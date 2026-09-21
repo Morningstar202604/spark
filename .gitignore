@@ -2,6 +2,10 @@
 .claude
 .gemini
 .opencode
+.monkeycode/
+
+# Upstream Codex CLI clone used as architecture reference only
+/codex/
 
 # IDE and Editors
 **/.idea/

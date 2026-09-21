@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Spark</title>
+  <style>
+    :root {
+      --bg: #0f1419;
+      --panel: #161d26;
+      --line: #243040;
+      --text: #e7ecf3;
+      --muted: #8b9bb4;
+      --accent: #5eead4;
+      --user: #93c5fd;
+      --tool: #fbbf24;
+      --err: #f87171;
+      --ok: #34d399;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font: 14px/1.5 ui-sans-serif, system-ui, sans-serif; }
+    body { display: grid; grid-template-rows: auto 1fr auto; }
+    header {
+      display: flex; align-items: center; justify-content: space-between; gap: 16px;
+      padding: 14px 20px; border-bottom: 1px solid var(--line); background: var(--panel);
+    }
+    h1 { margin: 0; font-size: 16px; letter-spacing: 0.08em; }
+    h1 span { color: var(--accent); }
+    .header-right { display: flex; align-items: center; gap: 12px; }
+    .meta { color: var(--muted); font-size: 12px; }
+    input, button { font: inherit; }
+    input {
+      background: #0c1117; color: var(--text); border: 1px solid var(--line);
+      border-radius: 8px; padding: 10px 12px; outline: none; width: 100%;
+    }
+    input:focus { border-color: var(--accent); }
+    button {
+      background: var(--accent); color: #042f2e; border: 0; border-radius: 8px;
+      padding: 10px 16px; font-weight: 700; cursor: pointer; height: 40px;
+    }
+    button.secondary { background: #243040; color: var(--text); }
+    button:disabled { opacity: 0.5; cursor: default; }
+    #log { padding: 20px; overflow: auto; display: flex; flex-direction: column; gap: 12px; }
+    .msg { max-width: 860px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; background: #121821; white-space: pre-wrap; word-break: break-word; }
+    .msg.user { border-color: #1e3a5f; color: var(--user); }
+    .msg.assistant { border-color: #134e4a; }
+    .msg.tool { border-color: #78350f; color: var(--tool); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+    .msg.error { border-color: #7f1d1d; color: var(--err); }
+    .role { display: block; font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); margin-bottom: 6px; }
+    form#chat-form {
+      display: grid; grid-template-columns: 1fr auto; gap: 10px;
+      padding: 14px 20px; border-top: 1px solid var(--line); background: var(--panel);
+    }
+    #overlay {
+      display: none;
+      position: fixed; inset: 0;
+      background: rgba(0, 0, 0, 0.55);
+      z-index: 20;
+    }
+    #overlay.open { display: block; }
+    #settings-panel {
+      position: absolute; top: 0; right: 0; height: 100%;
+      width: min(420px, 100%);
+      background: var(--panel);
+      border-left: 1px solid var(--line);
+      padding: 20px;
+      display: flex; flex-direction: column; gap: 14px;
+    }
+    #settings-panel h2 { margin: 0; font-size: 16px; }
+    #settings-panel p { margin: 0; color: var(--muted); font-size: 12px; }
+    .settings-head { display: flex; justify-content: space-between; align-items: center; }
+    label { display: flex; flex-direction: column; gap: 6px; font-size: 11px; color: var(--muted); letter-spacing: 0.08em; text-transform: uppercase; }
+    .actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    #probe {
+      padding: 10px 12px;
+      border-radius: 8px;
+      border: 1px solid var(--line);
+      color: var(--muted);
+      white-space: pre-wrap;
+      min-height: 72px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 12px;
+    }
+    #probe.ok { border-color: #065f46; color: var(--ok); }
+    #probe.fail { border-color: #7f1d1d; color: var(--err); }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>SPARK <span>LOCAL AGENT</span></h1>
+    <div class="header-right">
+      <div class="meta" id="status">loading...</div>
+      <button type="button" class="secondary" id="open-settings">设置</button>
+    </div>
+  </header>
+  <div id="log"></div>
+  <form id="chat-form">
+    <input id="prompt" placeholder="输入任务，按发送" autocomplete="off" />
+    <button type="submit">发送</button>
+  </form>
+  <div id="overlay">
+    <aside id="settings-panel">
+      <div class="settings-head">
+        <h2>设置</h2>
+        <button type="button" class="secondary" id="close-settings">关闭</button>
+      </div>
+      <p>自定义模型。填 OpenAI 兼容的 Base URL、模型名和 API Key，保存后测试连接。</p>
+      <label>Base URL
+        <input id="base_url" placeholder="https://api.example.com/v1" />
+      </label>
+      <label>Model
+        <input id="model" placeholder="model-id" />
+      </label>
+      <label>API Key
+        <input id="api_key" type="password" placeholder="your-api-key-here" />
+      </label>
+      <div class="actions">
+        <button type="button" class="secondary" id="save">保存设置</button>
+        <button type="button" id="test">测试连接</button>
+      </div>
+      <div id="probe">在这里测试自定义模型。通过标准：连续两轮都有真实文本，流式完整结束。</div>
+    </aside>
+  </div>
+  <script>
+    const log = document.getElementById("log");
+    const status = document.getElementById("status");
+    const probe = document.getElementById("probe");
+    const overlay = document.getElementById("overlay");
+    const form = document.getElementById("chat-form");
+    const input = document.getElementById("prompt");
+    const sendBtn = form.querySelector("button");
+    const baseInput = document.getElementById("base_url");
+    const modelInput = document.getElementById("model");
+    const keyInput = document.getElementById("api_key");
+
+    function openSettings() { overlay.classList.add("open"); }
+    function closeSettings() { overlay.classList.remove("open"); }
+
+    function add(role, text) {
+      const el = document.createElement("div");
+      el.className = "msg " + role;
+      const tag = document.createElement("span");
+      tag.className = "role";
+      tag.textContent = role;
+      el.appendChild(tag);
+      el.appendChild(document.createTextNode(text));
+      log.appendChild(el);
+      log.scrollTop = log.scrollHeight;
+    }
+
+    function settingsPayload() {
+      return {
+        base_url: baseInput.value.trim(),
+        model: modelInput.value.trim(),
+        api_key: keyInput.value.trim(),
+      };
+    }
+
+    async function loadStatus() {
+      const res = await fetch("/api/status");
+      const data = await res.json();
+      status.textContent = data.model + "  ·  " + data.provider;
+      if (!baseInput.value) baseInput.value = data.base_url || "";
+      if (!modelInput.value) modelInput.value = data.model || "";
+      if (!keyInput.value && data.has_api_key) keyInput.placeholder = data.api_key_masked || "saved";
+    }
+
+    function showProbe(data) {
+      probe.className = data.ok ? "ok" : "fail";
+      if (data.ok) {
+        probe.textContent = "OK  " + data.model + "  " + data.latency_ms + "ms  x" + data.rounds + "\ncomplete: " + data.content + "\nstream: " + data.stream_content;
+      } else {
+        probe.textContent = "FAIL  " + (data.error || "probe failed") + (data.content ? "\npartial: " + data.content : "");
+      }
+    }
+
+    document.getElementById("open-settings").addEventListener("click", openSettings);
+    document.getElementById("close-settings").addEventListener("click", closeSettings);
+    overlay.addEventListener("click", (e) => {
+      if (e.target === overlay) closeSettings();
+    });
+
+    document.getElementById("save").addEventListener("click", async () => {
+      const payload = settingsPayload();
+      const res = await fetch("/api/settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        showProbe({ ok: false, error: data.error || "save failed" });
+        return;
+      }
+      probe.className = "ok";
+      probe.textContent = "设置已保存。点「测试连接」确认模型真实出字。";
+      await loadStatus();
+    });
+
+    document.getElementById("test").addEventListener("click", async () => {
+      probe.className = "";
+      probe.textContent = "正在测试：非流式 + 流式，连续 2 轮，等待真实内容...";
+      const res = await fetch("/api/test", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(settingsPayload()),
+      });
+      const data = await res.json();
+      showProbe(data);
+    });
+
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const prompt = input.value.trim();
+      if (!prompt) return;
+      input.value = "";
+      add("user", prompt);
+      sendBtn.disabled = true;
+      try {
+        const res = await fetch("/api/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ prompt }),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          add("error", data.error || "request failed");
+          return;
+        }
+        let assistant = "";
+        for (const ev of data.events || []) {
+          if (ev.type === "text_delta" && ev.text) assistant += ev.text;
+          if (ev.type === "tool_start" && ev.tool) {
+            add("tool", ev.tool.name + " " + JSON.stringify(ev.tool.arguments));
+          }
+          if (ev.type === "tool_end" && ev.tool) {
+            add("tool", ev.tool.name + " => " + JSON.stringify(ev.result).slice(0, 800));
+          }
+          if (ev.type === "turn_error") add("error", ev.text || "turn error");
+        }
+        if (assistant) add("assistant", assistant);
+      } catch (err) {
+        add("error", String(err));
+      } finally {
+        sendBtn.disabled = false;
+        input.focus();
+      }
+    });
+
+    loadStatus();
+  </script>
+</body>
+</html>

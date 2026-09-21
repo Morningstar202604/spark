@@ -1,0 +1,309 @@
+# Spark Agent — 架构文档
+
+本文档描述 Spark 的整体架构与核心流程。
+
+## 概览
+
+Spark 是一个**本地自托管的 AI 编程 Agent**，采用 Codex 式 Agent Loop 设计，支持多种 LLM Provider，内置丰富工具集，具备长会话记忆与检查点回滚能力。
+
+```
+用户输入 → AgentLoop（回合引擎）→ 模型推理 → 工具执行 → 结果反馈 → 下一轮
+                ↑                                         ↓
+        上下文压缩 ← 记忆检索 ← AGENTS.md ←─── SQLite 持久化
+                ↓
+         SSE 流式渲染 → Web UI
+```
+
+## 核心组件
+
+### 1. AgentLoop (`src/spark/core/loop.py`)
+
+AgentLoop 是核心引擎，负责管理整个对话回合：
+
+```
+单次 turn 流程：
+  用户输入
+    │
+    ▼
+  [上下文检查] ──≥85%──→ 触发 8 段式压缩
+    │
+    ▼
+  [记忆检索] → 补充到 messages
+    │
+    ▼
+  [构建 prompt] = system + AGENTS.md + history + memory
+    │
+    ▼
+  [调用 Provider] → 流式接收 token
+    │
+    ├─ 有 tool_call ──→ 执行工具 → 收集结果 → 回到模型推理
+    │                       │
+    │                       ▼
+    │                  sandbox 检查（是否允许此操作）
+    │                       │
+    │                       ▼
+    │                  审批策略（suggest/full-auto）
+    │
+    └─ 无 tool_call ──→ 输出最终答案
+                              │
+                              ▼
+                         落库（history + store）
+                              │
+                              ▼
+                     自动检查点（write/shell 类回合）
+                              │
+                              ▼
+                         turn_end → 推送前端
+```
+
+### 2. 上下文引擎 (`src/spark/core/context.py`)
+
+管理 Agent 的"视野"：
+
+| 模块 | 作用 |
+|------|------|
+| AGENTS.md | 注入项目级说明，定义工作流与约定 |
+| Token 估算 | `token_count_estimate(text)` → words × 1.3 |
+| 自动压缩 | 85% 阈值触发，保留最近 8 条消息 + 分段摘要 |
+| 记忆检索 | 关键词匹配 → LLM 抽取 → 语义检索（降级关键词） |
+
+### 3. Provider 层 (`src/spark/providers/`)
+
+统一抽象，支持多种 LLM 后端：
+
+```python
+class BaseProvider(ABC):
+    @abstractmethod
+    async def stream(self, messages, schemas) -> AsyncIterator[Delta]: ...
+
+class OpenAICompatProvider(BaseProvider):     # OpenAI 兼容接口
+class OllamaProvider(BaseProvider):           # 本地 Ollama 服务
+class MockProvider(BaseProvider):             # 测试用 mock
+```
+
+### 4. 工具注册表 (`src/spark/tools/registry.py`)
+
+所有工具通过 schema 注册，统一审批与沙箱检查：
+
+```
+ToolRegistry
+├── 文件工具：read_file, write_file, apply_patch
+├── 搜索工具：grep, glob, list_dir
+├── 执行工具：run_shell, bg_start, bg_output, bg_kill
+├── 数据工具：read_notebook, notebook_edit
+├── 联网工具：web_search, web_fetch
+├── 规划工具：update_plan
+├── 扩展工具：task（子 Agent 委派）
+└── MCP 工具：McpBridge 桥接外部协议
+```
+
+### 5. 沙箱系统 (`src/spark/sandbox.py`)
+
+四档权限，逐级放行：
+
+```
+sandbox-only:      list_dir / read_file / grep / glob
+    ↓
+workspace:         + write_file / apply_patch / shell
+    ↓
+full-access:       + background / MCP / readonly tools
+    ↓
+unrestricted:      全部放开（仅用户自定义保护路径）
+```
+
+**安全防护：**
+- Shell 命令白名单扫描
+- 路径穿越检测（绝对路径 → workdir 校验）
+- 保护路径清单（config.toml、sessions.db 等）
+- 文件写入前 `check_write_path()` 校验
+
+### 6. 持久化 (`src/spark/store.py`)
+
+SQLite 存储：
+
+| 表 | 内容 |
+|----|------|
+| `sessions` | 会话元信息（id, title, model, updated_at） |
+| `messages` | 对话消息（role, content, timestamp） |
+| `checkpoints` | 检查点记录（id, session_id, label, created_at） |
+| `memory` | 长期记忆（text, embedding, tags, created_at） |
+| `configs` | 设置快照 |
+
+### 7. 记忆系统 (`src/spark/memory/`)
+
+```
+每轮结束
+    │
+    ▼
+自动抽取（LLM 调用）
+    │
+    ▼
+入库（SQLite + 关键词索引）
+    │
+    ▼
+检索时：top_k 最近 + 语义相关性
+```
+
+**降级策略**：嵌入模型不可用时，自动降级为关键词匹配。
+
+### 8. 检查点 (`src/spark/core/checkpoints.py`)
+
+每次关键操作后自动快照：
+
+```
+触发条件：write_file / apply_patch / run_shell / notebook_edit
+    │
+    ▼
+tar.gz 快照（排除 .git / node_modules / __pycache__ 等）
+    │
+    ▼
+存储路径：~/.spark/checkpoints/<session_id>/<id>.tar.gz
+    │
+    ▼
+回滚时：还原文件 + 截断对话历史 + 重载历史记录
+```
+
+## 前端架构
+
+```
+React 19 + Vite + Tailwind 4
+    │
+    ├── App.tsx            # 主布局与状态管理
+    │   ├── SessionSidebar # 会话列表（CRUD + 关键词）
+    │   ├── ChatMessage    # 消息渲染（markdown + 工具块）
+    │   ├── InputBox       # 输入框（图片附件 + 快捷按钮）
+    │   ├── SettingsPanel  # 设置面板（多 Tab）
+    │   └── Toast          # 通知系统
+    │
+    ├── api.ts             # API 客户端（fetch + SSE）
+    ├── types.ts           # TypeScript 类型定义
+    └── components/
+        ├── Markdown.tsx   # mdx 渲染（rehype + highlight.js）
+        ├── ThinkingBlock  # 推理过程展示
+        ├── PlanCard       # 任务计划卡片
+        └── ContextMeter   # 上下文水位仪表
+```
+
+**通信协议：**
+- 实时消息：SSE（Server-Sent Events）
+- CRUD 操作：REST JSON
+- 事件类型：`text_delta` / `reasoning_delta` / `tool_start` / `tool_end` / `plan` / `approval_needed` / `compaction` / `context` / `turn_end` / `turn_error` / `done`
+
+## CLI 架构
+
+```
+spark                          # 默认启动 TUI
+spark exec "prompt"            # 无头执行
+spark web                      # 启动 Web UI
+spark sessions                 # 列出会话
+spark resume <id>              # 恢复会话
+spark test --model xxx         # 连通性测试
+```
+
+## MCP 集成
+
+通过 `McpBridge` 桥接外部 MCP 服务器：
+
+```toml
+[[mcp.servers]]
+name = "filesystem"
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-filesystem", "/data"]
+readonly_tools = ["ReadFile", "ReadDir", "Glob"]
+```
+
+安全策略：
+- MCP 工具默认只读
+- 可通过 `readonly_tools` 白名单限制
+- 配置在 `[mcp.servers]` 段中
+
+## 文件结构
+
+```
+spark/
+├── src/spark/
+│   ├── __init__.py
+│   ├── cli.py               # CLI 入口（typer）
+│   ├── config.py            # 配置加载（pydantic + toml）
+│   ├── core/
+│   │   ├── loop.py          # AgentLoop 主循环
+│   │   ├── context.py       # 上下文引擎
+│   │   ├── tokens.py        # Token 估算
+│   │   └── checkpoints.py   # 检查点管理
+│   ├── providers/
+│   │   ├── base.py          # Provider 抽象基类
+│   │   ├── factory.py       # 工厂函数
+│   │   ├── openai_compat.py # OpenAI 兼容实现
+│   │   ├── ollama.py        # Ollama 实现
+│   │   ├── mock.py          # Mock 实现
+│   │   └── probe.py         # 连通性探测
+│   ├── tools/
+│   │   ├── registry.py      # 工具注册表
+│   │   ├── fs.py            # 文件系统工具
+│   │   ├── shell.py         # Shell 执行
+│   │   ├── search.py        # grep/glob
+│   │   ├── web.py           # 联网检索
+│   │   ├── notebook.py      # Jupyter 操作
+│   │   ├── bg.py            # 后台任务
+│   │   └── mcp_bridge.py    # MCP 桥接
+│   ├── memory/
+│   │   ├── service.py       # 记忆服务
+│   │   ├── extractor.py     # LLM 抽取
+│   │   ├── llm.py           # 记忆 LLM 调用
+│   │   └── store.py         # 记忆存储
+│   ├── sandbox.py           # 沙箱策略
+│   ├── policy.py            # 工具权限策略
+│   ├── store.py             # SQLite 持久化
+│   ├── tui/                 # 终端 UI（textual）
+│   └── web/                 # Web 服务器（stdlib http.server）
+├── tests/
+│   ├── test_sandbox.py      # 沙箱测试
+│   ├── test_policy.py       # 策略测试
+│   ├── test_loop.py         # 循环逻辑测试
+│   ├── test_store.py        # 持久化测试
+│   └── test_p1_capabilities.py  # P1 功能 E2E
+├── web/
+│   ├── src/                 # React 源码
+│   ├── public/              # 静态资源
+│   └── package.json
+├── brand/                   # 品牌资产
+│   ├── favicon.svg
+│   ├── logo.svg
+│   ├── logo-dark.svg
+│   └── hero.svg
+├── docs/                    # 文档
+│   ├── ARCHITECTURE.md
+│   ├── CONFIGURATION.md
+│   └── assets/
+│       ├── architecture.svg # 整体架构图
+│       └── turn-flow.svg    # 回合流程图
+├── README.md
+├── CONTRIBUTING.md
+├── LICENSE
+├── pyproject.toml
+└── .env.example
+```
+
+## 扩展指南
+
+### 添加新工具
+
+1. 在 `src/spark/tools/` 下创建实现
+2. 在 `registry.py` 的 `schemas()` 方法中注册 `_schema(name, description, properties, required)`
+3. 在 `policy.py` 中归类（READONLY_TOOLS 或 SHELL_TOOLS）
+4. 在 `tools/__init__.py` 中导出执行函数
+
+### 添加新 Provider
+
+1. 继承 `BaseProvider`
+2. 实现 `stream()` 异步生成器
+3. 在 `providers/factory.py` 的 `create_provider()` 中添加分支
+4. 在 `config.py` 的 `ProviderName` Literal 中添加类型
+
+## 设计原则
+
+- **本地优先**：所有数据存储本地，不依赖云服务
+- **可扩展**：Provider、工具、MCP 均可插件化
+- **安全**：沙箱四档、审批流、路径保护
+- **可观测**：Token 计数、上下文水位、事件流可视化
+- **容错**：记忆降级、模型探测、异常兜底

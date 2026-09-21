@@ -59,3 +59,5 @@ Spark 是一个本地运行的终端编程 Agent，参考 OpenAI Codex CLI 的 A
 - [开发指南](./DEVELOPER_GUIDE.md) - 开发环境和规范
 
 参考仓库：`当前工作区/codex`（OpenAI Codex CLI 源码，只读对照，不作为运行时依赖）。
+
+实现代码在 `当前工作区/src/spark/`，入口命令 `spark`。

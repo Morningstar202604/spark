@@ -12,7 +12,7 @@
 ## 快速开始
 
 ```bash
-# 创建虚拟环境并安装（实现落地后）
+# 创建虚拟环境并安装
 python -m venv .venv
 source .venv/bin/activate
 pip install -e ".[dev]"
@@ -34,7 +34,7 @@ SPARK_MODEL=deepseek-chat
 
 ## 项目结构说明
 
-实现代码计划放在 `当前工作区/spark/`（或仓库根的 `src/spark/`，以落地时 `pyproject.toml` 为准）。规划文档在 `当前工作区/.monkeycode/docs/`。功能规格在 `当前工作区/.monkeycode/specs/2026-09-21-spark-coding-agent/`。
+实现代码在 `当前工作区/src/spark/`。规划文档在 `当前工作区/.monkeycode/docs/`。功能规格在 `当前工作区/.monkeycode/specs/2026-09-21-spark-coding-agent/`。
 
 模块边界：
 
