@@ -18,6 +18,7 @@ from spark.providers.factory import create_provider
 from spark.providers.probe import probe_provider
 from spark.sandbox import WorkdirSandbox
 from spark.store import SessionStore
+from spark.tools import bg as bg_tools
 from spark.tools.mcp_bridge import McpBridge
 from spark.tools.registry import ToolContext, ToolRegistry
 
@@ -126,6 +127,7 @@ class SparkWebState:
         self.memory_store = MemoryStore(default_home() / "memory.db", cfg.memory)
         self.memory = MemoryService(self.memory_store, cfg)
         self.env_info = self._detect_env()
+        bg_tools.attach_store(self.store)
         self.boot_mcp()
         self.rebuild_loop(reuse_latest=True)
 

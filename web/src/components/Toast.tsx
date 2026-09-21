@@ -1,4 +1,4 @@
-import { useEffect } from "react"
+import { useEffect, useRef } from "react"
 
 export interface ToastItem {
   id: number
@@ -13,10 +13,24 @@ const kindStyle: Record<ToastItem["kind"], string> = {
 }
 
 export default function Toast({ toasts, onDismiss }: { toasts: ToastItem[]; onDismiss: (id: number) => void }) {
+  const timersRef = useRef<Map<number, ReturnType<typeof setTimeout>>>(new Map())
+
   useEffect(() => {
-    if (toasts.length === 0) return
-    const timers = toasts.map((t) => setTimeout(() => onDismiss(t.id), 5000))
-    return () => timers.forEach(clearTimeout)
+    for (const t of toasts) {
+      if (!timersRef.current.has(t.id)) {
+        const timer = setTimeout(() => {
+          timersRef.current.delete(t.id)
+          onDismiss(t.id)
+        }, 5000)
+        timersRef.current.set(t.id, timer)
+      }
+    }
+    return () => {
+      for (const [id, timer] of timersRef.current) {
+        clearTimeout(timer)
+        timersRef.current.delete(id)
+      }
+    }
   }, [toasts, onDismiss])
   if (toasts.length === 0) return null
   return (

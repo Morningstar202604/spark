@@ -6,7 +6,7 @@ from typing import Any, Awaitable, Callable
 from spark.config import SparkConfig
 from spark.models import ToolCall, ToolResult
 from spark.sandbox import WorkdirSandbox
-from spark.tools import bg, fs, notebook, search, shell, web
+from spark.tools import bg, fs, gitops, notebook, search, shell, web
 
 
 @dataclass
@@ -206,6 +206,54 @@ class ToolRegistry:
                 {},
                 [],
             ),
+            _schema(
+                "git_status",
+                "Show git working tree status (branch + changed files) for a repo inside workdir.",
+                {"path": {"type": "string", "description": "repo directory, default '.'"}},
+                [],
+            ),
+            _schema(
+                "git_diff",
+                "Show git diff for a repo inside workdir. Use staged=true for staged changes, or ref like 'HEAD~1' to diff against it.",
+                {
+                    "path": {"type": "string"},
+                    "staged": {"type": "boolean", "description": "show staged changes only"},
+                    "ref": {"type": "string", "description": "optional commit-ish to diff against"},
+                },
+                [],
+            ),
+            _schema(
+                "git_log",
+                "Show recent commit history: short hash, author, relative date, subject.",
+                {"path": {"type": "string"}, "max_count": {"type": "integer", "description": "default 20, max 100"}},
+                [],
+            ),
+            _schema(
+                "git_branch",
+                "Show the current branch name of a repo inside workdir.",
+                {"path": {"type": "string"}},
+                [],
+            ),
+            _schema(
+                "git_add",
+                "Stage files for commit in a repo inside workdir. Paths are sandbox-checked.",
+                {
+                    "paths": {"type": "array", "items": {"type": "string"}, "description": "files or directories to stage"},
+                    "path": {"type": "string", "description": "repo directory, default '.'"},
+                },
+                ["paths"],
+            ),
+            _schema(
+                "git_commit",
+                "Commit staged changes with a message. Set add_all=true to stage every change first. "
+                "Push/pull/reset stay out of scope - tell the user to run them manually.",
+                {
+                    "message": {"type": "string"},
+                    "path": {"type": "string"},
+                    "add_all": {"type": "boolean", "description": "stage all changes before committing"},
+                },
+                ["message"],
+            ),
         ]
         return builtin + self._extra_schemas
 
@@ -261,6 +309,18 @@ class ToolRegistry:
                 return bg.bg_kill_tool(call.arguments)
             if call.name == "bg_list":
                 return bg.bg_list_tool()
+            if call.name == "git_status":
+                return gitops.git_status(self.ctx.sandbox, gitops.GitStatusArgs.model_validate(call.arguments))
+            if call.name == "git_diff":
+                return gitops.git_diff(self.ctx.sandbox, gitops.GitDiffArgs.model_validate(call.arguments))
+            if call.name == "git_log":
+                return gitops.git_log(self.ctx.sandbox, gitops.GitLogArgs.model_validate(call.arguments))
+            if call.name == "git_branch":
+                return gitops.git_branch(self.ctx.sandbox, gitops.GitBranchArgs.model_validate(call.arguments))
+            if call.name == "git_add":
+                return gitops.git_add(self.ctx.sandbox, gitops.GitAddArgs.model_validate(call.arguments))
+            if call.name == "git_commit":
+                return gitops.git_commit(self.ctx.sandbox, gitops.GitCommitArgs.model_validate(call.arguments))
             if call.name == "grep":
                 return search.grep_tool(self.ctx.sandbox, search.GrepArgs.model_validate(call.arguments))
             if call.name == "glob":

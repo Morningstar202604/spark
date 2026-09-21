@@ -7,8 +7,8 @@ from spark.models import ToolCall
 
 DecisionKind = Literal["allow", "prompt", "deny"]
 
-READONLY_TOOLS = {"read_file", "list_dir", "update_plan", "grep", "glob", "web_search", "web_fetch", "read_notebook", "task", "bg_output", "bg_list"}
-WRITE_TOOLS = {"write_file", "apply_patch", "notebook_edit"}
+READONLY_TOOLS = {"read_file", "list_dir", "update_plan", "grep", "glob", "web_search", "web_fetch", "read_notebook", "task", "bg_output", "bg_list", "git_status", "git_diff", "git_log", "git_branch"}
+WRITE_TOOLS = {"write_file", "apply_patch", "notebook_edit", "git_add", "git_commit"}
 SHELL_TOOLS = {"run_shell", "bg_start", "bg_kill"}
 
 

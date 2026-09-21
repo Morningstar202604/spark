@@ -60,6 +60,15 @@ class SessionStore:
                     snapshot_json TEXT NOT NULL,
                     created_at INTEGER NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS bg_jobs (
+                    id TEXT PRIMARY KEY,
+                    command TEXT NOT NULL,
+                    cwd TEXT NOT NULL,
+                    started_at REAL NOT NULL,
+                    finished_at REAL,
+                    exit_code INTEGER,
+                    output TEXT NOT NULL DEFAULT ''
+                );
                 """
             )
             try:
@@ -263,3 +272,37 @@ class SessionStore:
             )
             self._conn.commit()
         return removed
+
+    # ---- background jobs ----
+
+    def upsert_bg_job(self, job_id: str, command: str, cwd: str, started_at: float) -> None:
+        with self._lock:
+            self._conn.execute(
+                """INSERT INTO bg_jobs (id, command, cwd, started_at, finished_at, exit_code, output)
+                   VALUES (?, ?, ?, ?, NULL, NULL, '')
+                   ON CONFLICT(id) DO NOTHING""",
+                (job_id, command, cwd, started_at),
+            )
+            self._conn.commit()
+
+    def update_bg_job(self, job_id: str, *, output: str, finished_at: float | None, exit_code: int | None) -> None:
+        with self._lock:
+            self._conn.execute(
+                "UPDATE bg_jobs SET output = ?, finished_at = ?, exit_code = ? WHERE id = ?",
+                (output, finished_at, exit_code, job_id),
+            )
+            self._conn.commit()
+
+    def list_bg_jobs(self, running_only: bool = False) -> list[dict]:
+        sql = "SELECT id, command, cwd, started_at, finished_at, exit_code FROM bg_jobs"
+        if running_only:
+            sql += " WHERE finished_at IS NULL"
+        sql += " ORDER BY started_at DESC LIMIT 50"
+        with self._lock:
+            rows = self._conn.execute(sql).fetchall()
+            return [dict(r) for r in rows]
+
+    def get_bg_job(self, job_id: str) -> dict | None:
+        with self._lock:
+            row = self._conn.execute("SELECT * FROM bg_jobs WHERE id = ?", (job_id,)).fetchone()
+            return dict(row) if row else None
