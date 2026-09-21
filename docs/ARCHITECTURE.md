@@ -89,11 +89,12 @@ class MockProvider(BaseProvider):             # 测试用 mock
 ToolRegistry
 ├── 文件工具：read_file, write_file, apply_patch
 ├── 搜索工具：grep, glob, list_dir
-├── 执行工具：run_shell, bg_start, bg_output, bg_kill
+├── 执行工具：run_shell, bg_start, bg_output, bg_kill（跨重启持久化）
+├── Git 工具：git_status, git_diff, git_log, git_branch, git_add, git_commit
 ├── 数据工具：read_notebook, notebook_edit
 ├── 联网工具：web_search, web_fetch
 ├── 规划工具：update_plan
-├── 扩展工具：task（子 Agent 委派）
+├── 扩展工具：task（子 Agent 委派，最多 4 个并行）
 └── MCP 工具：McpBridge 桥接外部协议
 ```
 

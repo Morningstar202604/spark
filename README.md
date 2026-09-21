@@ -5,7 +5,7 @@
 一个**本地自托管**的 AI 编程 Agent，代码在你手，密钥在你手。
 
 [![Python](https://img.shields.io/badge/Python-3.11+-blue.svg)](https://www.python.org/)
-[![Pytest](https://img.shields.io/badge/tests-80_passed-brightgreen)](tests/)
+[![Pytest](https://img.shields.io/badge/tests-92_passed-brightgreen)](tests/)
 [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 [![Ruff](https://img.shields.io/badge/linter-ruff-5eead4.svg)]()
 [![TypeScript](https://img.shields.io/badge/TS-zero_errors-brightgreen)](web/)
@@ -93,11 +93,12 @@ spark exec --approval full-auto --model deepseek-chat "为这个 Python 项目�
 |------|------|------|
 | 文件 | `read_file` / `write_file` / `apply_patch` | 读写、局部替换 |
 | 搜索 | `grep` / `glob` | 正则搜索、文件名匹配 |
-| 执行 | `run_shell` / `bg_start` / `bg_output` / `bg_kill` | 命令行、后台任务 |
+| 执行 | `run_shell` / `bg_start` / `bg_output` / `bg_kill` | 命令行、后台任务（跨重启可查） |
+| Git | `git_status` / `git_diff` / `git_log` / `git_branch` / `git_add` / `git_commit` | 仓库查看与提交（push 等高危操作留给用户） |
 | 数据 | `read_notebook` / `notebook_edit` | Jupyter 操作 |
 | 联网 | `web_search` / `web_fetch` | Bing 搜索、页面抓取 |
 | 规划 | `update_plan` | 多步骤任务计划 |
-| 扩展 | `task` / MCP 工具 | 子 Agent、外部桥接 |
+| 扩展 | `task` / MCP 工具 | 子 Agent（最多 4 个并行）、外部桥接 |
 
 ### 沙箱权限
 

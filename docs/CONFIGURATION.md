@@ -138,6 +138,18 @@ auto_extract = true            # 每轮结束后自动抽取记忆
 | PUT | `/api/agents_md` | 更新 AGENTS.md |
 | POST | `/api/test` | 测试模型连通性 |
 
+## 本地数据文件
+
+| 路径 | 说明 |
+|------|------|
+| `~/.spark/config.toml` | 配置文件（含模型档案与密钥） |
+| `~/.spark/sessions.db` | SQLite：会话、消息、工具事件、检查点、后台任务记录 |
+| `~/.spark/checkpoints/*.tar.gz` | 工作区快照（回滚用） |
+| `~/.spark/memory.db` | 长期记忆库 |
+| `~/.spark/spark.log` | 运行日志 |
+
+后台任务（`bg_start`）记录持久化在 `sessions.db` 的 `bg_jobs` 表：服务器重启后 `bg_list` 仍可列出历史任务（标记为 lost），`bg_output` 返回最后一次持久化的输出，进程本体已随重启终止。
+
 ## CLI 命令
 
 ```bash
