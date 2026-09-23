@@ -9,6 +9,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from spark.config import (
+    HookConfig,
     ModelProfile,
     SparkConfig,
     default_home,
@@ -18,6 +19,7 @@ from spark.config import (
 )
 from spark.core.loop import AgentLoop
 from spark.errors import ConfigError, SparkError
+from spark.hooks import HookRegistry
 from spark.memory.service import MemoryService
 from spark.memory.store import MemoryStore
 from spark.models import ApprovalDecision
@@ -68,6 +70,9 @@ def parse_mcp_servers(items: list) -> list:
             )
         )
     return out
+
+
+HOOK_EVENTS = tuple(HookRegistry.EVENTS)
 
 
 _CTYPES = {
@@ -330,6 +335,8 @@ class SparkWebState:
                 "protected_paths": list(self.cfg.agent.protected_paths),
                 "shell_timeout_sec": self.cfg.agent.shell_timeout_sec,
                 "max_tool_rounds": self.cfg.agent.max_tool_rounds,
+                "max_repeat_calls": self.cfg.agent.max_repeat_calls,
+                "max_turn_tokens": self.cfg.agent.max_turn_tokens,
                 "max_output_chars": self.cfg.agent.max_output_chars,
                 "show_thinking": self.cfg.agent.show_thinking,
                 "show_tools": self.cfg.agent.show_tools,
@@ -356,6 +363,16 @@ class SparkWebState:
                 for s in self.cfg.mcp_servers
             ],
             "mcp_errors": list(self.mcp_bridge.errors) if self.mcp_bridge else [],
+            "hooks": [
+                {
+                    "event": h.event,
+                    "command": h.command,
+                    "args": list(h.args),
+                    "name": h.name,
+                    "timeout_sec": h.timeout_sec,
+                }
+                for h in self.cfg.hooks
+            ],
         }
 
 
@@ -1069,6 +1086,18 @@ def serve_web(
                             )
                         ),
                     )
+                    repeat_in = int(
+                        agent_in.get(
+                            "max_repeat_calls", state.cfg.agent.max_repeat_calls
+                        )
+                    )
+                    token_in = int(
+                        agent_in.get("max_turn_tokens", state.cfg.agent.max_turn_tokens)
+                    )
+                    if repeat_in < 0 or token_in < 0:
+                        raise ValueError("negative reliability limit")
+                    state.cfg.agent.max_repeat_calls = repeat_in
+                    state.cfg.agent.max_turn_tokens = token_in
                 except (TypeError, ValueError):
                     self._json(400, {"error": "invalid agent numbers"})
                     return
@@ -1085,6 +1114,45 @@ def serve_web(
                         mcp_errors = state.boot_mcp()
                     except Exception as exc:
                         mcp_errors = [f"MCP boot failed: {exc}"]
+                hooks_in = body.get("hooks")
+                if isinstance(hooks_in, list):
+                    parsed_hooks = []
+                    for item in hooks_in:
+                        if not isinstance(item, dict):
+                            self._json(400, {"error": "invalid hook entry"})
+                            return
+                        event_name = str(item.get("event") or "").strip()
+                        command = str(item.get("command") or "").strip()
+                        if event_name not in HOOK_EVENTS or not command:
+                            self._json(
+                                400,
+                                {
+                                    "error": (
+                                        f"invalid hook: event must be one of "
+                                        f"{', '.join(HOOK_EVENTS)} and command is required"
+                                    )
+                                },
+                            )
+                            return
+                        try:
+                            timeout_sec = max(1, int(item.get("timeout_sec") or 15))
+                        except (TypeError, ValueError):
+                            self._json(400, {"error": "invalid hook timeout_sec"})
+                            return
+                        raw_args = item.get("args") or []
+                        if not isinstance(raw_args, list):
+                            self._json(400, {"error": "invalid hook args"})
+                            return
+                        parsed_hooks.append(
+                            HookConfig(
+                                event=event_name,
+                                command=command,
+                                args=[str(part) for part in raw_args],
+                                name=str(item.get("name") or "")[:120],
+                                timeout_sec=timeout_sec,
+                            )
+                        )
+                    state.cfg.hooks = parsed_hooks
                 save_config(state.cfg)
                 try:
                     with state.turn_lock:

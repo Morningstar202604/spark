@@ -9,3 +9,5 @@
 2026-09-23 | agent | 工作区改动仅本地 commit，不 push origin | 用户要求提交到本地、不进远程仓库 | user-2026-09-23 | commit:b3d61f2
 2026-09-23 | agent | 新增长任务可靠性护栏：重复调用熔断 + 单轮 token 预算 + 子代理取消传播 | 对标 Claude Code/Codex/OpenHands 的长任务止损做法，防止烧钱与失控 | worktree:reliability | -
 2026-09-23 | agent | 新增 run_tests 工具做测试闭环、worktree_create/list/remove 做分支隔离、hooks 生命周期扩展点 | 对标 Aider auto-test、Cline worktree、Claude hooks | worktree:reliability | -
+2026-09-24 | agent | 护栏参数与 hooks 暴露到 Web 设置：Agent 页加熔断/预算输入，Security 页加 hooks 编辑器；/api/config 与 /api/settings 双向支持 | 用户要求在 UI 直接调节，无需手改 toml | worktree:settings-ui | -
+2026-09-24 | agent | 设置 API 测试改为 monkeypatch save_config，禁止测试写用户真实 ~/.spark/config.toml | 端到端测试曾把真实配置覆盖为 mock provider 并清空密钥 | tests/test_settings_api.py:70 | -

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react"
-import type { FullConfig, ModelProfile, ProbeResult, Status, McpServer, SettingsPayload } from "../types"
+import type { FullConfig, HookEntry, ModelProfile, ProbeResult, Status, McpServer, SettingsPayload } from "../types"
 import {
   fetchConfig,
   fetchAgentsMd,
@@ -37,6 +37,13 @@ const tabs: { key: Tab; label: string }[] = [
   { key: "project", label: "项目" },
 ]
 
+const hookEventOptions: { key: string; label: string }[] = [
+  { key: "pre_tool", label: "pre_tool — 工具调用前" },
+  { key: "post_tool", label: "post_tool — 工具执行后" },
+  { key: "turn_start", label: "turn_start — 每轮开始" },
+  { key: "turn_end", label: "turn_end — 每轮结束" },
+]
+
 const displayOptions: { key: keyof FullConfig["agent"] & `show_${string}`; label: string; desc: string }[] = [
   { key: "show_thinking", label: "思考过程", desc: "模型的 reasoning 流式块（默认折叠，可点击展开）" },
   { key: "show_tools", label: "工具调用", desc: "工具执行的名称、参数与结果块" },
@@ -59,6 +66,7 @@ export default function SettingsPanel({ status, onClose, onSaved }: Props) {
   const [showProfileForm, setShowProfileForm] = useState(false)
   const [profileForm, setProfileForm] = useState({ id: "", name: "", provider: "openai_compat", base_url: "", model: "", api_key: "" })
   const [protectedText, setProtectedText] = useState("")
+  const [hookRows, setHookRows] = useState<HookEntry[]>([])
   const [theme, setTheme] = useState<Theme>(() => getStoredTheme())
   const dirtyRef = useRef({ cfg: false, mcp: false, md: false })
 
@@ -88,6 +96,7 @@ export default function SettingsPanel({ status, onClose, onSaved }: Props) {
           setMcpRows(data.mcp_servers.map((s) => ({ ...s, args: [...s.args], readonly_tools: [...s.readonly_tools] })))
         }
         setProtectedText(data.agent.protected_paths?.join("\n") ?? "")
+        setHookRows((data.hooks || []).map((h) => ({ ...h, args: [...(h.args || [])] })))
       })
       .catch((e) => setNotice(`配置加载失败：${e instanceof Error ? e.message : String(e)}`))
     fetchAgentsMd().then((d) => {
@@ -105,6 +114,11 @@ export default function SettingsPanel({ status, onClose, onSaved }: Props) {
     setMcpRows((rows) => rows.map((r, idx) => (idx === i ? { ...r, ...patch } : r)))
   }
 
+  function patchHook(i: number, patch: Partial<HookEntry>) {
+    dirtyRef.current.mcp = true
+    setHookRows((rows) => rows.map((r, idx) => (idx === i ? { ...r, ...patch } : r)))
+  }
+
   function resetForm() {
     if (busy) return
     dirtyRef.current = { cfg: false, mcp: false, md: false }
@@ -115,6 +129,7 @@ export default function SettingsPanel({ status, onClose, onSaved }: Props) {
         setCfg(data)
         setProtectedText(data.agent.protected_paths?.join("\n") ?? "")
         setMcpRows(data.mcp_servers.map((s) => ({ ...s, args: [...s.args], readonly_tools: [...s.readonly_tools] })))
+        setHookRows((data.hooks || []).map((h) => ({ ...h, args: [...(h.args || [])] })))
         setMcpErrors([])
       })
       .catch((e) => setNotice(`配置加载失败：${e instanceof Error ? e.message : String(e)}`))
@@ -140,6 +155,8 @@ export default function SettingsPanel({ status, onClose, onSaved }: Props) {
         protected_paths: protectedText.split("\n").map((s) => s.trim()).filter(Boolean),
         shell_timeout_sec: Number(cfg.agent.shell_timeout_sec) || 60,
         max_tool_rounds: Number(cfg.agent.max_tool_rounds) || 30,
+        max_repeat_calls: Math.max(0, Number(cfg.agent.max_repeat_calls) || 0),
+        max_turn_tokens: Math.max(0, Number(cfg.agent.max_turn_tokens) || 0),
         max_output_chars: Number(cfg.agent.max_output_chars) || 8000,
         show_thinking: cfg.agent.show_thinking,
         show_tools: cfg.agent.show_tools,
@@ -155,6 +172,15 @@ export default function SettingsPanel({ status, onClose, onSaved }: Props) {
           command: r.command.trim(),
           args: r.args.filter(Boolean),
           readonly_tools: r.readonly_tools.filter(Boolean),
+        })),
+      hooks: hookRows
+        .filter((h) => h.event.trim() && h.command.trim())
+        .map((h) => ({
+          event: h.event.trim(),
+          command: h.command.trim(),
+          args: h.args.join(" ").trim() ? h.args.join(" ").trim().split(/\s+/) : [],
+          name: h.name.trim(),
+          timeout_sec: Math.max(1, Number(h.timeout_sec) || 15),
         })),
     }
     try {
@@ -483,6 +509,18 @@ export default function SettingsPanel({ status, onClose, onSaved }: Props) {
                   <input type="number" min={200} value={cfg?.agent.max_output_chars ?? 8000} onChange={(e) => patchAgent({ max_output_chars: Number(e.target.value) })} className={inputCls} />
                 </label>
               </div>
+              <div className="text-xs font-bold tracking-widest text-spark-accent uppercase">长任务护栏</div>
+              <p className="text-xs text-spark-muted">防止死循环与费用失控。重复调用熔断：同一工具以完全相同参数连续调用超过上限即中断本轮；0 表示关闭。Token 预算：单轮累计超过上限即停止，0 表示不限。</p>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <label className={labelCls}>
+                  重复调用熔断（次）
+                  <input type="number" min={0} value={cfg?.agent.max_repeat_calls ?? 4} onChange={(e) => patchAgent({ max_repeat_calls: Math.max(0, Number(e.target.value) || 0) })} className={inputCls} />
+                </label>
+                <label className={labelCls}>
+                  单轮 Token 预算（0=不限）
+                  <input type="number" min={0} step={1000} value={cfg?.agent.max_turn_tokens ?? 0} onChange={(e) => patchAgent({ max_turn_tokens: Math.max(0, Number(e.target.value) || 0) })} className={inputCls} />
+                </label>
+              </div>
               <button type="button" onClick={handleSave} disabled={busy !== null} className="self-start rounded-lg bg-spark-accent px-4 py-2 text-sm font-bold text-spark-on-accent hover:opacity-90 disabled:opacity-50">
                 {busy === "save" ? "保存中…" : "保存设置"}
               </button>
@@ -555,6 +593,32 @@ export default function SettingsPanel({ status, onClose, onSaved }: Props) {
                 ) : (
                   <p className="text-xs text-spark-muted">暂无探测数据。</p>
                 )}
+              </div>
+              <div className={sectionCls}>
+                <div className="text-xs font-bold tracking-widest text-spark-accent uppercase">生命周期钩子</div>
+                <p className="text-xs text-spark-muted">
+                  在关键节点执行外部命令。pre_tool 在每次工具调用前运行，退出码非 0 即拦截该工具并把 stderr 作为原因回传给模型。
+                </p>
+                <div className="flex flex-col gap-2">
+                  {hookRows.map((h, i) => (
+                    <div key={i} className="flex flex-col gap-2 rounded-lg border border-spark-line bg-spark-panel p-3">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <select value={h.event} onChange={(e) => patchHook(i, { event: e.target.value })} className={`${inputCls} w-auto flex-1`}>
+                          {hookEventOptions.map((opt) => (
+                            <option key={opt.key} value={opt.key}>{opt.label}</option>
+                          ))}
+                        </select>
+                        <input type="number" min={1} value={h.timeout_sec} onChange={(e) => patchHook(i, { timeout_sec: Math.max(1, Number(e.target.value) || 1) })} className={`${inputCls} w-24`} title="超时（秒）" />
+                        <button type="button" onClick={() => setHookRows((rows) => rows.filter((_, idx) => idx !== i))} className="rounded border border-spark-err/45 px-2 py-1 text-xs text-spark-err hover:bg-spark-err/12">删除</button>
+                      </div>
+                      <input value={h.command} onChange={(e) => patchHook(i, { command: e.target.value })} placeholder="命令，例如 ./scripts/lint.sh" className={`${inputCls} font-mono text-xs`} />
+                      <input value={h.args.join(" ")} onChange={(e) => patchHook(i, { args: e.target.value.trim() ? e.target.value.trim().split(/\s+/) : [] })} placeholder="参数（空格分隔，可选）" className={`${inputCls} font-mono text-xs`} />                      <input value={h.name} onChange={(e) => patchHook(i, { name: e.target.value })} placeholder="名称（可选）" className={`${inputCls} text-xs`} />
+                    </div>
+                  ))}
+                  <button type="button" onClick={() => setHookRows((rows) => [...rows, { event: "pre_tool", command: "", args: [], name: "", timeout_sec: 15 }])} className="self-start rounded border border-spark-line px-3 py-1.5 text-xs text-spark-text hover:bg-spark-line">
+                    添加钩子
+                  </button>
+                </div>
               </div>
               <button type="button" onClick={handleSave} disabled={busy !== null} className="self-start rounded-lg bg-spark-accent px-4 py-2 text-sm font-bold text-spark-on-accent hover:opacity-90 disabled:opacity-50">
                 {busy === "save" ? "保存中…" : "保存权限设置"}

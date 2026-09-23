@@ -54,6 +54,8 @@ export interface FullConfig {
     protected_paths: string[]
     shell_timeout_sec: number
     max_tool_rounds: number
+    max_repeat_calls: number
+    max_turn_tokens: number
     max_output_chars: number
     show_thinking: boolean
     show_tools: boolean
@@ -72,6 +74,15 @@ export interface FullConfig {
   }
   mcp_servers: McpServer[]
   mcp_errors: string[]
+  hooks: HookEntry[]
+}
+
+export interface HookEntry {
+  event: string
+  command: string
+  args: string[]
+  name: string
+  timeout_sec: number
 }
 
 export interface SettingsPayload {
@@ -88,6 +99,8 @@ export interface SettingsPayload {
     protected_paths: string[]
     shell_timeout_sec: number
     max_tool_rounds: number
+    max_repeat_calls?: number
+    max_turn_tokens?: number
     max_output_chars: number
     show_thinking?: boolean
     show_tools?: boolean
@@ -97,6 +110,7 @@ export interface SettingsPayload {
     show_notices?: boolean
   }
   mcp_servers: McpServer[]
+  hooks?: HookEntry[]
 }
 
 export interface ToolCall {
