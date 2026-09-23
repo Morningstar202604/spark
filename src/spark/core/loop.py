@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
+from collections import deque
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 
 from spark.config import SparkConfig
 from spark.core.context import build_messages, history_token_usage
+from spark.core.tokens import estimate_message_tokens
+from spark.hooks import HookRegistry
 from spark.models import (
     ApprovalDecision,
     ApprovalRequest,
@@ -49,9 +53,61 @@ class AgentLoop:
         self.registry.ctx.task_runner = self.spawn_subtask
         self.registry.ctx.task_runner_parallel = self.spawn_subtasks_parallel
         self.history: list[ChatMessage] = store.load_messages(session_id)
+        self._call_window: deque[str] = deque(maxlen=32)
+        self._call_counts: dict[str, int] = {}
+        self._turn_tokens = 0
+        self._active_children: list[AgentLoop] = []
+        self.hooks = HookRegistry.from_config(
+            [hook.model_dump() for hook in getattr(cfg, "hooks", [])], workdir
+        )
 
     def cancel(self) -> None:
         self.cancelled = True
+        for child in list(self._active_children):
+            child.cancel()
+
+    def _fingerprint(self, call: ToolCall) -> str:
+        payload = json.dumps(
+            {"name": call.name, "arguments": call.arguments},
+            sort_keys=True,
+            ensure_ascii=False,
+            default=str,
+        )
+        return hashlib.sha1(payload.encode("utf-8")).hexdigest()[:16]
+
+    def _record_call(self, call: ToolCall) -> tuple[str, int] | None:
+        """Track a tool-call signature; return the over-limit signature when the
+        same (name, arguments) pair repeats past max_repeat_calls. 0 disables the guard."""
+        limit = getattr(self.cfg.agent, "max_repeat_calls", 0) or 0
+        if limit <= 0:
+            return None
+        fingerprint = self._fingerprint(call)
+        self._call_window.append(fingerprint)
+        count = sum(1 for item in self._call_window if item == fingerprint)
+        self._call_counts[fingerprint] = count
+        if count > limit:
+            return fingerprint, count
+        return None
+
+    def _charge_tokens(self, text_parts: list[str], reasoning_parts: list[str]) -> int:
+        added = estimate_message_tokens(
+            ChatMessage(role="assistant", content="".join(text_parts) or None)
+        ) + estimate_message_tokens(
+            ChatMessage(role="assistant", content="".join(reasoning_parts) or None)
+        )
+        self._turn_tokens += added
+        return added
+
+    def _budget_exceeded(self) -> bool:
+        limit = getattr(self.cfg.agent, "max_turn_tokens", 0) or 0
+        return limit > 0 and self._turn_tokens >= limit
+
+    def _budget_state(self) -> dict:
+        limit = getattr(self.cfg.agent, "max_turn_tokens", 0) or 0
+        return {
+            "turn_tokens": self._turn_tokens,
+            "turn_token_limit": limit or None,
+        }
 
     async def run(self, user_text: str, images=None) -> list[TurnEvent]:
         self.cancelled = False
@@ -194,12 +250,29 @@ class AgentLoop:
             self.store.touch(self.session_id, title=user_text[:80])
 
         rounds = 0
+        self._turn_tokens = 0
+        self._call_window.clear()
+        self._call_counts.clear()
         while True:
             if self.cancelled:
                 yield TurnEvent(type="turn_error", text="Turn cancelled")
                 return
             if rounds >= self.cfg.agent.max_tool_rounds:
-                yield TurnEvent(type="turn_error", text="Reached max_tool_rounds")
+                yield TurnEvent(
+                    type="turn_error",
+                    text="Reached max_tool_rounds",
+                    data=self._budget_state(),
+                )
+                return
+            if self._budget_exceeded():
+                yield TurnEvent(
+                    type="turn_error",
+                    text=(
+                        "Token budget exceeded for this turn "
+                        f"({self._turn_tokens}/{self.cfg.agent.max_turn_tokens})"
+                    ),
+                    data=self._budget_state(),
+                )
                 return
             messages = build_messages(
                 workdir=self.workdir,
@@ -208,6 +281,7 @@ class AgentLoop:
                 memory_block=memory_block,
             )
             text_parts: list[str] = []
+            reasoning_parts: list[str] = []
             tool_calls: list[ToolCall] = []
             try:
                 async for delta in self.provider.stream(
@@ -217,6 +291,7 @@ class AgentLoop:
                         yield TurnEvent(type="turn_error", text="Turn cancelled")
                         return
                     if delta.type == "reasoning" and delta.text:
+                        reasoning_parts.append(delta.text)
                         yield TurnEvent(type="reasoning_delta", text=delta.text)
                     elif delta.type == "text" and delta.text:
                         text_parts.append(delta.text)
@@ -227,7 +302,39 @@ class AgentLoop:
                 yield TurnEvent(type="turn_error", text=str(exc))
                 return
 
+            self._charge_tokens(text_parts, reasoning_parts)
+
             if tool_calls:
+                tripped = None
+                for call in tool_calls:
+                    guard = self._record_call(call)
+                    if guard is not None:
+                        tripped = (call.name, guard[1])
+                        break
+                if tripped is not None:
+                    name, count = tripped
+                    yield TurnEvent(
+                        type="context",
+                        data={
+                            "usage": self._usage(),
+                            "circuit_breaker": {
+                                "tool": name,
+                                "repeats": count,
+                                "limit": self.cfg.agent.max_repeat_calls,
+                            },
+                            **self._budget_state(),
+                        },
+                    )
+                    yield TurnEvent(
+                        type="turn_error",
+                        text=(
+                            f"Circuit breaker: tool '{name}' repeated with identical "
+                            f"arguments {count} times (limit "
+                            f"{self.cfg.agent.max_repeat_calls})"
+                        ),
+                        data=self._budget_state(),
+                    )
+                    return
                 assistant = ChatMessage(
                     role="assistant",
                     content="".join(text_parts) or None,
@@ -249,7 +356,20 @@ class AgentLoop:
             self.history.append(assistant)
             assistant_id = self.store.append_message(self.session_id, assistant)
             self._maybe_auto_checkpoint(assistant_id)
-            yield TurnEvent(type="context", data={"usage": self._usage()})
+            yield TurnEvent(
+                type="context",
+                data={"usage": self._usage(), **self._budget_state()},
+            )
+            if self._budget_exceeded():
+                yield TurnEvent(
+                    type="turn_error",
+                    text=(
+                        "Token budget exceeded for this turn "
+                        f"({self._turn_tokens}/{self.cfg.agent.max_turn_tokens})"
+                    ),
+                    data=self._budget_state(),
+                )
+                return
             yield TurnEvent(type="turn_end", text=assistant.content)
             return
 
@@ -314,6 +434,16 @@ class AgentLoop:
 
     async def _run_tool(self, call: ToolCall, message_id: int):
         yield TurnEvent(type="tool_start", tool_call=call)
+        if self.hooks.enabled:
+            verdict = self.hooks.notify(
+                "pre_tool",
+                {"tool": call.name, "arguments": call.arguments},
+            )
+            if not verdict.allow:
+                result = ToolResult(ok=False, payload={"error": verdict.reason})
+                await self._persist_tool(call, message_id, result, "hook_block")
+                yield TurnEvent(type="tool_end", tool_call=call, result=result)
+                return
         decision = decide(
             self.cfg.agent.approval,
             call,
@@ -449,6 +579,7 @@ class AgentLoop:
             memory=None,
         )
         sub_loop.allow_always = set(self.allow_always)
+        self._active_children.append(sub_loop)
         final_text = ""
         try:
             async for event in sub_loop.iter_turn(prompt):
@@ -462,6 +593,7 @@ class AgentLoop:
                     return
             yield TurnEvent(type="turn_end", text=final_text)
         finally:
+            self._active_children.remove(sub_loop)
             sub_store.close()
 
     async def spawn_subtasks_parallel(self, prompts: list[str]):
@@ -539,6 +671,7 @@ class AgentLoop:
             memory=None,
         )
         sub_loop.allow_always = set(self.allow_always)
+        self._active_children.append(sub_loop)
         final_text = ""
         try:
             async for event in sub_loop.iter_turn(prompt):
@@ -551,4 +684,5 @@ class AgentLoop:
             await queue.put((index, None))
             return final_text
         finally:
+            self._active_children.remove(sub_loop)
             sub_store.close()

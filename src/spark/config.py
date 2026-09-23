@@ -38,6 +38,8 @@ class AgentConfig(BaseModel):
     protected_paths: list[str] = Field(default_factory=list)
     shell_timeout_sec: int = 60
     max_tool_rounds: int = 30
+    max_repeat_calls: int = 4
+    max_turn_tokens: int = 0
     max_output_chars: int = 8000
     show_thinking: bool = True
     show_tools: bool = True
@@ -80,6 +82,14 @@ class ModelProfile(BaseModel):
     api_key: str = ""
 
 
+class HookConfig(BaseModel):
+    event: str = "pre_tool"
+    command: str = ""
+    args: list[str] = Field(default_factory=list)
+    name: str = ""
+    timeout_sec: int = 15
+
+
 class SparkConfig(BaseModel):
     active_profile_id: str = ""
     provider: ProviderConfig = Field(default_factory=ProviderConfig)
@@ -88,6 +98,7 @@ class SparkConfig(BaseModel):
     memory: MemoryConfig = Field(default_factory=MemoryConfig)
     mcp_servers: list[McpServerConfig] = Field(default_factory=list)
     model_profiles: list[ModelProfile] = Field(default_factory=list)
+    hooks: list[HookConfig] = Field(default_factory=list)
 
 
 def default_home() -> Path:
@@ -120,6 +131,8 @@ approval = "suggest"
 workdir_only = true
 shell_timeout_sec = 60
 max_tool_rounds = 30
+max_repeat_calls = 4
+max_turn_tokens = 0
 
 [context]
 agents_md = "AGENTS.md"
@@ -251,6 +264,17 @@ def save_config(cfg: SparkConfig, path: Path | None = None) -> Path:
             f"api_key = {_toml_str(prof.api_key)}\n"
         )
     profiles_section = ("\n" + "\n".join(profile_blocks)) if profile_blocks else ""
+    hook_blocks = []
+    for hook in cfg.hooks:
+        hook_blocks.append(
+            "[[hooks]]\n"
+            f"event = {_toml_str(hook.event)}\n"
+            f"command = {_toml_str(hook.command)}\n"
+            f"args = {json.dumps(list(hook.args))}\n"
+            f"name = {_toml_str(hook.name)}\n"
+            f"timeout_sec = {hook.timeout_sec}\n"
+        )
+    hooks_section = ("\n" + "\n".join(hook_blocks)) if hook_blocks else ""
     memory_section = (
         f"\n[memory]\nenabled = {str(cfg.memory.enabled).lower()}\n"
         f"top_k = {cfg.memory.top_k}\ncapacity = {cfg.memory.capacity}\n"
@@ -270,6 +294,8 @@ sandbox_mode = {_toml_str(cfg.agent.sandbox_mode)}
 protected_paths = {json.dumps(list(cfg.agent.protected_paths))}
 shell_timeout_sec = {cfg.agent.shell_timeout_sec}
 max_tool_rounds = {cfg.agent.max_tool_rounds}
+max_repeat_calls = {cfg.agent.max_repeat_calls}
+max_turn_tokens = {cfg.agent.max_turn_tokens}
 max_output_chars = {cfg.agent.max_output_chars}
 show_thinking = {str(cfg.agent.show_thinking).lower()}
 show_tools = {str(cfg.agent.show_tools).lower()}
@@ -284,7 +310,7 @@ max_fragment_chars = {cfg.context.max_fragment_chars}
 history_budget_chars = {cfg.context.history_budget_chars}
 max_context_tokens = {cfg.context.max_context_tokens}
 compact_threshold = {cfg.context.compact_threshold}
-keep_recent_messages = {cfg.context.keep_recent_messages}{memory_section}{mcp_section}{profiles_section}
+keep_recent_messages = {cfg.context.keep_recent_messages}{memory_section}{mcp_section}{profiles_section}{hooks_section}
 """
     tmp = path.with_suffix(path.suffix + ".tmp")
     tmp.write_text(body, encoding="utf-8")

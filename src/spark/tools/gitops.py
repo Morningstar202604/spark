@@ -67,6 +67,55 @@ class GitCommitArgs(BaseModel):
     add_all: bool = False
 
 
+class WorktreeListArgs(BaseModel):
+    path: str = "."
+
+
+class WorktreeCreateArgs(BaseModel):
+    branch: str
+    path: str = "."
+    base: str | None = None
+
+
+class WorktreeRemoveArgs(BaseModel):
+    worktree: str
+    force: bool = False
+
+
+class RunTestsArgs(BaseModel):
+    path: str = "."
+    command: str | None = None
+    timeout_sec: int = 600
+
+
+_SAFE_BRANCH = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/\-]{0,100}$")
+_TEST_TIMEOUT = 600
+
+
+def detect_test_command(root: Path) -> str | None:
+    """Best-effort test command for a repo; None when no signal exists."""
+    if (root / "pyproject.toml").is_file() and (root / "tests").is_dir():
+        return "python -m pytest -q"
+    if (root / "pytest.ini").is_file() or (root / "tox.ini").is_file():
+        return "python -m pytest -q"
+    package = root / "package.json"
+    if package.is_file():
+        try:
+            import json
+
+            scripts = (
+                json.loads(package.read_text(encoding="utf-8")).get("scripts") or {}
+            )
+        except (OSError, ValueError):
+            return None
+        for name in ("test", "test:unit", "test:ci"):
+            if name in scripts:
+                return f"npm run {name}"
+    if (root / "Makefile").is_file():
+        return "make test"
+    return None
+
+
 def _clip(text: str) -> str:
     if len(text) <= MAX_OUTPUT:
         return text
@@ -182,3 +231,125 @@ def git_commit(sandbox: WorkdirSandbox, args: GitCommitArgs) -> ToolResult:
             return pre
     # refuse an empty commit attempt: nothing staged -> git fails on its own
     return _run_git(sandbox, args.path, ["commit", "-m", message])
+
+
+def worktree_list(sandbox: WorkdirSandbox, args: WorktreeListArgs) -> ToolResult:
+    return _run_git(sandbox, args.path, ["worktree", "list"])
+
+
+def worktree_create(sandbox: WorkdirSandbox, args: WorktreeCreateArgs) -> ToolResult:
+    branch = args.branch.strip()
+    if not _SAFE_BRANCH.match(branch):
+        return ToolResult(ok=False, payload={"error": f"invalid branch: {branch!r}"})
+    base = args.base.strip() if args.base else None
+    if base:
+        err = _validate_ref(base)
+        if err:
+            return ToolResult(ok=False, payload={"error": err})
+    try:
+        repo = sandbox.resolve(args.path or ".")
+    except Exception as exc:
+        return ToolResult(ok=False, payload={"error": str(exc)})
+    if branch in {
+        existing.strip()
+        for existing in run_git_capture(repo, "branch", "--list", branch).splitlines()
+    }:
+        return ToolResult(
+            ok=False, payload={"error": f"branch already exists: {branch}"}
+        )
+    git_args = ["worktree", "add", "-b", branch]
+    if base:
+        git_args.append(base)
+    git_args.append(branch)
+    result = _run_git(sandbox, args.path, git_args)
+    if not result.ok:
+        return result
+    target = (repo / branch).resolve()
+    return ToolResult(
+        ok=True,
+        payload={
+            "branch": branch,
+            "worktree_path": str(target),
+            "output": result.payload.get("output", ""),
+        },
+    )
+
+
+def worktree_remove(sandbox: WorkdirSandbox, args: WorktreeRemoveArgs) -> ToolResult:
+    target = Path(args.worktree)
+    if not target.is_absolute():
+        try:
+            target = sandbox.resolve(args.worktree)
+        except Exception as exc:
+            return ToolResult(ok=False, payload={"error": str(exc)})
+    try:
+        repo_root = sandbox.resolve(".").resolve()
+    except Exception as exc:
+        return ToolResult(ok=False, payload={"error": str(exc)})
+    try:
+        target.relative_to(repo_root)
+    except ValueError:
+        return ToolResult(
+            ok=False, payload={"error": f"worktree outside repo: {target}"}
+        )
+    git_args = ["worktree", "remove", str(target)]
+    if args.force:
+        git_args.append("--force")
+    return _run_git(sandbox, ".", git_args)
+
+
+def run_tests(sandbox: WorkdirSandbox, args: RunTestsArgs) -> ToolResult:
+    """Run the repo's detected test command and summarize pass/fail for the agent loop."""
+    try:
+        root = sandbox.resolve(args.path or ".")
+    except Exception as exc:
+        return ToolResult(ok=False, payload={"error": str(exc)})
+    command = args.command.strip() if args.command else detect_test_command(root)
+    if not command:
+        return ToolResult(
+            ok=False,
+            payload={"error": "no test command detected; pass command explicitly"},
+        )
+    try:
+        completed = subprocess.run(
+            command,
+            shell=True,
+            cwd=str(root),
+            capture_output=True,
+            text=True,
+            timeout=args.timeout_sec or _TEST_TIMEOUT,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        return ToolResult(
+            ok=False,
+            payload={
+                "command": command,
+                "error": f"tests timed out after {args.timeout_sec or _TEST_TIMEOUT}s",
+            },
+        )
+    output = (completed.stdout or "") + (completed.stderr or "")
+    return ToolResult(
+        ok=completed.returncode == 0,
+        payload={
+            "command": command,
+            "exit_code": completed.returncode,
+            "passed": completed.returncode == 0,
+            "output": _clip(output.strip()),
+        },
+    )
+
+
+def run_git_capture(cwd: Path, *args: str) -> str:
+    try:
+        completed = subprocess.run(
+            ["git", *args],
+            cwd=str(cwd),
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    return completed.stdout or ""

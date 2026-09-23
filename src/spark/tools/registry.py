@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Any, Awaitable, Callable
+from typing import Any
 
 from spark.config import SparkConfig
 from spark.models import ToolCall, ToolResult
@@ -15,19 +16,27 @@ class ToolContext:
     config: SparkConfig
     mcp_call: Callable[[str, dict[str, Any]], Awaitable[ToolResult]] | None = None
     task_runner: Any = None  # async (prompt) -> AsyncIterator[TurnEvent]; set by AgentLoop for sub-agents
-    task_runner_parallel: Any = None  # async (prompts) -> AsyncIterator[TurnEvent]; parallel sub-agents
+    task_runner_parallel: Any = (
+        None  # async (prompts) -> AsyncIterator[TurnEvent]; parallel sub-agents
+    )
 
 
 ToolHandler = Callable[[ToolContext, dict[str, Any]], ToolResult]
 
 
-def _schema(name: str, description: str, properties: dict[str, Any], required: list[str]) -> dict[str, Any]:
+def _schema(
+    name: str, description: str, properties: dict[str, Any], required: list[str]
+) -> dict[str, Any]:
     return {
         "type": "function",
         "function": {
             "name": name,
             "description": description,
-            "parameters": {"type": "object", "properties": properties, "required": required},
+            "parameters": {
+                "type": "object",
+                "properties": properties,
+                "required": required,
+            },
         },
     }
 
@@ -85,8 +94,14 @@ class ToolRegistry:
                 "Returns path:line:text matches. Automatically skips .git, node_modules, venvs and build dirs.",
                 {
                     "pattern": {"type": "string", "description": "regular expression"},
-                    "path": {"type": "string", "description": "subdirectory to search, default '.'"},
-                    "glob": {"type": "string", "description": "optional filename filter like '*.py'"},
+                    "path": {
+                        "type": "string",
+                        "description": "subdirectory to search, default '.'",
+                    },
+                    "glob": {
+                        "type": "string",
+                        "description": "optional filename filter like '*.py'",
+                    },
                     "max_results": {"type": "integer", "description": "default 50"},
                 },
                 ["pattern"],
@@ -96,7 +111,10 @@ class ToolRegistry:
                 "Find files inside the workdir by filename pattern, e.g. 'src/**/*.ts' or '*.md'.",
                 {
                     "pattern": {"type": "string"},
-                    "path": {"type": "string", "description": "subdirectory to search, default '.'"},
+                    "path": {
+                        "type": "string",
+                        "description": "subdirectory to search, default '.'",
+                    },
                     "max_results": {"type": "integer", "description": "default 200"},
                 },
                 ["pattern"],
@@ -105,7 +123,10 @@ class ToolRegistry:
                 "web_search",
                 "Search the public web (Bing) for current information: docs, error messages, library versions, news. "
                 "Returns title/url/snippet results. Follow up with web_fetch to read a promising page.",
-                {"query": {"type": "string"}, "max_results": {"type": "integer", "description": "default 8"}},
+                {
+                    "query": {"type": "string"},
+                    "max_results": {"type": "integer", "description": "default 8"},
+                },
                 ["query"],
             ),
             _schema(
@@ -125,10 +146,13 @@ class ToolRegistry:
                 "{prompt}) to run up to 4 sub-agents in parallel - e.g. explore different modules at once. "
                 "Sub-agents have all tools except task; you only receive their final summaries.",
                 {
-                    "prompt": {"type": "string", "description": "single sub-agent mode: complete instructions"},
+                    "prompt": {
+                        "type": "string",
+                        "description": "single sub-agent mode: complete instructions",
+                    },
                     "tasks": {
                         "type": "array",
-                        "description": "parallel mode: up to 4 items, each {\"prompt\": \"...\"}",
+                        "description": 'parallel mode: up to 4 items, each {"prompt": "..."}',
                         "items": {
                             "type": "object",
                             "properties": {"prompt": {"type": "string"}},
@@ -151,7 +175,10 @@ class ToolRegistry:
                     "path": {"type": "string"},
                     "cell_index": {"type": "integer"},
                     "new_source": {"type": "string"},
-                    "cell_type": {"type": "string", "description": "optional: change cell to 'code' or 'markdown'"},
+                    "cell_type": {
+                        "type": "string",
+                        "description": "optional: change cell to 'code' or 'markdown'",
+                    },
                 },
                 ["path", "cell_index", "new_source"],
             ),
@@ -191,7 +218,13 @@ class ToolRegistry:
                 "bg_output",
                 "Read the accumulated output of a background job started with bg_start. "
                 "Returns running state, exit code when finished, and the last N chars of output.",
-                {"job_id": {"type": "string"}, "tail": {"type": "integer", "description": "chars of output tail, default 8000"}},
+                {
+                    "job_id": {"type": "string"},
+                    "tail": {
+                        "type": "integer",
+                        "description": "chars of output tail, default 8000",
+                    },
+                },
                 ["job_id"],
             ),
             _schema(
@@ -209,7 +242,12 @@ class ToolRegistry:
             _schema(
                 "git_status",
                 "Show git working tree status (branch + changed files) for a repo inside workdir.",
-                {"path": {"type": "string", "description": "repo directory, default '.'"}},
+                {
+                    "path": {
+                        "type": "string",
+                        "description": "repo directory, default '.'",
+                    }
+                },
                 [],
             ),
             _schema(
@@ -217,15 +255,27 @@ class ToolRegistry:
                 "Show git diff for a repo inside workdir. Use staged=true for staged changes, or ref like 'HEAD~1' to diff against it.",
                 {
                     "path": {"type": "string"},
-                    "staged": {"type": "boolean", "description": "show staged changes only"},
-                    "ref": {"type": "string", "description": "optional commit-ish to diff against"},
+                    "staged": {
+                        "type": "boolean",
+                        "description": "show staged changes only",
+                    },
+                    "ref": {
+                        "type": "string",
+                        "description": "optional commit-ish to diff against",
+                    },
                 },
                 [],
             ),
             _schema(
                 "git_log",
                 "Show recent commit history: short hash, author, relative date, subject.",
-                {"path": {"type": "string"}, "max_count": {"type": "integer", "description": "default 20, max 100"}},
+                {
+                    "path": {"type": "string"},
+                    "max_count": {
+                        "type": "integer",
+                        "description": "default 20, max 100",
+                    },
+                },
                 [],
             ),
             _schema(
@@ -238,8 +288,15 @@ class ToolRegistry:
                 "git_add",
                 "Stage files for commit in a repo inside workdir. Paths are sandbox-checked.",
                 {
-                    "paths": {"type": "array", "items": {"type": "string"}, "description": "files or directories to stage"},
-                    "path": {"type": "string", "description": "repo directory, default '.'"},
+                    "paths": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "files or directories to stage",
+                    },
+                    "path": {
+                        "type": "string",
+                        "description": "repo directory, default '.'",
+                    },
                 },
                 ["paths"],
             ),
@@ -250,9 +307,68 @@ class ToolRegistry:
                 {
                     "message": {"type": "string"},
                     "path": {"type": "string"},
-                    "add_all": {"type": "boolean", "description": "stage all changes before committing"},
+                    "add_all": {
+                        "type": "boolean",
+                        "description": "stage all changes before committing",
+                    },
                 },
                 ["message"],
+            ),
+            _schema(
+                "run_tests",
+                "Run the repository's test suite and return pass/fail plus captured output. "
+                "Detects pytest / npm test / make test automatically; pass 'command' to override. "
+                "Use this to close the loop after a code change instead of guessing whether the change works.",
+                {
+                    "path": {
+                        "type": "string",
+                        "description": "subdirectory, default '.'",
+                    },
+                    "command": {
+                        "type": "string",
+                        "description": "optional explicit command override",
+                    },
+                    "timeout_sec": {"type": "integer", "description": "default 600"},
+                },
+                [],
+            ),
+            _schema(
+                "worktree_list",
+                "List git worktrees attached to this repository.",
+                {"path": {"type": "string"}},
+                [],
+            ),
+            _schema(
+                "worktree_create",
+                "Create an isolated git worktree on a new branch, so concurrent work does not "
+                "disturb the current working tree. Returns the worktree path to operate in.",
+                {
+                    "branch": {
+                        "type": "string",
+                        "description": "new branch name, e.g. feature/login",
+                    },
+                    "path": {
+                        "type": "string",
+                        "description": "repo subdirectory, default '.'",
+                    },
+                    "base": {"type": "string", "description": "optional base ref"},
+                },
+                ["branch"],
+            ),
+            _schema(
+                "worktree_remove",
+                "Remove a git worktree previously created by worktree_create.",
+                {
+                    "worktree": {
+                        "type": "string",
+                        "description": "worktree path returned by worktree_create",
+                    },
+                    "force": {
+                        "type": "boolean",
+                        "description": "remove even when dirty",
+                    },
+                },
+                ["worktree"],
             ),
         ]
         return builtin + self._extra_schemas
@@ -287,13 +403,21 @@ class ToolRegistry:
     async def execute(self, call: ToolCall) -> ToolResult:
         try:
             if call.name == "read_file":
-                return fs.read_file(self.ctx.sandbox, fs.ReadFileArgs.model_validate(call.arguments))
+                return fs.read_file(
+                    self.ctx.sandbox, fs.ReadFileArgs.model_validate(call.arguments)
+                )
             if call.name == "list_dir":
-                return fs.list_dir(self.ctx.sandbox, fs.ListDirArgs.model_validate(call.arguments))
+                return fs.list_dir(
+                    self.ctx.sandbox, fs.ListDirArgs.model_validate(call.arguments)
+                )
             if call.name == "write_file":
-                return fs.write_file(self.ctx.sandbox, fs.WriteFileArgs.model_validate(call.arguments))
+                return fs.write_file(
+                    self.ctx.sandbox, fs.WriteFileArgs.model_validate(call.arguments)
+                )
             if call.name == "apply_patch":
-                return fs.apply_patch(self.ctx.sandbox, fs.ApplyPatchArgs.model_validate(call.arguments))
+                return fs.apply_patch(
+                    self.ctx.sandbox, fs.ApplyPatchArgs.model_validate(call.arguments)
+                )
             if call.name == "run_shell":
                 return shell.run_shell(
                     self.ctx.sandbox,
@@ -310,40 +434,99 @@ class ToolRegistry:
             if call.name == "bg_list":
                 return bg.bg_list_tool()
             if call.name == "git_status":
-                return gitops.git_status(self.ctx.sandbox, gitops.GitStatusArgs.model_validate(call.arguments))
+                return gitops.git_status(
+                    self.ctx.sandbox,
+                    gitops.GitStatusArgs.model_validate(call.arguments),
+                )
             if call.name == "git_diff":
-                return gitops.git_diff(self.ctx.sandbox, gitops.GitDiffArgs.model_validate(call.arguments))
+                return gitops.git_diff(
+                    self.ctx.sandbox, gitops.GitDiffArgs.model_validate(call.arguments)
+                )
             if call.name == "git_log":
-                return gitops.git_log(self.ctx.sandbox, gitops.GitLogArgs.model_validate(call.arguments))
+                return gitops.git_log(
+                    self.ctx.sandbox, gitops.GitLogArgs.model_validate(call.arguments)
+                )
             if call.name == "git_branch":
-                return gitops.git_branch(self.ctx.sandbox, gitops.GitBranchArgs.model_validate(call.arguments))
+                return gitops.git_branch(
+                    self.ctx.sandbox,
+                    gitops.GitBranchArgs.model_validate(call.arguments),
+                )
             if call.name == "git_add":
-                return gitops.git_add(self.ctx.sandbox, gitops.GitAddArgs.model_validate(call.arguments))
+                return gitops.git_add(
+                    self.ctx.sandbox, gitops.GitAddArgs.model_validate(call.arguments)
+                )
             if call.name == "git_commit":
-                return gitops.git_commit(self.ctx.sandbox, gitops.GitCommitArgs.model_validate(call.arguments))
+                return gitops.git_commit(
+                    self.ctx.sandbox,
+                    gitops.GitCommitArgs.model_validate(call.arguments),
+                )
+            if call.name == "run_tests":
+                return gitops.run_tests(
+                    self.ctx.sandbox,
+                    gitops.RunTestsArgs.model_validate(call.arguments),
+                )
+            if call.name == "worktree_list":
+                return gitops.worktree_list(
+                    self.ctx.sandbox,
+                    gitops.WorktreeListArgs.model_validate(call.arguments),
+                )
+            if call.name == "worktree_create":
+                return gitops.worktree_create(
+                    self.ctx.sandbox,
+                    gitops.WorktreeCreateArgs.model_validate(call.arguments),
+                )
+            if call.name == "worktree_remove":
+                return gitops.worktree_remove(
+                    self.ctx.sandbox,
+                    gitops.WorktreeRemoveArgs.model_validate(call.arguments),
+                )
             if call.name == "grep":
-                return search.grep_tool(self.ctx.sandbox, search.GrepArgs.model_validate(call.arguments))
+                return search.grep_tool(
+                    self.ctx.sandbox, search.GrepArgs.model_validate(call.arguments)
+                )
             if call.name == "glob":
-                return search.glob_tool(self.ctx.sandbox, search.GlobArgs.model_validate(call.arguments))
+                return search.glob_tool(
+                    self.ctx.sandbox, search.GlobArgs.model_validate(call.arguments)
+                )
             if call.name == "web_search":
-                return web.web_search_tool(web.WebSearchArgs.model_validate(call.arguments))
+                return web.web_search_tool(
+                    web.WebSearchArgs.model_validate(call.arguments)
+                )
             if call.name == "web_fetch":
-                return web.web_fetch_tool(web.WebFetchArgs.model_validate(call.arguments))
+                return web.web_fetch_tool(
+                    web.WebFetchArgs.model_validate(call.arguments)
+                )
             if call.name == "read_notebook":
-                return notebook.read_notebook(self.ctx.sandbox, notebook.ReadNotebookArgs.model_validate(call.arguments))
+                return notebook.read_notebook(
+                    self.ctx.sandbox,
+                    notebook.ReadNotebookArgs.model_validate(call.arguments),
+                )
             if call.name == "notebook_edit":
-                return notebook.notebook_edit(self.ctx.sandbox, notebook.NotebookEditArgs.model_validate(call.arguments))
+                return notebook.notebook_edit(
+                    self.ctx.sandbox,
+                    notebook.NotebookEditArgs.model_validate(call.arguments),
+                )
             if call.name == "update_plan":
                 steps = call.arguments.get("steps")
                 if not isinstance(steps, list):
-                    return ToolResult(ok=False, payload={"error": "steps must be a list"})
+                    return ToolResult(
+                        ok=False, payload={"error": "steps must be a list"}
+                    )
                 clean: list[dict[str, Any]] = []
                 for step in steps:
-                    if not isinstance(step, dict) or not str(step.get("title", "")).strip():
+                    if (
+                        not isinstance(step, dict)
+                        or not str(step.get("title", "")).strip()
+                    ):
                         continue
                     status = step.get("status", "pending")
                     clean.append(
-                        {"title": str(step["title"]).strip(), "status": status if status in {"pending", "in_progress", "completed"} else "pending"}
+                        {
+                            "title": str(step["title"]).strip(),
+                            "status": status
+                            if status in {"pending", "in_progress", "completed"}
+                            else "pending",
+                        }
                     )
                 self.plan = clean
                 return ToolResult(ok=True, payload={"steps": clean})
