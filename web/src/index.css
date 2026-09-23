@@ -46,22 +46,6 @@
   --logo-glyph: #0f766e;
 }
 
-/* Light-theme safety net for remaining hard-coded dark utilities */
-[data-theme="light"] .text-teal-950 { color: #ffffff; }
-[data-theme="light"] .bg-red-950 { background-color: #fef2f2; }
-[data-theme="light"] .bg-red-950\/20 { background-color: rgb(254 242 242 / 0.2); }
-[data-theme="light"] .bg-red-950\/40 { background-color: rgb(254 242 242 / 0.4); }
-[data-theme="light"] .bg-emerald-950\/40 { background-color: rgb(236 253 245 / 0.4); }
-[data-theme="light"] .bg-blue-950\/20 { background-color: rgb(37 99 235 / 0.08); }
-[data-theme="light"] .border-blue-900\/70 { border-color: rgb(29 78 216 / 0.35); }
-[data-theme="light"] .text-red-400 { color: #dc2626; }
-[data-theme="light"] .text-emerald-400 { color: #059669; }
-[data-theme="light"] .bg-red-500 { background-color: #dc2626; }
-[data-theme="light"] .bg-red-900 { background-color: #dc2626; }
-[data-theme="light"] .border-red-900 { border-color: rgb(220 38 38 / 0.45); }
-[data-theme="light"] .border-red-500 { border-color: #dc2626; }
-[data-theme="light"] .border-emerald-800 { border-color: rgb(5 150 105 / 0.45); }
-
 /* highlight.js: light base (github.css) + dark palette override */
 [data-theme="dark"] .hljs { color: #e6edf3; background-color: #0c1117; }
 [data-theme="dark"] .hljs-comment,
