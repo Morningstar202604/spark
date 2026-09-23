@@ -4,8 +4,8 @@ export default function Logo({ size = 26, withWordmark = true }: { size?: number
       <svg width={size} height={size} viewBox="0 0 32 32" fill="none" aria-hidden>
         <defs>
           <linearGradient id="spark-bg" x1="0" y1="0" x2="32" y2="32" gradientUnits="userSpaceOnUse">
-            <stop stopColor="#0c1f1c" />
-            <stop offset="1" stopColor="#123b35" />
+            <stop stopColor="var(--logo-a)" />
+            <stop offset="1" stopColor="var(--logo-b)" />
           </linearGradient>
           <linearGradient id="spark-g" x1="6" y1="4" x2="26" y2="28" gradientUnits="userSpaceOnUse">
             <stop stopColor="#99f6e4" />
@@ -24,12 +24,12 @@ export default function Logo({ size = 26, withWordmark = true }: { size?: number
             </feMerge>
           </filter>
         </defs>
-        <rect x="0.75" y="0.75" width="30.5" height="30.5" rx="9" fill="url(#spark-bg)" stroke="#1d4a43" strokeWidth="1.5" />
+        <rect x="0.75" y="0.75" width="30.5" height="30.5" rx="9" fill="url(#spark-bg)" stroke="var(--logo-stroke)" strokeWidth="1.5" />
         <rect x="0.75" y="0.75" width="30.5" height="30.5" rx="9" fill="url(#spark-glow)" />
         <path
           d="M18.6 5.6 L9.9 17.3 h4.5 l-1.8 9.1 8.9-12.1 h-4.7 l1.3-8.7 z"
           fill="url(#spark-g)"
-          stroke="#0c1f1c"
+          stroke="var(--logo-glyph)"
           strokeWidth="0.8"
           strokeLinejoin="round"
           filter="url(#spark-soft)"

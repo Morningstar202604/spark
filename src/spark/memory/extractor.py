@@ -1,9 +1,37 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 
 from spark.memory.llm import chat_complete, parse_json_object
 from spark.memory.store import MemoryRow
+
+_SECRET_RES = [
+    re.compile(r"sk-[A-Za-z0-9_\-]{8,}"),
+    re.compile(r"ghp_[A-Za-z0-9]{8,}"),
+    re.compile(r"gho_[A-Za-z0-9]{8,}"),
+    re.compile(r"github_pat_[A-Za-z0-9_]{8,}"),
+    re.compile(r"xox[baprs]-[A-Za-z0-9\-]{8,}"),
+    re.compile(r"AKIA[0-9A-Z]{16}"),
+    re.compile(r"Bearer\s+[A-Za-z0-9\-_.~+/]{8,}", re.IGNORECASE),
+    re.compile(
+        r"(?i)(password|passwd|pwd|secret|token|api[_-]?key|authorization)\s*[=:]\s*[^\s,;'\"']{4,}"
+    ),
+    re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----"),
+]
+
+
+def redact_secrets(text: str) -> str:
+    if not text:
+        return text
+    out = text
+    for pat in _SECRET_RES:
+        if pat.groups:
+            out = pat.sub(lambda m: f"{m.group(1)}=[REDACTED]", out)
+        else:
+            out = pat.sub("[REDACTED]", out)
+    return out
+
 
 EXTRACT_SYSTEM = """你是长期记忆抽取器。从对话记录中提取值得跨会话长期记住的信息。
 只提取这些类别：
@@ -80,6 +108,9 @@ async def extract_facts(
             importance = float(item.get("importance", 5))
         except (TypeError, ValueError):
             importance = 5.0
+        content = redact_secrets(content)
+        if not content.strip():
+            continue
         out.append(
             Candidate(
                 content=content,
@@ -100,7 +131,9 @@ async def resolve_operations(
 ) -> list[Op]:
     lines = ["新记忆候选："]
     for i, cand in enumerate(candidates):
-        lines.append(f"{i}. [{cand.type}] {cand.content} (importance={cand.importance})")
+        lines.append(
+            f"{i}. [{cand.type}] {cand.content} (importance={cand.importance})"
+        )
     lines.append("")
     lines.append("现有相似记忆：")
     has_any = False
@@ -120,10 +153,17 @@ async def resolve_operations(
     data = parse_json_object(raw)
     ops: list[Op] = []
     if not data:
-        return [Op(action="ADD", content=c.content, type=c.type, importance=c.importance) for c in candidates]
+        return [
+            Op(action="ADD", content=c.content, type=c.type, importance=c.importance)
+            for c in candidates
+        ]
     raw_ops = data.get("ops") or []
     for idx, cand in enumerate(candidates):
-        item = raw_ops[idx] if idx < len(raw_ops) and isinstance(raw_ops[idx], dict) else None
+        item = (
+            raw_ops[idx]
+            if idx < len(raw_ops) and isinstance(raw_ops[idx], dict)
+            else None
+        )
         action = str((item or {}).get("action") or "ADD").upper()
         if action == "UPDATE":
             target = (item or {}).get("target_id")
@@ -145,12 +185,16 @@ async def resolve_operations(
                 continue
             action = "ADD"
         if action == "ADD":
-            content = str((item or {}).get("content") or cand.content).strip() or cand.content
+            content = (
+                str((item or {}).get("content") or cand.content).strip() or cand.content
+            )
             try:
                 importance = float((item or {}).get("importance", cand.importance))
             except (TypeError, ValueError):
                 importance = cand.importance
-            ops.append(Op(action="ADD", content=content, type=cand.type, importance=importance))
+            ops.append(
+                Op(action="ADD", content=content, type=cand.type, importance=importance)
+            )
         else:
             ops.append(Op(action="NOOP"))
     return ops

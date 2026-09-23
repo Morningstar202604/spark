@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import shlex
 from pathlib import Path
 
@@ -28,6 +29,10 @@ DENY_PATTERNS = (
     "systemctl enable",
     "systemctl disable",
     "curl http://169.254.169.254",
+    "rm -rf /",
+    "rm -rf ~",
+    "rm -rf $home",
+    "/etc/shadow",
 )
 
 
@@ -76,20 +81,36 @@ class WorkdirSandbox:
             return self.protected_paths
         return self.protected_paths + DEFAULT_PROTECTED + SELF_PROTECTED
 
+    @staticmethod
+    def _logical(path: Path) -> Path:
+        # Drive-stripped form so POSIX-style absolute rules still match on Windows.
+        if path.drive:
+            return Path("/") / path.relative_to(path.anchor)
+        return path
+
     def _check_protected(self, path: Path) -> None:
         for raw in self._protected_effective():
             p = Path(raw)
+            base = p if (p.is_absolute() or raw[:1] in ("/", "\\")) else (self.root / p)
             try:
-                path.relative_to(p if p.is_absolute() else (self.root / p))
+                self._logical(path).relative_to(self._logical(base))
             except ValueError:
                 continue
             raise SandboxPolicyError(f"Blocked protected path: {raw}")
+
+    def _command_tokens(self, command: str) -> list[str]:
+        cleaned = command.replace("|", " ").replace(";", " ").replace("&&", " ").replace("\n", " ")
+        try:
+            tokens = shlex.split(cleaned, posix=os.name != "nt")
+        except ValueError:
+            tokens = cleaned.split()
+        return [tok.strip("\"'") for tok in tokens if tok.strip("\"'")]
 
     def _command_hits_protected(self, command: str) -> str | None:
         """Return the protected path entry hit by a path token in the command, if any."""
         for raw in self._protected_effective():
             p = (Path(raw) if Path(raw).is_absolute() else (self.root / raw)).resolve()
-            for token in command.replace("|", " ").replace(";", " ").replace("&&", " ").split():
+            for token in self._command_tokens(command):
                 try:
                     cand = Path(token)
                     if cand.is_absolute():
@@ -108,6 +129,25 @@ class WorkdirSandbox:
     def check_shell(self, command: str) -> str | None:
         """Return a rejection reason, or None when the command may run."""
         if self.unrestricted:
+            hit_user = None
+            for raw in self.protected_paths:
+                p = (Path(raw) if Path(raw).is_absolute() else (self.root / raw)).resolve()
+                for token in self._command_tokens(command):
+                    try:
+                        cand = Path(token)
+                        if cand.is_absolute():
+                            cand = cand.resolve()
+                        else:
+                            cand = (self.root / cand).resolve()
+                        cand.relative_to(p)
+                        hit_user = raw
+                        break
+                    except (OSError, ValueError, PermissionError):
+                        continue
+                if hit_user:
+                    break
+            if hit_user:
+                return f"command blocked: references protected path {hit_user}"
             return None
         if self.full_access:
             hit = self._command_hits_protected(command)
@@ -119,9 +159,10 @@ class WorkdirSandbox:
             if pattern in lowered:
                 return f"command blocked by sandbox policy (pattern: {pattern.strip()})"
         try:
-            tokens = shlex.split(lowered)
+            tokens = shlex.split(lowered, posix=os.name != "nt")
         except ValueError:
             tokens = lowered.split()
+        tokens = [tok.strip("\"'") for tok in tokens]
         for token in tokens:
             base = token.rsplit("/", 1)[-1]
             if base in {"env", "printenv"}:

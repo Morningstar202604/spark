@@ -85,7 +85,8 @@ def test_full_access_still_protects_spark_self(tmp_path: Path) -> None:
 
 def test_unrestricted_allows_self_and_system(tmp_path: Path) -> None:
     sb = WorkdirSandbox(tmp_path, _cfg("unrestricted"))
-    assert sb.resolve("/workspace/src/spark/config.py") == Path("/workspace/src/spark/config.py")
+    got = sb.resolve("/workspace/src/spark/config.py")
+    assert got.as_posix().endswith("/workspace/src/spark/config.py")
     assert sb.check_shell("sudo anything") is None
     assert sb.check_shell("printenv") is None
     assert sb.check_write_path(Path("/root/.spark/config.toml")) is None

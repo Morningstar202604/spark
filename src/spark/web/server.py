@@ -8,7 +8,14 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse
 
-from spark.config import ModelProfile, SparkConfig, default_home, mask_secret, require_api_key, save_config
+from spark.config import (
+    ModelProfile,
+    SparkConfig,
+    default_home,
+    mask_secret,
+    require_api_key,
+    save_config,
+)
 from spark.core.loop import AgentLoop
 from spark.errors import ConfigError, SparkError
 from spark.memory.service import MemoryService
@@ -25,6 +32,56 @@ from spark.tools.registry import ToolContext, ToolRegistry
 INDEX_HTML = Path(__file__).with_name("index.html")
 
 
+def ui_dir_for() -> Path | None:
+    for c in (
+        Path(__file__).with_name("dist"),
+        Path(__file__).resolve().parents[3] / "web" / "dist",
+    ):
+        if (c / "index.html").is_file():
+            return c
+    return None
+
+
+def parse_mcp_servers(items: list) -> list:
+    from spark.config import McpServerConfig
+
+    out: list[McpServerConfig] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name") or "").strip()
+        if not name:
+            continue
+        command = str(item.get("command") or "").strip()
+        if not command:
+            raise ValueError("each MCP server needs name and command")
+        args_raw = item.get("args")
+        ro_raw = item.get("readonly_tools")
+        out.append(
+            McpServerConfig(
+                name=name,
+                command=command,
+                args=[str(a) for a in args_raw] if isinstance(args_raw, list) else [],
+                readonly_tools=[str(a) for a in ro_raw]
+                if isinstance(ro_raw, list)
+                else [],
+            )
+        )
+    return out
+
+
+_CTYPES = {
+    ".html": "text/html; charset=utf-8",
+    ".js": "application/javascript; charset=utf-8",
+    ".css": "text/css; charset=utf-8",
+    ".json": "application/json; charset=utf-8",
+    ".svg": "image/svg+xml",
+    ".png": "image/png",
+    ".ico": "image/x-icon",
+    ".woff2": "font/woff2",
+}
+
+
 def _extract_text(payload: dict) -> str:
     choices = payload.get("choices") or []
     if not choices:
@@ -33,7 +90,9 @@ def _extract_text(payload: dict) -> str:
     return str(msg.get("content") or "").strip()
 
 
-def _generate_session_meta_async(state: "SparkWebState", user_text: str, assistant_text: str) -> None:
+def _generate_session_meta_async(
+    state: SparkWebState, user_text: str, assistant_text: str
+) -> None:
     """After a turn completes, ask the model for a short title + keywords and store them."""
 
     def run() -> None:
@@ -47,7 +106,9 @@ def _generate_session_meta_async(state: "SparkWebState", user_text: str, assista
         if not model or (state.cfg.provider.name == "openai_compat" and not api_key):
             return
         try:
-            convo = f"[user]\n{user_text[:2000]}\n\n[assistant]\n{assistant_text[:2000]}"
+            convo = (
+                f"[user]\n{user_text[:2000]}\n\n[assistant]\n{assistant_text[:2000]}"
+            )
             prompt = (
                 "为这段对话生成元信息。严格输出一行 JSON，格式："
                 '{"title": "不超过12字的标题", "keywords": ["关键词1", "关键词2", "关键词3"]}。'
@@ -75,7 +136,11 @@ def _generate_session_meta_async(state: "SparkWebState", user_text: str, assista
             meta = json.loads(match.group(0))
             title = str(meta.get("title") or "").strip().strip("\"'")[:40]
             raw_kws = meta.get("keywords")
-            keywords = [str(k).strip()[:20] for k in raw_kws if str(k).strip()][:4] if isinstance(raw_kws, list) else []
+            keywords = (
+                [str(k).strip()[:20] for k in raw_kws if str(k).strip()][:4]
+                if isinstance(raw_kws, list)
+                else []
+            )
             if title:
                 state.store.set_title(state.session_id, title)
             if keywords:
@@ -98,6 +163,7 @@ class WebApprover:
         self.pending = True
         self._action = "deny"
         self._event = threading.Event()
+        self._tool_call_id = request.tool_call.id
         waited = 0.0
         try:
             while not self._event.is_set() and waited < 600.0:
@@ -105,7 +171,7 @@ class WebApprover:
                 waited += 0.2
         finally:
             self.pending = False
-        return ApprovalDecision(action=self._action)
+        return ApprovalDecision(tool_call_id=self._tool_call_id, action=self._action)
 
     def respond(self, action: str) -> None:
         self._action = action
@@ -122,7 +188,7 @@ class SparkWebState:
         self.loop: AgentLoop | None = None
         self.turn_lock = threading.Lock()
         self.busy = False
-        self.approver = WebApprover() if cfg.agent.approval == "suggest" else None
+        self.approver = WebApprover() if cfg.agent.approval != "full-auto" else None
         self.mcp_bridge: McpBridge | None = None
         self.memory_store = MemoryStore(default_home() / "memory.db", cfg.memory)
         self.memory = MemoryService(self.memory_store, cfg)
@@ -152,7 +218,9 @@ class SparkWebState:
         self.mcp_bridge = bridge
         return list(bridge.errors)
 
-    def rebuild_loop(self, session_id: str | None = None, reuse_latest: bool = False) -> None:
+    def rebuild_loop(
+        self, session_id: str | None = None, reuse_latest: bool = False
+    ) -> None:
         tool_ctx = ToolContext(sandbox=self.sandbox, config=self.cfg)
         registry = ToolRegistry(tool_ctx)
         if self.mcp_bridge is not None:
@@ -161,15 +229,21 @@ class SparkWebState:
         provider = create_provider(self.cfg)
         if session_id is None and reuse_latest:
             latest = next(
-                (row for row in self.store.list_sessions() if row["workdir"] == str(self.workdir)),
+                (
+                    row
+                    for row in self.store.list_sessions()
+                    if row["workdir"] == str(self.workdir)
+                ),
                 None,
             )
             session_id = latest["id"] if latest else None
         if session_id is None:
-            self.session_id = self.store.create_session(self.workdir, self.cfg.provider.model, title="web preview")
+            self.session_id = self.store.create_session(
+                self.workdir, self.cfg.provider.model, title="web preview"
+            )
         else:
             self.session_id = session_id
-        approver = self.approver if self.cfg.agent.approval == "suggest" else None
+        approver = self.approver if self.cfg.agent.approval != "full-auto" else None
         self.loop = AgentLoop(
             workdir=self.workdir,
             cfg=self.cfg,
@@ -183,7 +257,11 @@ class SparkWebState:
 
     def status(self) -> dict:
         key = self.cfg.provider.api_key or ""
-        usage = {"used": 0, "limit": self.cfg.context.max_context_tokens, "percent": 0.0}
+        usage = {
+            "used": 0,
+            "limit": self.cfg.context.max_context_tokens,
+            "percent": 0.0,
+        }
         plan: list[dict] = []
         if self.loop is not None:
             try:
@@ -304,14 +382,26 @@ def _event_payload(event) -> dict:
     return payload
 
 
-def serve_web(*, workdir: Path, cfg: SparkConfig, store: SessionStore, host: str = "0.0.0.0", port: int = 8000) -> None:
+def serve_web(
+    *,
+    workdir: Path,
+    cfg: SparkConfig,
+    store: SessionStore,
+    host: str = "0.0.0.0",
+    port: int = 8000,
+) -> None:
     state = SparkWebState(workdir, cfg, store)
-    html = INDEX_HTML.read_text(encoding="utf-8")
+    ui_dir = ui_dir_for()
+    html = (
+        (ui_dir / "index.html").read_text(encoding="utf-8")
+        if ui_dir
+        else INDEX_HTML.read_text(encoding="utf-8")
+    )
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, fmt: str, *args) -> None:
             sys_stderr = __import__("sys").stderr
-            sys_stderr.write("%s - %s\n" % (self.address_string(), fmt % args))
+            sys_stderr.write(f"{self.address_string()} - {fmt % args}\n")
 
         def _json(self, code: int, body: dict | list) -> None:
             data = json.dumps(body, ensure_ascii=False).encode("utf-8")
@@ -340,6 +430,28 @@ def serve_web(*, workdir: Path, cfg: SparkConfig, store: SessionStore, host: str
             if path in {"/", "/index.html"}:
                 self._html()
                 return
+            if ui_dir is not None and not path.startswith("/api/"):
+                rel = path.lstrip("/")
+                if rel:
+                    target = (ui_dir / rel).resolve()
+                    try:
+                        target.relative_to(ui_dir.resolve())
+                    except ValueError:
+                        self._json(404, {"error": "not found"})
+                        return
+                    if target.is_file():
+                        data = target.read_bytes()
+                        ctype = _CTYPES.get(
+                            target.suffix.lower(), "application/octet-stream"
+                        )
+                        self.send_response(200)
+                        self.send_header("Content-Type", ctype)
+                        self.send_header("Content-Length", str(len(data)))
+                        self.end_headers()
+                        self.wfile.write(data)
+                        return
+                self._html()
+                return
             if path == "/api/status":
                 self._json(200, state.status())
                 return
@@ -366,14 +478,19 @@ def serve_web(*, workdir: Path, cfg: SparkConfig, store: SessionStore, host: str
                 return
             if path == "/api/agents_md":
                 path_md = state.workdir / state.cfg.context.agents_md
-                content = path_md.read_text(encoding="utf-8") if path_md.exists() else ""
-                self._json(200, {
-                    "filename": state.cfg.context.agents_md,
-                    "exists": path_md.exists(),
-                    "content": content,
-                    "chars": len(content),
-                    "max_fragment_chars": state.cfg.context.max_fragment_chars,
-                })
+                content = (
+                    path_md.read_text(encoding="utf-8") if path_md.exists() else ""
+                )
+                self._json(
+                    200,
+                    {
+                        "filename": state.cfg.context.agents_md,
+                        "exists": path_md.exists(),
+                        "content": content,
+                        "chars": len(content),
+                        "max_fragment_chars": state.cfg.context.max_fragment_chars,
+                    },
+                )
                 return
             if path == "/api/memory":
                 query = urlparse(self.path).query
@@ -389,12 +506,30 @@ def serve_web(*, workdir: Path, cfg: SparkConfig, store: SessionStore, host: str
                             search_hits.append(entry)
                     except Exception as exc:
                         search_hits = [{"error": str(exc)}]
-                self._json(200, {"items": items, "search": search_hits, "stats": state.memory.stats()})
+                self._json(
+                    200,
+                    {
+                        "items": items,
+                        "search": search_hits,
+                        "stats": state.memory.stats(),
+                    },
+                )
                 return
             if path == "/api/sessions":
                 rows = state.store.list_sessions()
                 sessions = [
-                    {k: row.get(k) for k in ("id", "title", "keywords", "workdir", "model", "created_at", "updated_at")}
+                    {
+                        k: row.get(k)
+                        for k in (
+                            "id",
+                            "title",
+                            "keywords",
+                            "workdir",
+                            "model",
+                            "created_at",
+                            "updated_at",
+                        )
+                    }
                     for row in rows
                     if row["workdir"] == str(state.workdir)
                 ][:50]
@@ -408,14 +543,28 @@ def serve_web(*, workdir: Path, cfg: SparkConfig, store: SessionStore, host: str
                 messages = []
                 if state.loop:
                     for msg in state.loop.history:
-                        entry: dict = {"role": msg.role if msg.role != "summary" else "assistant", "content": msg.content or ""}
+                        entry: dict = {
+                            "role": msg.role if msg.role != "summary" else "assistant",
+                            "content": msg.content or "",
+                        }
                         if msg.role == "tool":
-                            entry = {"role": "tool", "name": msg.name, "content": msg.content or ""}
+                            entry = {
+                                "role": "tool",
+                                "name": msg.name,
+                                "content": msg.content or "",
+                            }
                         elif msg.role == "summary":
-                            entry = {"role": "assistant", "content": "[conversation summary]\n" + (msg.content or "")}
+                            entry = {
+                                "role": "assistant",
+                                "content": "[conversation summary]\n"
+                                + (msg.content or ""),
+                            }
                         elif msg.role in {"user", "assistant"}:
                             if msg.images:
-                                entry["images"] = [f"data:{i.media_type};base64,{i.data}" for i in msg.images]
+                                entry["images"] = [
+                                    f"data:{i.media_type};base64,{i.data}"
+                                    for i in msg.images
+                                ]
                             if not msg.content:
                                 continue
                         else:
@@ -439,13 +588,17 @@ def serve_web(*, workdir: Path, cfg: SparkConfig, store: SessionStore, host: str
                 provider_name = str(body.get("provider") or "openai_compat").strip()
                 api_key = str(body.get("api_key") or "").strip()
                 if provider_name not in {"openai_compat", "ollama", "mock"}:
-                    self._json(400, {"error": "provider must be openai_compat, ollama or mock"})
+                    self._json(
+                        400, {"error": "provider must be openai_compat, ollama or mock"}
+                    )
                     return
                 if not base_url or not model:
                     self._json(400, {"error": "base_url and model are required"})
                     return
                 pid = str(body.get("id") or "").strip()
-                existing = next((p for p in state.cfg.model_profiles if p.id == pid), None)
+                existing = next(
+                    (p for p in state.cfg.model_profiles if p.id == pid), None
+                )
                 if existing:
                     existing.name = name or existing.name or existing.model
                     existing.provider = provider_name  # type: ignore[assignment]
@@ -471,7 +624,9 @@ def serve_web(*, workdir: Path, cfg: SparkConfig, store: SessionStore, host: str
             if path == "/api/models/delete":
                 pid = str(body.get("id") or "").strip()
                 before = len(state.cfg.model_profiles)
-                state.cfg.model_profiles = [p for p in state.cfg.model_profiles if p.id != pid]
+                state.cfg.model_profiles = [
+                    p for p in state.cfg.model_profiles if p.id != pid
+                ]
                 if len(state.cfg.model_profiles) == before:
                     self._json(404, {"error": "unknown profile"})
                     return
@@ -485,7 +640,9 @@ def serve_web(*, workdir: Path, cfg: SparkConfig, store: SessionStore, host: str
                     self._json(409, {"error": "agent is busy"})
                     return
                 pid = str(body.get("id") or "").strip()
-                profile = next((p for p in state.cfg.model_profiles if p.id == pid), None)
+                profile = next(
+                    (p for p in state.cfg.model_profiles if p.id == pid), None
+                )
                 if not profile:
                     self._json(404, {"error": "unknown profile"})
                     return
@@ -518,7 +675,14 @@ def serve_web(*, workdir: Path, cfg: SparkConfig, store: SessionStore, host: str
                     target.write_text(content, encoding="utf-8")
                 elif target.exists():
                     target.write_text("", encoding="utf-8")
-                self._json(200, {"ok": True, "chars": len(content), "max_fragment_chars": state.cfg.context.max_fragment_chars})
+                self._json(
+                    200,
+                    {
+                        "ok": True,
+                        "chars": len(content),
+                        "max_fragment_chars": state.cfg.context.max_fragment_chars,
+                    },
+                )
                 return
             if path == "/api/memory":
                 action = str(body.get("action") or "").strip()
@@ -535,7 +699,9 @@ def serve_web(*, workdir: Path, cfg: SparkConfig, store: SessionStore, host: str
                     except (TypeError, ValueError):
                         importance = 8.0
                     mid = state.memory.add_manual(content, mtype, importance)
-                    self._json(200, {"ok": True, "id": mid, "stats": state.memory.stats()})
+                    self._json(
+                        200, {"ok": True, "id": mid, "stats": state.memory.stats()}
+                    )
                     return
                 if action == "delete":
                     mid = body.get("id")
@@ -584,16 +750,28 @@ def serve_web(*, workdir: Path, cfg: SparkConfig, store: SessionStore, host: str
                     if msg.role in {"user", "assistant"} and msg.content:
                         messages.append({"role": msg.role, "content": msg.content})
                     elif msg.role == "tool":
-                        messages.append({"role": "tool", "name": msg.name, "content": msg.content})
-                self._json(200, {"ok": True, "report": report, "status": state.status(), "messages": messages})
+                        messages.append(
+                            {"role": "tool", "name": msg.name, "content": msg.content}
+                        )
+                self._json(
+                    200,
+                    {
+                        "ok": True,
+                        "report": report,
+                        "status": state.status(),
+                        "messages": messages,
+                    },
+                )
                 return
             if path == "/api/approval":
                 if state.approver is None:
-                    self._json(400, {"error": "approval mode is not suggest"})
+                    self._json(400, {"error": "approval disabled (full-auto)"})
                     return
                 action = str(body.get("decision") or "").strip()
                 if action not in {"allow", "allow_always", "deny"}:
-                    self._json(400, {"error": "decision must be allow, allow_always or deny"})
+                    self._json(
+                        400, {"error": "decision must be allow, allow_always or deny"}
+                    )
                     return
                 state.approver.respond(action)
                 self._json(200, {"ok": True})
@@ -618,7 +796,11 @@ def serve_web(*, workdir: Path, cfg: SparkConfig, store: SessionStore, host: str
                 state.store.delete_session(target)
                 if deleting_active:
                     with state.turn_lock:
-                        remaining = [r for r in state.store.list_sessions() if r["workdir"] == str(state.workdir)]
+                        remaining = [
+                            r
+                            for r in state.store.list_sessions()
+                            if r["workdir"] == str(state.workdir)
+                        ]
                         if remaining:
                             state.rebuild_loop(session_id=remaining[0]["id"])
                         else:
@@ -641,8 +823,12 @@ def serve_web(*, workdir: Path, cfg: SparkConfig, store: SessionStore, host: str
                     if msg.role in {"user", "assistant"} and msg.content:
                         messages.append({"role": msg.role, "content": msg.content})
                     elif msg.role == "tool":
-                        messages.append({"role": "tool", "name": msg.name, "content": msg.content})
-                self._json(200, {"ok": True, "status": state.status(), "messages": messages})
+                        messages.append(
+                            {"role": "tool", "name": msg.name, "content": msg.content}
+                        )
+                self._json(
+                    200, {"ok": True, "status": state.status(), "messages": messages}
+                )
                 return
             if path == "/api/chat/stream":
                 prompt = str(body.get("prompt") or "").strip()
@@ -660,7 +846,9 @@ def serve_web(*, workdir: Path, cfg: SparkConfig, store: SessionStore, host: str
                         continue
                     try:
                         head, _, b64part = item.partition(",")
-                        media_type = head.removeprefix("data:").split(";")[0] or "image/png"
+                        media_type = (
+                            head.removeprefix("data:").split(";")[0] or "image/png"
+                        )
                         _b64mod.b64decode(b64part, validate=True)
                         images.append({"media_type": media_type, "data": b64part})
                     except Exception:
@@ -678,7 +866,11 @@ def serve_web(*, workdir: Path, cfg: SparkConfig, store: SessionStore, host: str
 
                 def send_event(event) -> None:
                     payload = _event_payload(event)
-                    self.wfile.write(b"data: " + json.dumps(payload, ensure_ascii=False).encode("utf-8") + b"\n\n")
+                    self.wfile.write(
+                        b"data: "
+                        + json.dumps(payload, ensure_ascii=False).encode("utf-8")
+                        + b"\n\n"
+                    )
 
                 memory_collector: dict = {"text": "", "tools": []}
 
@@ -688,22 +880,32 @@ def serve_web(*, workdir: Path, cfg: SparkConfig, store: SessionStore, host: str
                     elif event.type == "turn_end" and event.text:
                         memory_collector["text"] = event.text
                     elif event.type == "tool_end" and event.tool_call:
-                        memory_collector["tools"].append(f"{event.tool_call.name}: {json.dumps(event.result.payload if event.result else {}, ensure_ascii=False)[:200]}")
+                        memory_collector["tools"].append(
+                            f"{event.tool_call.name}: {json.dumps(event.result.payload if event.result else {}, ensure_ascii=False)[:200]}"
+                        )
 
                 try:
                     with state.turn_lock:
                         state.busy = True
                         try:
-                            for event in state.loop.iter_turn_sync(prompt, images=image_refs):
+                            for event in state.loop.iter_turn_sync(
+                                prompt, images=image_refs
+                            ):
                                 collect_event(event)
                                 send_event(event)
                         finally:
                             state.busy = False
-                    self.wfile.write(b"data: {\"type\": \"done\"}\n\n")
+                    self.wfile.write(b'data: {"type": "done"}\n\n')
                     turn_text = memory_collector["text"]
                     if turn_text:
                         _generate_session_meta_async(state, prompt, turn_text)
-                    if state.cfg.memory.enabled and state.cfg.memory.auto_extract and state.memory is not None and not state.cfg.provider.name == "mock":
+                    if (
+                        state.cfg.memory.enabled
+                        and state.cfg.memory.auto_extract
+                        and state.memory is not None
+                        and state.cfg.provider.name != "mock"
+                    ):
+
                         def run_memory() -> None:
                             try:
                                 state.memory.record_turn(
@@ -714,12 +916,15 @@ def serve_web(*, workdir: Path, cfg: SparkConfig, store: SessionStore, host: str
                                 )
                             except Exception:
                                 pass
+
                         threading.Thread(target=run_memory, daemon=True).start()
                 except (BrokenPipeError, ConnectionResetError):
                     return
                 except Exception as exc:
                     try:
-                        err = json.dumps({"type": "turn_error", "text": str(exc)}, ensure_ascii=False)
+                        err = json.dumps(
+                            {"type": "turn_error", "text": str(exc)}, ensure_ascii=False
+                        )
                         self.wfile.write(b"data: " + err.encode("utf-8") + b"\n\n")
                     except (BrokenPipeError, ConnectionResetError):
                         pass
@@ -744,14 +949,34 @@ def serve_web(*, workdir: Path, cfg: SparkConfig, store: SessionStore, host: str
                 if state.busy:
                     self._json(409, {"error": "agent is busy"})
                     return
-                provider_in = body.get("provider") if isinstance(body.get("provider"), dict) else {}
-                agent_in = body.get("agent") if isinstance(body.get("agent"), dict) else {}
-                base_url = str(provider_in.get("base_url") or body.get("base_url") or state.cfg.provider.base_url).strip()
-                model = str(provider_in.get("model") or body.get("model") or state.cfg.provider.model).strip()
-                api_key = str(provider_in.get("api_key") or body.get("api_key") or "").strip()
-                provider_name = str(provider_in.get("name") or state.cfg.provider.name).strip()
+                provider_in = (
+                    body.get("provider")
+                    if isinstance(body.get("provider"), dict)
+                    else {}
+                )
+                agent_in = (
+                    body.get("agent") if isinstance(body.get("agent"), dict) else {}
+                )
+                base_url = str(
+                    provider_in.get("base_url")
+                    or body.get("base_url")
+                    or state.cfg.provider.base_url
+                ).strip()
+                model = str(
+                    provider_in.get("model")
+                    or body.get("model")
+                    or state.cfg.provider.model
+                ).strip()
+                api_key = str(
+                    provider_in.get("api_key") or body.get("api_key") or ""
+                ).strip()
+                provider_name = str(
+                    provider_in.get("name") or state.cfg.provider.name
+                ).strip()
                 if provider_name not in {"openai_compat", "ollama", "mock"}:
-                    self._json(400, {"error": "provider must be openai_compat, ollama or mock"})
+                    self._json(
+                        400, {"error": "provider must be openai_compat, ollama or mock"}
+                    )
                     return
                 if not base_url or not model:
                     self._json(400, {"error": "base_url and model are required"})
@@ -768,54 +993,94 @@ def serve_web(*, workdir: Path, cfg: SparkConfig, store: SessionStore, host: str
                 state.cfg.provider.base_url = base_url
                 state.cfg.provider.model = model
                 state.cfg.provider.api_key = api_key or None
-                approval = str(agent_in.get("approval") or state.cfg.agent.approval).strip()
+                approval = str(
+                    agent_in.get("approval") or state.cfg.agent.approval
+                ).strip()
                 if approval not in {"suggest", "auto-edit", "full-auto"}:
-                    self._json(400, {"error": "approval must be suggest, auto-edit or full-auto"})
+                    self._json(
+                        400,
+                        {"error": "approval must be suggest, auto-edit or full-auto"},
+                    )
                     return
                 state.cfg.agent.approval = approval  # type: ignore[assignment]
-                sandbox_mode = str(agent_in.get("sandbox_mode") or state.cfg.agent.sandbox_mode).strip()
-                if sandbox_mode not in {"sandbox-only", "workspace", "full-access", "unrestricted"}:
-                    self._json(400, {"error": "sandbox_mode must be sandbox-only, workspace, full-access or unrestricted"})
+                sandbox_mode = str(
+                    agent_in.get("sandbox_mode") or state.cfg.agent.sandbox_mode
+                ).strip()
+                if sandbox_mode not in {
+                    "sandbox-only",
+                    "workspace",
+                    "full-access",
+                    "unrestricted",
+                }:
+                    self._json(
+                        400,
+                        {
+                            "error": "sandbox_mode must be sandbox-only, workspace, full-access or unrestricted"
+                        },
+                    )
                     return
                 state.cfg.agent.sandbox_mode = sandbox_mode  # type: ignore[assignment]
-                display_flags = {k: bool(agent_in[k]) for k in ("show_thinking", "show_tools", "show_plan", "show_context", "show_keywords", "show_notices") if k in agent_in}
+                display_flags = {
+                    k: bool(agent_in[k])
+                    for k in (
+                        "show_thinking",
+                        "show_tools",
+                        "show_plan",
+                        "show_context",
+                        "show_keywords",
+                        "show_notices",
+                    )
+                    if k in agent_in
+                }
                 for key, value in display_flags.items():
                     setattr(state.cfg.agent, key, value)
                 if "protected_paths" in agent_in:
                     pp = agent_in.get("protected_paths")
                     if isinstance(pp, list):
-                        state.cfg.agent.protected_paths = [str(x).strip() for x in pp if str(x).strip()]
+                        state.cfg.agent.protected_paths = [
+                            str(x).strip() for x in pp if str(x).strip()
+                        ]
                 state.sandbox = WorkdirSandbox(state.workdir, state.cfg)
                 try:
-                    state.cfg.agent.workdir_only = bool(agent_in.get("workdir_only", state.cfg.agent.workdir_only))
-                    state.cfg.agent.shell_timeout_sec = max(1, int(agent_in.get("shell_timeout_sec", state.cfg.agent.shell_timeout_sec)))
-                    state.cfg.agent.max_tool_rounds = max(1, int(agent_in.get("max_tool_rounds", state.cfg.agent.max_tool_rounds)))
-                    state.cfg.agent.max_output_chars = max(200, int(agent_in.get("max_output_chars", state.cfg.agent.max_output_chars)))
+                    state.cfg.agent.workdir_only = bool(
+                        agent_in.get("workdir_only", state.cfg.agent.workdir_only)
+                    )
+                    state.cfg.agent.shell_timeout_sec = max(
+                        1,
+                        int(
+                            agent_in.get(
+                                "shell_timeout_sec", state.cfg.agent.shell_timeout_sec
+                            )
+                        ),
+                    )
+                    state.cfg.agent.max_tool_rounds = max(
+                        1,
+                        int(
+                            agent_in.get(
+                                "max_tool_rounds", state.cfg.agent.max_tool_rounds
+                            )
+                        ),
+                    )
+                    state.cfg.agent.max_output_chars = max(
+                        200,
+                        int(
+                            agent_in.get(
+                                "max_output_chars", state.cfg.agent.max_output_chars
+                            )
+                        ),
+                    )
                 except (TypeError, ValueError):
                     self._json(400, {"error": "invalid agent numbers"})
                     return
                 mcp_in = body.get("mcp_servers")
                 mcp_errors: list[str] = []
                 if isinstance(mcp_in, list):
-                    servers = []
-                    for item in mcp_in:
-                        if not isinstance(item, dict):
-                            continue
-                        name = str(item.get("name") or "").strip()
-                        command = str(item.get("command") or "").strip()
-                        if not name or not command:
-                            self._json(400, {"error": "each MCP server needs name and command"})
-                            return
-                        args_raw = item.get("args")
-                        ro_raw = item.get("readonly_tools")
-                        args = [str(a) for a in args_raw] if isinstance(args_raw, list) else []
-                        readonly = [str(a) for a in ro_raw] if isinstance(ro_raw, list) else []
-                        servers.append({"name": name, "command": command, "args": args, "readonly_tools": readonly})
                     try:
-                        state.cfg.mcp_servers = servers  # type: ignore[assignment]
-                    except Exception as exc:
-                        self._json(400, {"error": f"invalid mcp_servers: {exc}"})
+                        servers = parse_mcp_servers(mcp_in)
+                    except ValueError as exc:
+                        self._json(400, {"error": str(exc)})
                         return
+                    state.cfg.mcp_servers = servers
                     try:
                         mcp_errors = state.boot_mcp()
                     except Exception as exc:
@@ -827,25 +1092,44 @@ def serve_web(*, workdir: Path, cfg: SparkConfig, store: SessionStore, host: str
                 except SparkError as exc:
                     self._json(400, {"error": str(exc)})
                     return
-                self._json(200, {"ok": True, "status": state.status(), "mcp_errors": mcp_errors, "config": state.full_config()})
+                self._json(
+                    200,
+                    {
+                        "ok": True,
+                        "status": state.status(),
+                        "mcp_errors": mcp_errors,
+                        "config": state.full_config(),
+                    },
+                )
                 return
             if path == "/api/test":
-                base_url = str(body.get("base_url") or state.cfg.provider.base_url).strip()
+                base_url = str(
+                    body.get("base_url") or state.cfg.provider.base_url
+                ).strip()
                 model = str(body.get("model") or state.cfg.provider.model).strip()
-                api_key = str(body.get("api_key") or "").strip() or (state.cfg.provider.api_key or "")
+                api_key = str(body.get("api_key") or "").strip() or (
+                    state.cfg.provider.api_key or ""
+                )
                 if not api_key:
                     try:
                         api_key = require_api_key(state.cfg) or ""
                     except ConfigError as exc:
                         self._json(400, {"ok": False, "error": str(exc)})
                         return
-                result = asyncio.run(probe_provider(base_url=base_url, api_key=api_key, model=model, rounds=2))
+                result = asyncio.run(
+                    probe_provider(
+                        base_url=base_url, api_key=api_key, model=model, rounds=2
+                    )
+                )
                 self._json(200 if result.ok else 502, result.public_dict())
                 return
             self._json(404, {"error": "not found"})
 
     server = ThreadingHTTPServer((host, port), Handler)
-    print(f"Spark web preview at http://{host}:{port} session={state.session_id}", flush=True)
+    print(
+        f"Spark web preview at http://{host}:{port} session={state.session_id}",
+        flush=True,
+    )
     try:
         server.serve_forever()
     finally:

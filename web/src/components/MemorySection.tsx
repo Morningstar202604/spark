@@ -2,9 +2,9 @@ import { useCallback, useEffect, useState } from "react"
 import { fetchMemories, memoryAdd, memoryDelete, memoryOptimize, type MemoryItem, type MemoryStats } from "../api"
 
 const typeBadge: Record<string, string> = {
-  preference: "bg-sky-950 text-sky-300",
-  project: "bg-emerald-950 text-emerald-300",
-  lesson: "bg-amber-950 text-amber-300",
+  preference: "bg-spark-user/15 text-spark-user",
+  project: "bg-spark-ok/15 text-spark-ok",
+  lesson: "bg-spark-tool/15 text-spark-tool",
   general: "bg-spark-line text-spark-muted",
 }
 
@@ -33,7 +33,7 @@ function ItemRow({ item, onDelete }: { item: MemoryItem; onDelete: (id: number) 
       <button
         type="button"
         onClick={() => onDelete(item.id)}
-        className="shrink-0 rounded px-2 py-1 text-[10px] font-bold text-spark-err hover:bg-red-950"
+        className="shrink-0 rounded px-2 py-1 text-[10px] font-bold text-spark-err hover:bg-spark-err/12"
       >
         删除
       </button>
@@ -57,8 +57,8 @@ export default function MemorySection() {
       setStats(data.stats)
       setItems(data.items)
       setHits(q ? data.search : null)
-    } catch {
-      /* ignore */
+    } catch (e) {
+      setReport(`记忆加载失败：${e instanceof Error ? e.message : String(e)}`)
     }
   }, [])
 
@@ -68,8 +68,13 @@ export default function MemorySection() {
 
   async function handleSearch() {
     setBusy(true)
-    await refresh(query.trim())
-    setBusy(false)
+    try {
+      await refresh(query.trim())
+    } catch (e) {
+      setReport(`检索失败：${e instanceof Error ? e.message : String(e)}`)
+    } finally {
+      setBusy(false)
+    }
   }
 
   async function handleAdd() {
@@ -79,16 +84,23 @@ export default function MemorySection() {
       await memoryAdd({ content: newContent.trim(), type: newType, importance: 8 })
       setNewContent("")
       await refresh(query.trim())
-    } catch {
-      /* ignore */
+    } catch (e) {
+      setReport(`添加失败：${e instanceof Error ? e.message : String(e)}`)
     } finally {
       setBusy(false)
     }
   }
 
   async function handleDelete(id: number) {
-    await memoryDelete(id)
-    await refresh(query.trim())
+    setBusy(true)
+    try {
+      await memoryDelete(id)
+      await refresh(query.trim())
+    } catch (e) {
+      setReport(`删除失败：${e instanceof Error ? e.message : String(e)}`)
+    } finally {
+      setBusy(false)
+    }
   }
 
   async function handleOptimize() {
@@ -199,7 +211,7 @@ export default function MemorySection() {
             type="button"
             onClick={handleAdd}
             disabled={busy || !newContent.trim()}
-            className="rounded-lg bg-spark-accent px-3 py-2 text-xs font-bold text-teal-950 hover:opacity-90 disabled:opacity-50"
+            className="rounded-lg bg-spark-accent px-3 py-2 text-xs font-bold text-spark-on-accent hover:opacity-90 disabled:opacity-50"
           >
             添加
           </button>

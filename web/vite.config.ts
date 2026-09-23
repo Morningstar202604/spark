@@ -4,13 +4,16 @@ import tailwindcss from '@tailwindcss/vite'
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
+  build: {
+    outDir: '../src/spark/web/dist',
+    emptyOutDir: true,
+  },
   server: {
     host: '0.0.0.0',
-    port: 8000,
-    allowedHosts: ['.monkeycode-ai.online'],
+    port: 5173,
     proxy: {
       '/api': {
-        target: 'http://127.0.0.1:8001',
+        target: 'http://127.0.0.1:8000',
         changeOrigin: true,
       },
     },

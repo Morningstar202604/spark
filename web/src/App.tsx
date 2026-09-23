@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import ChatMessage, { type ChatItem } from "./components/ChatMessage"
 import SettingsPanel from "./components/SettingsPanel"
 import SessionSidebar from "./components/SessionSidebar"
@@ -20,6 +20,7 @@ import {
   respondApproval,
   listCheckpoints,
   rollbackCheckpoint,
+  fetchHistory,
   type CheckpointRow,
 } from "./api"
 import type { ApprovalInfo, ChatEvent, PlanStep, SessionRow, Status } from "./types"
@@ -67,12 +68,17 @@ export default function App() {
   const visibleItems = show.tools ? items : items.filter((it) => it.kind !== "tool")
   const [toasts, setToasts] = useState<ToastItem[]>([])
   const toastId = useRef(0)
+  const interactedRef = useRef(false)
+  const approvalBusyRef = useRef(false)
+  const [approvalBusy, setApprovalBusy] = useState(false)
   function pushToast(text: string, kind: ToastItem["kind"] = "error") {
     toastId.current += 1
     const id = toastId.current
     setToasts((prev) => [...prev.slice(-2), { id, text, kind }])
   }
-  const dismissToast = (id: number) => setToasts((prev) => prev.filter((t) => t.id !== id))
+  const dismissToast = useCallback((id: number) => {
+    setToasts((prev) => prev.filter((t) => t.id !== id))
+  }, [])
 
   function addErrorItem(text: string) {
     setItems((prev) => [...prev, { kind: "message", role: "error", text }])
@@ -86,6 +92,13 @@ export default function App() {
       })
       .catch(() => pushToast("无法连接后端服务，请稍后重试或刷新页面"))
     refreshSessions()
+    fetchHistory()
+      .then((h) => {
+        if (!interactedRef.current) setItems(historyToItems(h.messages))
+      })
+      .catch(() => {
+        if (!interactedRef.current) pushToast("历史消息加载失败")
+      })
   }, [])
 
   useEffect(() => {
@@ -100,8 +113,8 @@ export default function App() {
     try {
       const data = await listSessions()
       setSessions(data.sessions)
-    } catch {
-      /* ignore */
+    } catch (e) {
+      pushToast(`会话列表加载失败：${e instanceof Error ? e.message : String(e)}`)
     }
   }
 
@@ -113,6 +126,7 @@ export default function App() {
       setCheckpoints(data.checkpoints)
     } catch {
       setCheckpoints([])
+      pushToast("加载检查点失败")
     } finally {
       setCpsBusy(false)
     }
@@ -121,6 +135,7 @@ export default function App() {
   async function handleRollback(id: number) {
     if (streaming || cpsBusy) return
     if (!window.confirm("回滚到该检查点？文件与会话都会恢复到当时状态，之后的对话将被移除。")) return
+    interactedRef.current = true
     setCpsBusy(true)
     try {
       const data = await rollbackCheckpoint(id)
@@ -140,6 +155,7 @@ export default function App() {
 
   async function handleNewSession() {
     if (streaming) return
+    interactedRef.current = true
     try {
       const st = await newSession()
       setStatus(st)
@@ -155,6 +171,7 @@ export default function App() {
 
   async function handleSwitch(id: string) {
     if (streaming || id === status?.session_id) return
+    interactedRef.current = true
     try {
       const data = await switchSession(id)
       setStatus(data.status)
@@ -170,6 +187,7 @@ export default function App() {
 
   async function handleDelete(id: string) {
     if (streaming) return
+    interactedRef.current = true
     try {
       const data = await deleteSession(id)
       if (data.status) setStatus(data.status)
@@ -189,22 +207,29 @@ export default function App() {
     try {
       await cancelTurn()
     } catch {
-      /* ignore */
+      pushToast("取消失败，请重试")
     }
   }
 
   async function handleApproval(decision: "allow" | "allow_always" | "deny") {
+    if (approvalBusyRef.current) return
+    approvalBusyRef.current = true
+    setApprovalBusy(true)
     try {
       await respondApproval(decision)
       setApproval(null)
     } catch {
-      setApproval(null)
+      pushToast("审批响应失败，请重试")
+    } finally {
+      approvalBusyRef.current = false
+      setApprovalBusy(false)
     }
   }
 
   async function send(images: string[] = []) {
     const prompt = input.trim()
     if ((!prompt && images.length === 0) || streaming) return
+    interactedRef.current = true
     setInput("")
     setStreaming(true)
     setThinking(null)
@@ -356,7 +381,7 @@ export default function App() {
                   type="button"
                   onClick={handleCancel}
                   title="停止生成"
-                  className="flex h-9 w-9 animate-in items-center justify-center rounded-lg bg-red-950 text-spark-err transition-colors hover:bg-red-900"
+                  className="flex h-9 w-9 animate-in items-center justify-center rounded-lg bg-spark-err/15 text-spark-err transition-colors hover:bg-spark-err/25"
                 >
                   <span className="block h-3 w-3 rounded-[2px] bg-current" />
                 </button>
@@ -418,7 +443,7 @@ export default function App() {
               </div>
             ))}
             {show.thinking && thinking && <ThinkingBlock text={thinking.text} active={thinking.active} />}
-            {approval && <ApprovalCard approval={approval} onDecide={handleApproval} busy={false} />}
+            {approval && <ApprovalCard approval={approval} onDecide={handleApproval} busy={approvalBusy} />}
           </div>
         </div>
         <InputBox
@@ -464,7 +489,7 @@ export default function App() {
                         type="button"
                         disabled={cpsBusy || streaming}
                         onClick={() => void handleRollback(cp.id)}
-                        className="shrink-0 rounded-lg bg-spark-accent px-3 py-1.5 text-xs font-bold text-teal-950 transition-all hover:brightness-110 active:scale-95 disabled:opacity-50"
+                        className="shrink-0 rounded-lg bg-spark-accent px-3 py-1.5 text-xs font-bold text-spark-on-accent transition-all hover:brightness-110 active:scale-95 disabled:opacity-50"
                       >
                         回滚
                       </button>

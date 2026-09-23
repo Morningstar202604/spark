@@ -82,6 +82,27 @@ class McpBridge:
     def __init__(self) -> None:
         self.servers: dict[str, McpServerProcess] = {}
         self.errors: list[str] = []
+        self._loop: asyncio.AbstractEventLoop | None = None
+        self._lock = __import__("threading").Lock()
+
+    def _ensure_loop(self) -> asyncio.AbstractEventLoop:
+        with self._lock:
+            if self._loop is None or self._loop.is_closed():
+                self._loop = asyncio.new_event_loop()
+                __import__("threading").Thread(
+                    target=self._loop.run_forever, daemon=True, name="mcp-bridge"
+                ).start()
+            return self._loop
+
+    async def _run(self, coro):
+        try:
+            running = asyncio.get_running_loop()
+        except RuntimeError:
+            running = None
+        loop = self._ensure_loop()
+        if running is loop:
+            return await coro
+        return await asyncio.wrap_future(asyncio.run_coroutine_threadsafe(coro, loop))
 
     def register_into(self, registry: ToolRegistry) -> None:
         for name, proc in self.servers.items():
@@ -103,6 +124,9 @@ class McpBridge:
                     registry.readonly_mcp.add(ns)
 
     async def start(self, configs: list[McpServerConfig], registry: ToolRegistry) -> None:
+        await self._run(self._start_inner(configs, registry))
+
+    async def _start_inner(self, configs: list[McpServerConfig], registry: ToolRegistry) -> None:
         for cfg in configs:
             proc = McpServerProcess(cfg)
             try:
@@ -143,8 +167,11 @@ class McpBridge:
         server = self.servers.get(parts[1])
         if server is None:
             return ToolResult(ok=False, payload={"error": f"MCP server not available: {parts[1]}"})
-        return await server.call(parts[2], arguments)
+        return await self._run(server.call(parts[2], arguments))
 
     async def close(self) -> None:
+        await self._run(self._close_inner())
+
+    async def _close_inner(self) -> None:
         for server in self.servers.values():
             await server.close()

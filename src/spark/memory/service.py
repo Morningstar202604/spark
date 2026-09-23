@@ -6,7 +6,13 @@ import threading
 import time
 
 from spark.config import SparkConfig
-from spark.memory.extractor import Candidate, consolidate_group, extract_facts, resolve_operations
+from spark.memory.extractor import (
+    Candidate,
+    consolidate_group,
+    extract_facts,
+    redact_secrets,
+    resolve_operations,
+)
 from spark.memory.llm import embed_texts, messages_to_transcript
 from spark.memory.store import MemoryRow, MemoryStore, tokenize
 from spark.models import ChatMessage
@@ -36,17 +42,25 @@ class MemoryService:
 
     def _llm_ready(self) -> bool:
         p = self.cfg.provider
-        return p.name != "mock" and bool(p.base_url) and bool(p.api_key or p.name == "ollama")
+        return (
+            p.name != "mock"
+            and bool(p.base_url)
+            and bool(p.api_key or p.name == "ollama")
+        )
 
     def _embed(self, texts: list[str]) -> list[list[float]] | None:
         if not self.cfg.memory.enabled:
             return None
         now = time.time()
-        if self.embedding_available is False and now - self.embedding_checked_at < EMBED_RETRY_SECS:
+        if (
+            self.embedding_available is False
+            and now - self.embedding_checked_at < EMBED_RETRY_SECS
+        ):
             return None
         p = self.cfg.provider
-        try:
-            vecs = asyncio.run(
+
+        def _run_embed():
+            return asyncio.run(
                 embed_texts(
                     base_url=p.base_url,
                     api_key=p.api_key or "ollama",
@@ -54,6 +68,29 @@ class MemoryService:
                     texts=texts,
                 )
             )
+
+        try:
+            try:
+                asyncio.get_running_loop()
+            except RuntimeError:
+                vecs = _run_embed()
+            else:
+                result: list = [None]
+                exc_box: list = []
+
+                def _worker() -> None:
+                    try:
+                        result[0] = _run_embed()
+                    except Exception as exc:  # noqa: BLE001
+                        exc_box.append(exc)
+
+                th = threading.Thread(target=_worker, daemon=True)
+                th.start()
+                th.join(timeout=60)
+                if exc_box:
+                    vecs = None
+                else:
+                    vecs = result[0]
         except Exception:
             vecs = None
         self.embedding_checked_at = now
@@ -65,7 +102,9 @@ class MemoryService:
 
     # ---------- retrieval ----------
 
-    def search(self, query: str, top_k: int | None = None) -> list[tuple[MemoryRow, float]]:
+    def search(
+        self, query: str, top_k: int | None = None
+    ) -> list[tuple[MemoryRow, float]]:
         vecs = self._embed([query])
         q_emb = vecs[0] if vecs else None
         return self.store.search(query, top_k=top_k, query_embedding=q_emb)
@@ -93,8 +132,15 @@ class MemoryService:
         tool_summary: str,
         session_id: str,
     ) -> dict:
-        if not self.cfg.memory.enabled or not self.cfg.memory.auto_extract or not self._llm_ready():
+        if (
+            not self.cfg.memory.enabled
+            or not self.cfg.memory.auto_extract
+            or not self._llm_ready()
+        ):
             return {"extracted": 0, "ops": []}
+        user_text = redact_secrets(user_text)
+        assistant_text = redact_secrets(assistant_text)
+        tool_summary = redact_secrets(tool_summary)
         pieces = [f"user: {user_text[:2000]}"]
         if assistant_text:
             pieces.append(f"assistant: {assistant_text[:2000]}")
@@ -135,7 +181,9 @@ class MemoryService:
                 return {"extracted": len(candidates), "ops": [], "error": str(exc)}
 
             new_texts = [op.content for op in ops if op.action == "ADD"]
-            update_texts = [op.content for op in ops if op.action == "UPDATE" and op.target_id]
+            update_texts = [
+                op.content for op in ops if op.action == "UPDATE" and op.target_id
+            ]
             all_texts = new_texts + update_texts
             vecs = self._embed(all_texts) if all_texts else None
             vec_map: dict[str, list[float]] = {}
@@ -146,23 +194,39 @@ class MemoryService:
             applied: list[dict] = []
             for op in ops:
                 if op.action == "ADD":
+                    safe_content = redact_secrets(op.content)
                     mid = self.store.add(
-                        op.content,
+                        safe_content,
                         type=op.type,
                         importance=op.importance,
-                        embedding=vec_map.get(op.content),
-                        embedding_model=self.cfg.memory.embedding_model if op.content in vec_map else None,
+                        embedding=vec_map.get(op.content) or vec_map.get(safe_content),
+                        embedding_model=self.cfg.memory.embedding_model
+                        if (op.content in vec_map or safe_content in vec_map)
+                        else None,
                         source_session=session_id,
                     )
-                    applied.append({"action": "ADD", "id": mid, "content": op.content})
+                    applied.append(
+                        {"action": "ADD", "id": mid, "content": safe_content}
+                    )
                 elif op.action == "UPDATE" and op.target_id:
                     if self.store.get(op.target_id):
+                        safe_content = redact_secrets(op.content)
                         self.store.update_content(
                             op.target_id,
-                            op.content,
+                            safe_content,
                             importance=op.importance,
+                            embedding=vec_map.get(op.content),
+                            embedding_model=self.cfg.memory.embedding_model
+                            if op.content in vec_map
+                            else None,
                         )
-                        applied.append({"action": "UPDATE", "id": op.target_id, "content": op.content})
+                        applied.append(
+                            {
+                                "action": "UPDATE",
+                                "id": op.target_id,
+                                "content": safe_content,
+                            }
+                        )
             archived = self.store.enforce_capacity()
         return {"extracted": len(candidates), "ops": applied, "archived": archived}
 
@@ -228,12 +292,14 @@ class MemoryService:
                         continue
                     content, importance = merged
                     vecs = self._embed([content])
-                    mid = self.store.add(
+                    self.store.add(
                         content,
                         type=cluster[0].type,
                         importance=max(importance, max(r.importance for r in cluster)),
                         embedding=vecs[0] if vecs else None,
-                        embedding_model=self.cfg.memory.embedding_model if vecs else None,
+                        embedding_model=self.cfg.memory.embedding_model
+                        if vecs
+                        else None,
                     )
                     for row in cluster:
                         self.store.archive(row.id)
@@ -244,7 +310,10 @@ class MemoryService:
 
     # ---------- management ----------
 
-    def add_manual(self, content: str, type: str = "general", importance: float = 8.0) -> int:
+    def add_manual(
+        self, content: str, type: str = "general", importance: float = 8.0
+    ) -> int:
+        content = redact_secrets(content)
         vecs = self._embed([content])
         with self._lock:
             return self.store.add(
@@ -275,4 +344,11 @@ class MemoryService:
         self._embed(["memory embedding probe"])
 
 
-__all__ = ["MemoryService", "MemoryStore", "messages_to_transcript", "tokenize", "ChatMessage", "Candidate"]
+__all__ = [
+    "Candidate",
+    "ChatMessage",
+    "MemoryService",
+    "MemoryStore",
+    "messages_to_transcript",
+    "tokenize",
+]

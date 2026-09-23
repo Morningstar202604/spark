@@ -7,15 +7,22 @@ export interface ToastItem {
 }
 
 const kindStyle: Record<ToastItem["kind"], string> = {
-  error: "border-red-900 bg-red-950/90 text-red-200",
+  error: "border-spark-err/45 bg-spark-err/10 text-spark-err",
   info: "border-spark-line bg-spark-panel text-spark-text",
-  ok: "border-emerald-900 bg-emerald-950/90 text-emerald-200",
+  ok: "border-spark-ok/45 bg-spark-ok/10 text-spark-ok",
 }
 
 export default function Toast({ toasts, onDismiss }: { toasts: ToastItem[]; onDismiss: (id: number) => void }) {
   const timersRef = useRef<Map<number, ReturnType<typeof setTimeout>>>(new Map())
 
   useEffect(() => {
+    const active = new Set(toasts.map((t) => t.id))
+    for (const [id, timer] of timersRef.current) {
+      if (!active.has(id)) {
+        clearTimeout(timer)
+        timersRef.current.delete(id)
+      }
+    }
     for (const t of toasts) {
       if (!timersRef.current.has(t.id)) {
         const timer = setTimeout(() => {
@@ -25,13 +32,15 @@ export default function Toast({ toasts, onDismiss }: { toasts: ToastItem[]; onDi
         timersRef.current.set(t.id, timer)
       }
     }
-    return () => {
-      for (const [id, timer] of timersRef.current) {
-        clearTimeout(timer)
-        timersRef.current.delete(id)
-      }
-    }
   }, [toasts, onDismiss])
+
+  useEffect(() => {
+    const timers = timersRef.current
+    return () => {
+      for (const timer of timers.values()) clearTimeout(timer)
+      timers.clear()
+    }
+  }, [])
   if (toasts.length === 0) return null
   return (
     <div className="pointer-events-none fixed top-3 left-1/2 z-50 flex w-[92%] max-w-sm -translate-x-1/2 flex-col gap-2">

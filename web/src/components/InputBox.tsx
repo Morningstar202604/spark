@@ -74,7 +74,7 @@ export default function InputBox({ value, onChange, onSubmit, onStop, streaming,
                 <button
                   type="button"
                   onClick={() => setImages((prev) => prev.filter((u) => u !== dataUrl))}
-                  className="absolute -top-1.5 -right-1.5 flex h-6 w-6 items-center justify-center rounded-full bg-red-900 text-xs font-bold text-white shadow transition-transform hover:scale-110"
+                  className="absolute -top-1.5 -right-1.5 flex h-6 w-6 items-center justify-center rounded-full bg-spark-err text-xs font-bold text-spark-on-accent shadow transition-transform hover:scale-110"
                   title="移除图片"
                 >
                   ×
@@ -140,7 +140,7 @@ export default function InputBox({ value, onChange, onSubmit, onStop, streaming,
                 type="button"
                 title="停止生成"
                 onClick={onStop}
-                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-red-950 text-spark-err transition-transform hover:scale-105 active:scale-95"
+                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-spark-err/20 text-spark-err transition-transform hover:scale-105 hover:bg-spark-err/30 active:scale-95"
               >
                 <span className="block h-2.5 w-2.5 rounded-[2px] bg-current" />
               </button>
@@ -150,7 +150,7 @@ export default function InputBox({ value, onChange, onSubmit, onStop, streaming,
                 title="发送"
                 disabled={!canSend}
                 onClick={submit}
-                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-spark-accent text-teal-950 transition-all hover:brightness-110 active:scale-95 disabled:cursor-not-allowed disabled:opacity-40"
+                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-spark-accent text-spark-on-accent transition-all hover:brightness-110 active:scale-95 disabled:cursor-not-allowed disabled:opacity-40"
               >
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
                   <path d="M12 19V5" />

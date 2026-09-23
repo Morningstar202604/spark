@@ -19,14 +19,19 @@ from spark.tools.registry import ToolRegistry
 
 
 class ApprovalScreen(ModalScreen[ApprovalDecision]):
-    def __init__(self, request: ApprovalRequest, access_mode: str = "workspace") -> None:
+    def __init__(
+        self, request: ApprovalRequest, access_mode: str = "workspace"
+    ) -> None:
         super().__init__()
         self.request = request
         self.access_mode = access_mode
 
     def compose(self) -> ComposeResult:
         yield Vertical(
-            Static(f"Approve {self.request.tool_call.name}?  [access={self.access_mode}]", id="title"),
+            Static(
+                f"Approve {self.request.tool_call.name}?  [access={self.access_mode}]",
+                id="title",
+            ),
             RichLog(id="detail", wrap=True),
             Horizontal(
                 Button("Allow", id="allow", variant="success"),
@@ -47,7 +52,9 @@ class ApprovalScreen(ModalScreen[ApprovalDecision]):
             "always": "allow_always",
         }
         action = mapping[event.button.id or "deny"]
-        self.dismiss(ApprovalDecision(tool_call_id=self.request.tool_call.id, action=action))
+        self.dismiss(
+            ApprovalDecision(tool_call_id=self.request.tool_call.id, action=action)
+        )
 
 
 class SparkApp(App):
@@ -76,6 +83,7 @@ class SparkApp(App):
         registry: ToolRegistry,
         bridge: McpBridge | None,
         initial_prompt: str | None = None,
+        memory=None,
     ) -> None:
         super().__init__()
         self.workdir = workdir
@@ -92,13 +100,16 @@ class SparkApp(App):
             store=store,
             session_id=session_id,
             approver=self._approve,
+            memory=memory,
         )
         self._running = False
 
     def compose(self) -> ComposeResult:
         yield Header()
         yield Static(self._status_text(), id="status")
-        yield Horizontal(Button("Test model", id="test-model", variant="primary"), id="toolbar")
+        yield Horizontal(
+            Button("Test model", id="test-model", variant="primary"), id="toolbar"
+        )
         yield RichLog(id="chat", wrap=True, highlight=True)
         yield Input(placeholder="Describe a task and press Enter", id="composer")
         yield Footer()
@@ -135,6 +146,8 @@ class SparkApp(App):
         self.query_one("#chat", RichLog).clear()
 
     def action_test_model(self) -> None:
+        if self._running:
+            return
         self.run_worker(self._test_model(), exclusive=True)
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
@@ -163,7 +176,9 @@ class SparkApp(App):
             chat.write(f"test FAIL: {result.error}")
 
     async def _approve(self, request: ApprovalRequest) -> ApprovalDecision:
-        return await self.push_screen_wait(ApprovalScreen(request, access_mode=self.cfg.agent.sandbox_mode))
+        return await self.push_screen_wait(
+            ApprovalScreen(request, access_mode=self.cfg.agent.sandbox_mode)
+        )
 
     async def _run_prompt(self, text: str) -> None:
         self._running = True
@@ -178,6 +193,8 @@ class SparkApp(App):
     def _render(self, event: TurnEvent, chat: RichLog) -> None:
         if event.type == "text_delta" and event.text:
             chat.write(event.text)
+        elif event.type == "reasoning_delta" and event.text:
+            chat.write(f"[thinking] {event.text}")
         elif event.type == "tool_start" and event.tool_call:
             chat.write(f"tool {event.tool_call.name} ...")
         elif event.type == "tool_end" and event.tool_call and event.result:
@@ -185,12 +202,30 @@ class SparkApp(App):
             if len(payload) > 500:
                 payload = payload[:500] + "..."
             chat.write(f"tool {event.tool_call.name}: {payload}")
+        elif event.type == "plan" and event.data and event.data.get("steps"):
+            steps = event.data["steps"]
+            chat.write("plan: " + " | ".join(str(s.get("title", "")) for s in steps))
+        elif event.type == "context" and event.data and event.data.get("usage"):
+            usage = event.data["usage"]
+            chat.write(f"context: {usage.get('used')}/{usage.get('limit')} tokens")
+        elif (
+            event.type == "compaction"
+            and event.data
+            and event.data.get("before_tokens")
+        ):
+            chat.write(
+                f"compacted: {event.data['before_tokens']} -> {event.data.get('after_tokens')} tokens"
+            )
         elif event.type == "turn_error":
             chat.write(f"error: {event.text}")
         elif event.type == "turn_end" and event.text:
             pass
 
     async def on_unmount(self) -> None:
+        try:
+            self.loop_engine.cancel()
+        except Exception:
+            pass
         if self.bridge:
             await self.bridge.close()
         self.store.close()

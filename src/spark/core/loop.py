@@ -7,11 +7,9 @@ from pathlib import Path
 
 from spark.config import SparkConfig
 from spark.core.context import build_messages, history_token_usage
-from spark.core.tokens import estimate_history_tokens, estimate_message_tokens
 from spark.models import (
     ApprovalDecision,
     ApprovalRequest,
-    ChatDelta,
     ChatMessage,
     ToolCall,
     ToolResult,
@@ -63,6 +61,7 @@ class AgentLoop:
         return events
 
     def iter_turn_sync(self, user_text: str, images=None):
+        self.cancelled = False
         agen = self.iter_turn(user_text, images=images)
         loop = asyncio.new_event_loop()
         try:
@@ -89,7 +88,9 @@ class AgentLoop:
         from spark.core.tokens import estimate_tokens
 
         schemas = self.registry.schemas()
-        return estimate_tokens(json.dumps(schemas, ensure_ascii=False)) if schemas else 0
+        return (
+            estimate_tokens(json.dumps(schemas, ensure_ascii=False)) if schemas else 0
+        )
 
     async def _maybe_compact(self):
         """Auto-compact: when usage crosses threshold, summarize old turns into one summary message."""
@@ -100,9 +101,16 @@ class AgentLoop:
         if usage["used"] <= limit * threshold or len(self.history) <= keep:
             return None
         boundary = len(self.history) - keep
-        while boundary < len(self.history) and self.history[boundary].role != "user":
-            boundary += 1
-        if boundary >= len(self.history) or boundary == 0:
+        if boundary <= 0:
+            return None
+        found = None
+        for i in range(boundary, len(self.history)):
+            if self.history[i].role == "user":
+                found = i
+                break
+        if found is not None:
+            boundary = found
+        if boundary >= len(self.history) or boundary <= 0:
             return None
         old_part = self.history[:boundary]
         if all(m.role == "summary" for m in old_part):
@@ -165,7 +173,6 @@ class AgentLoop:
         return "".join(parts).strip() or None
 
     async def iter_turn(self, user_text: str, images=None):
-        self.cancelled = False
         compacted = await self._maybe_compact()
         if compacted:
             yield TurnEvent(type="compaction", data=compacted)
@@ -180,7 +187,10 @@ class AgentLoop:
         user = ChatMessage(role="user", content=user_text, images=images)
         self.history.append(user)
         self.store.append_message(self.session_id, user)
-        if self.store.get_session(self.session_id) and self.store.get_session(self.session_id).get("title") == "untitled":
+        if (
+            self.store.get_session(self.session_id)
+            and self.store.get_session(self.session_id).get("title") == "untitled"
+        ):
             self.store.touch(self.session_id, title=user_text[:80])
 
         rounds = 0
@@ -191,11 +201,18 @@ class AgentLoop:
             if rounds >= self.cfg.agent.max_tool_rounds:
                 yield TurnEvent(type="turn_error", text="Reached max_tool_rounds")
                 return
-            messages = build_messages(workdir=self.workdir, cfg=self.cfg, history=self.history, memory_block=memory_block)
+            messages = build_messages(
+                workdir=self.workdir,
+                cfg=self.cfg,
+                history=self.history,
+                memory_block=memory_block,
+            )
             text_parts: list[str] = []
             tool_calls: list[ToolCall] = []
             try:
-                async for delta in self.provider.stream(messages, self.registry.schemas()):
+                async for delta in self.provider.stream(
+                    messages, self.registry.schemas()
+                ):
                     if self.cancelled:
                         yield TurnEvent(type="turn_error", text="Turn cancelled")
                         return
@@ -242,16 +259,30 @@ class AgentLoop:
             from spark.core.checkpoints import make_checkpoint_record
 
             recent_tools = [m.name for m in self.history[-12:] if m.role == "tool"]
-            if not any(name in {"write_file", "apply_patch", "run_shell", "notebook_edit"} for name in recent_tools):
+            if not any(
+                name in {"write_file", "apply_patch", "run_shell", "notebook_edit"}
+                for name in recent_tools
+            ):
                 return
             snapshot_id, files_hash = make_checkpoint_record(self.workdir)
-            last_user = next((m for m in reversed(self.history) if m.role == "user"), None)
-            label = (last_user.content or "")[:60].strip() if last_user else "checkpoint"
-            self.store.add_checkpoint(self.session_id, label, assistant_id, json.dumps({
-                "snapshot_id": snapshot_id,
-                "files_hash": files_hash,
-                "message_id": assistant_id,
-            }))
+            last_user = next(
+                (m for m in reversed(self.history) if m.role == "user"), None
+            )
+            label = (
+                (last_user.content or "")[:60].strip() if last_user else "checkpoint"
+            )
+            self.store.add_checkpoint(
+                self.session_id,
+                label,
+                assistant_id,
+                json.dumps(
+                    {
+                        "snapshot_id": snapshot_id,
+                        "files_hash": files_hash,
+                        "message_id": assistant_id,
+                    }
+                ),
+            )
         except Exception:
             pass
 
@@ -264,7 +295,15 @@ class AgentLoop:
             raise ValueError(f"checkpoint not found: {checkpoint_id}")
         meta = json.loads(record["snapshot_json"])
         files = restore_workdir(self.workdir, str(meta.get("snapshot_id") or ""))
-        removed = self.store.delete_messages_after(self.session_id, int(record["message_id"]))
+        removed = self.store.delete_messages_after(
+            self.session_id, int(record["message_id"])
+        )
+        try:
+            cid = int(record["message_id"])
+            if self.store.get_compact_from(self.session_id) > cid:
+                self.store.set_compact_from(self.session_id, 0)
+        except Exception:
+            pass
         self.history = self.store.load_messages(self.session_id)
         return {
             "checkpoint_id": checkpoint_id,
@@ -287,7 +326,9 @@ class AgentLoop:
             request = ApprovalRequest(tool_call=call, summary=summary, diff=diff)
             yield TurnEvent(type="approval_needed", approval=request, tool_call=call)
             if self.approver is None:
-                result = ToolResult(ok=False, payload={"error": "denied", "reason": "no approver"})
+                result = ToolResult(
+                    ok=False, payload={"error": "denied", "reason": "no approver"}
+                )
                 await self._persist_tool(call, message_id, result, "deny")
                 yield TurnEvent(type="tool_end", tool_call=call, result=result)
                 return
@@ -304,7 +345,11 @@ class AgentLoop:
             prompts: list[str] = []
             raw_tasks = call.arguments.get("tasks")
             if isinstance(raw_tasks, list):
-                prompts = [str(t.get("prompt") or "").strip() for t in raw_tasks if isinstance(t, dict)]
+                prompts = [
+                    str(t.get("prompt") or "").strip()
+                    for t in raw_tasks
+                    if isinstance(t, dict)
+                ]
                 prompts = [p for p in prompts if p]
             else:
                 prompt = str(call.arguments.get("prompt") or "").strip()
@@ -316,7 +361,12 @@ class AgentLoop:
                 summary_text = ""
                 error_text = ""
                 async for sub_event in self.registry.ctx.task_runner(prompts[0]):
-                    if sub_event.type in {"tool_start", "tool_end", "plan"}:
+                    if sub_event.type in {
+                        "tool_start",
+                        "tool_end",
+                        "plan",
+                        "approval_needed",
+                    }:
                         yield sub_event
                     elif sub_event.type == "turn_end":
                         summary_text = sub_event.text or ""
@@ -332,7 +382,12 @@ class AgentLoop:
                     prompts = prompts[:4]
                 summary_parts: list[str] = []
                 async for sub_event in self.registry.ctx.task_runner_parallel(prompts):
-                    if sub_event.type in {"tool_start", "tool_end", "plan"}:
+                    if sub_event.type in {
+                        "tool_start",
+                        "tool_end",
+                        "plan",
+                        "approval_needed",
+                    }:
                         yield sub_event
                     elif sub_event.type == "turn_end":
                         summary_parts.append(sub_event.text or "")
@@ -342,7 +397,9 @@ class AgentLoop:
         await self._persist_tool(call, message_id, result, approval_label)
         yield TurnEvent(type="tool_end", tool_call=call, result=result)
 
-    async def _persist_tool(self, call: ToolCall, message_id: int, result: ToolResult, approval: str) -> None:
+    async def _persist_tool(
+        self, call: ToolCall, message_id: int, result: ToolResult, approval: str
+    ) -> None:
         tool_msg = ChatMessage(
             role="tool",
             name=call.name,
@@ -351,18 +408,36 @@ class AgentLoop:
         )
         self.history.append(tool_msg)
         self.store.append_message(self.session_id, tool_msg)
-        self.store.append_tool_event(self.session_id, message_id, call.name, call.arguments, result, approval)
+        self.store.append_tool_event(
+            self.session_id, message_id, call.name, call.arguments, result, approval
+        )
+
+    def _make_sub_context(self) -> ToolContext:
+        sub_cfg = self.cfg.model_copy(deep=True)
+        sub_cfg.agent.max_tool_rounds = min(15, max(5, sub_cfg.agent.max_tool_rounds))
+        sub_ctx = ToolContext(sandbox=self.registry.ctx.sandbox, config=sub_cfg)
+        sub_ctx.mcp_call = self.registry.ctx.mcp_call
+        return sub_ctx
+
+    def _inherit_registry(self, sub_registry: ToolRegistry) -> None:
+        for schema in self.registry.schemas():
+            name = str(((schema.get("function") or {}).get("name")) or "")
+            if name.startswith("mcp__"):
+                sub_registry.add_mcp_schema(schema)
+        sub_registry.readonly_mcp |= set(self.registry.readonly_mcp)
 
     async def spawn_subtask(self, prompt: str):
         """Run a self-contained sub-agent with a fresh context; yield its events, final turn_end carries the summary."""
         from pathlib import Path as _Path
 
-        sub_cfg = self.cfg.model_copy(deep=True)
-        sub_cfg.agent.max_tool_rounds = min(15, max(5, sub_cfg.agent.max_tool_rounds))
-        sub_ctx = ToolContext(sandbox=self.registry.ctx.sandbox, config=sub_cfg)
+        sub_ctx = self._make_sub_context()
         sub_registry = ToolRegistry(sub_ctx)
+        self._inherit_registry(sub_registry)
+        sub_cfg = sub_ctx.config
         sub_store = SessionStore(_Path(":memory:"))
-        sid = sub_store.create_session(self.workdir, sub_cfg.provider.model, title="subtask")
+        sid = sub_store.create_session(
+            self.workdir, sub_cfg.provider.model, title="subtask"
+        )
         sub_loop = AgentLoop(
             workdir=self.workdir,
             cfg=sub_cfg,
@@ -377,7 +452,7 @@ class AgentLoop:
         final_text = ""
         try:
             async for event in sub_loop.iter_turn(prompt):
-                if event.type in {"tool_start", "tool_end", "plan"}:
+                if event.type in {"tool_start", "tool_end", "plan", "approval_needed"}:
                     yield event
                 elif event.type == "turn_end":
                     final_text = event.text or ""
@@ -403,37 +478,56 @@ class AgentLoop:
         summaries: dict[int, str] = {}
 
         async def runner(index: int, prompt: str) -> tuple[int, str]:
-            summary = await self._collect_subtask_events(index, prompt, queue)
-            return index, summary
+            try:
+                summary = await self._collect_subtask_events(index, prompt, queue)
+                return index, summary
+            except Exception as exc:
+                await queue.put((index, None))
+                return index, f"subtask failed: {exc}"
 
         tasks = [_asyncio.create_task(runner(i, p)) for i, p in enumerate(prompts)]
-        finished_count = 0
         pending = set(tasks)
-        while pending:
-            done, pending = await _asyncio.wait(pending, return_when=_asyncio.FIRST_COMPLETED)
-            for t in done:
-                index, summary = t.result()
-                summaries[index] = summary
-                finished_count += 1
-            # drain any queued live events
+
+        def drain():
             while not queue.empty():
                 _idx, event = queue.get_nowait()
                 if event is not None:
                     yield event
+
+        while pending or not queue.empty():
+            for ev in drain():
+                yield ev
+            if not pending:
+                break
+            done, pending = await _asyncio.wait(
+                pending, return_when=_asyncio.FIRST_COMPLETED
+            )
+            for t in done:
+                try:
+                    index, summary = t.result()
+                except Exception as exc:
+                    index, summary = -1, f"subtask failed: {exc}"
+                summaries[index] = summary
+        for ev in drain():
+            yield ev
         for i in range(len(prompts)):
             label = f"[子任务 {i + 1}]"
-            yield TurnEvent(type="turn_end", text=f"{label} {summaries.get(i, 'no output')}")
+            yield TurnEvent(
+                type="turn_end", text=f"{label} {summaries.get(i, 'no output')}"
+            )
 
     async def _collect_subtask_events(self, index: int, prompt: str, queue) -> str:
         """Run one subtask; stream its tool events into the queue tagged by index; return summary."""
         from pathlib import Path as _Path
 
-        sub_cfg = self.cfg.model_copy(deep=True)
-        sub_cfg.agent.max_tool_rounds = min(15, max(5, sub_cfg.agent.max_tool_rounds))
-        sub_ctx = ToolContext(sandbox=self.registry.ctx.sandbox, config=sub_cfg)
+        sub_ctx = self._make_sub_context()
         sub_registry = ToolRegistry(sub_ctx)
+        self._inherit_registry(sub_registry)
+        sub_cfg = sub_ctx.config
         sub_store = SessionStore(_Path(":memory:"))
-        sid = sub_store.create_session(self.workdir, sub_cfg.provider.model, title=f"subtask-{index}")
+        sid = sub_store.create_session(
+            self.workdir, sub_cfg.provider.model, title=f"subtask-{index}"
+        )
         sub_loop = AgentLoop(
             workdir=self.workdir,
             cfg=sub_cfg,
@@ -448,7 +542,7 @@ class AgentLoop:
         final_text = ""
         try:
             async for event in sub_loop.iter_turn(prompt):
-                if event.type in {"tool_start", "tool_end", "plan"}:
+                if event.type in {"tool_start", "tool_end", "plan", "approval_needed"}:
                     await queue.put((index, event))
                 elif event.type == "turn_end":
                     final_text = event.text or ""

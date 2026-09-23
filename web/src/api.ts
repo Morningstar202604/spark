@@ -130,6 +130,10 @@ export async function listSessions(): Promise<{ sessions: SessionRow[]; current:
   return readJson(await fetch("/api/sessions"))
 }
 
+export async function fetchHistory(): Promise<{ session_id: string; messages: HistoryMessage[] }> {
+  return readJson(await fetch("/api/history"))
+}
+
 export async function newSession(): Promise<Status> {
   const data = await readJson<{ status: Status }>(
     await fetch("/api/sessions/new", { method: "POST" }),

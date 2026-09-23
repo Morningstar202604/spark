@@ -135,7 +135,11 @@ def _load_toml(path: Path) -> dict[str, Any]:
         return {}
     with path.open("rb") as handle:
         data = tomllib.load(handle)
-    servers = data.pop("mcp", {}).get("servers", []) if isinstance(data.get("mcp"), dict) else data.pop("mcp_servers", [])
+    servers = (
+        data.pop("mcp", {}).get("servers", [])
+        if isinstance(data.get("mcp"), dict)
+        else data.pop("mcp_servers", [])
+    )
     if servers:
         data["mcp_servers"] = servers
     return data
@@ -152,6 +156,7 @@ def load_config(
 ) -> SparkConfig:
     raw: dict[str, Any] = {}
     chosen: Path | None = None
+    from_local_workdir = False
     candidates = []
     if config_path is not None:
         candidates.append(config_path)
@@ -161,7 +166,17 @@ def load_config(
         if candidate.exists():
             chosen = candidate
             raw = _load_toml(candidate)
+            from_local_workdir = (
+                candidate.name == ".spark.toml"
+                and candidate.parent == workdir.resolve()
+                if candidate.is_absolute()
+                else candidate.name == ".spark.toml"
+            )
             break
+    if from_local_workdir and isinstance(raw.get("agent"), dict):
+        agent_raw = raw["agent"]
+        agent_raw.pop("approval", None)
+        agent_raw.pop("sandbox_mode", None)
     try:
         cfg = SparkConfig.model_validate(raw)
     except Exception as exc:
@@ -202,16 +217,24 @@ def mask_secret(value: str | None) -> str:
     return value[:4] + "..." + value[-4:]
 
 
+def _toml_str(value: str) -> str:
+    return json.dumps(value if value is not None else "", ensure_ascii=False)
+
+
 def save_config(cfg: SparkConfig, path: Path | None = None) -> Path:
     path = path or default_config_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    key_line = f'api_key = "{cfg.provider.api_key}"\n' if cfg.provider.api_key else ""
+    key_line = (
+        f"api_key = {_toml_str(cfg.provider.api_key or '')}\n"
+        if cfg.provider.api_key
+        else ""
+    )
     mcp_blocks = []
     for server in cfg.mcp_servers:
         mcp_blocks.append(
             "[[mcp.servers]]\n"
-            f'name = "{server.name}"\n'
-            f'command = "{server.command}"\n'
+            f"name = {_toml_str(server.name)}\n"
+            f"command = {_toml_str(server.command)}\n"
             f"args = {json.dumps(server.args)}\n"
             f"readonly_tools = {json.dumps(server.readonly_tools)}\n"
         )
@@ -220,40 +243,54 @@ def save_config(cfg: SparkConfig, path: Path | None = None) -> Path:
     for prof in cfg.model_profiles:
         profile_blocks.append(
             "[[model_profiles]]\n"
-            f'id = "{prof.id}"\n'
-            f'name = "{prof.name}"\n'
-            f'provider = "{prof.provider}"\n'
-            f'base_url = "{prof.base_url}"\n'
-            f'model = "{prof.model}"\n'
-            f'api_key = "{prof.api_key}"\n'
+            f"id = {_toml_str(prof.id)}\n"
+            f"name = {_toml_str(prof.name)}\n"
+            f"provider = {_toml_str(prof.provider)}\n"
+            f"base_url = {_toml_str(prof.base_url)}\n"
+            f"model = {_toml_str(prof.model)}\n"
+            f"api_key = {_toml_str(prof.api_key)}\n"
         )
     profiles_section = ("\n" + "\n".join(profile_blocks)) if profile_blocks else ""
     memory_section = (
         f"\n[memory]\nenabled = {str(cfg.memory.enabled).lower()}\n"
         f"top_k = {cfg.memory.top_k}\ncapacity = {cfg.memory.capacity}\n"
-        f'embedding_model = "{cfg.memory.embedding_model}"\n'
+        f"embedding_model = {_toml_str(cfg.memory.embedding_model)}\n"
         f"auto_extract = {str(cfg.memory.auto_extract).lower()}\n"
     )
-    path.write_text(
-        f"""active_profile_id = "{cfg.active_profile_id}"
+    body = f"""active_profile_id = {_toml_str(cfg.active_profile_id)}
 [provider]
-name = "{cfg.provider.name}"
-base_url = "{cfg.provider.base_url}"
-model = "{cfg.provider.model}"
-api_key_env = "{cfg.provider.api_key_env}"
-{key_line}
-[agent]
-approval = "{cfg.agent.approval}"
+name = {_toml_str(cfg.provider.name)}
+base_url = {_toml_str(cfg.provider.base_url)}
+model = {_toml_str(cfg.provider.model)}
+api_key_env = {_toml_str(cfg.provider.api_key_env)}
+{key_line}[agent]
+approval = {_toml_str(cfg.agent.approval)}
 workdir_only = {str(cfg.agent.workdir_only).lower()}
+sandbox_mode = {_toml_str(cfg.agent.sandbox_mode)}
+protected_paths = {json.dumps(list(cfg.agent.protected_paths))}
 shell_timeout_sec = {cfg.agent.shell_timeout_sec}
 max_tool_rounds = {cfg.agent.max_tool_rounds}
 max_output_chars = {cfg.agent.max_output_chars}
+show_thinking = {str(cfg.agent.show_thinking).lower()}
+show_tools = {str(cfg.agent.show_tools).lower()}
+show_plan = {str(cfg.agent.show_plan).lower()}
+show_context = {str(cfg.agent.show_context).lower()}
+show_keywords = {str(cfg.agent.show_keywords).lower()}
+show_notices = {str(cfg.agent.show_notices).lower()}
 
 [context]
-agents_md = "{cfg.context.agents_md}"
+agents_md = {_toml_str(cfg.context.agents_md)}
 max_fragment_chars = {cfg.context.max_fragment_chars}
-history_budget_chars = {cfg.context.history_budget_chars}{memory_section}{mcp_section}{profiles_section}
-""",
-        encoding="utf-8",
-    )
+history_budget_chars = {cfg.context.history_budget_chars}
+max_context_tokens = {cfg.context.max_context_tokens}
+compact_threshold = {cfg.context.compact_threshold}
+keep_recent_messages = {cfg.context.keep_recent_messages}{memory_section}{mcp_section}{profiles_section}
+"""
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(body, encoding="utf-8")
+    os.replace(tmp, path)
+    try:
+        os.chmod(path, 0o600)
+    except OSError:
+        pass
     return path

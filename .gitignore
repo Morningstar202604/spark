@@ -181,3 +181,4 @@ web/.vite/
 *.lz
 *.lzma
 *.iso
+.aqg/

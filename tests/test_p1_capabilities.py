@@ -97,8 +97,11 @@ def test_auto_checkpoint_and_rollback_e2e(tmp_path: Path) -> None:
 
 
 def test_bg_start_output_kill(tmp_path: Path) -> None:
+    import sys
+
     sandbox = WorkdirSandbox(tmp_path, _cfg())
-    r = bg.bg_start_tool(sandbox, {"command": "echo started && sleep 30"})
+    command = f'echo started && "{sys.executable}" -c "import time; time.sleep(30)"'
+    r = bg.bg_start_tool(sandbox, {"command": command})
     assert r.ok, r.payload
     job_id = r.payload["job_id"]
     deadline = time.time() + 5

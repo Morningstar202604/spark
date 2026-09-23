@@ -23,7 +23,7 @@ export default function SessionSidebar({ open, sessions, current, showKeywords =
       {/* mobile overlay */}
       {open && <div className="fixed inset-0 z-20 bg-black/55 md:hidden" onClick={onClose} />}
       <aside
-        className={`fixed inset-y-0 left-0 z-30 flex w-64 flex-col border-r border-spark-line bg-[#0c1117] transition-transform duration-200 md:static md:translate-x-0 ${
+        className={`fixed inset-y-0 left-0 z-30 flex w-64 flex-col border-r border-spark-line bg-spark-side transition-transform duration-200 md:static md:translate-x-0 ${
           open ? "translate-x-0" : "-translate-x-full md:w-0 md:overflow-hidden md:border-r-0"
         }`}
       >
@@ -85,7 +85,7 @@ export default function SessionSidebar({ open, sessions, current, showKeywords =
                   </span>
                 </button>
                 {confirmId === s.id ? (
-                  <span className="absolute top-1.5 right-1.5 flex items-center gap-1 rounded-lg border border-red-900 bg-spark-bg px-1.5 py-1">
+                  <span className="absolute top-1.5 right-1.5 flex items-center gap-1 rounded-lg border border-spark-err/45 bg-spark-bg px-1.5 py-1">
                     <button
                       type="button"
                       title="确认删除"
@@ -94,7 +94,7 @@ export default function SessionSidebar({ open, sessions, current, showKeywords =
                         setConfirmId(null)
                         onDelete(s.id)
                       }}
-                      className="rounded p-1 text-[10px] font-bold text-spark-err transition-colors hover:bg-red-950"
+                      className="rounded p-1 text-[10px] font-bold text-spark-err transition-colors hover:bg-spark-err/12"
                     >
                       删除
                     </button>
@@ -119,7 +119,7 @@ export default function SessionSidebar({ open, sessions, current, showKeywords =
                     }}
                     title="删除会话"
                     aria-label="删除会话"
-                    className="absolute top-1.5 right-1.5 flex h-7 w-7 items-center justify-center rounded-lg text-spark-muted transition-all hover:bg-red-950 hover:text-spark-err active:scale-90 md:opacity-0 md:group-hover:opacity-100 md:focus-visible:opacity-100"
+                    className="absolute top-1.5 right-1.5 flex h-7 w-7 items-center justify-center rounded-lg text-spark-muted transition-all hover:bg-spark-err/12 hover:text-spark-err active:scale-90 md:opacity-0 md:group-hover:opacity-100 md:focus-visible:opacity-100"
                   >
                     <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden>
                       <path d="M18 6 6 18M6 6l12 12" />

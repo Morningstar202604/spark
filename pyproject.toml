@@ -28,7 +28,7 @@ spark = "spark.cli:app"
 where = ["src"]
 
 [tool.setuptools.package-data]
-spark = ["prompts/*.md", "web/*.html"]
+spark = ["prompts/*.md", "web/*.html", "web/dist/*", "web/dist/assets/*"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

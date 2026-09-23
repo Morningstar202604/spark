@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import re
 import subprocess
+from pathlib import Path
 
 from pydantic import BaseModel
 
@@ -10,11 +12,29 @@ from spark.sandbox import WorkdirSandbox
 MAX_OUTPUT = 12_000
 
 # Read-only commands the model may invoke directly.
-_ALLOWED = {"status", "diff", "log", "branch"}# Mutating commands exposed as explicit tools below.
+_ALLOWED = {
+    "status",
+    "diff",
+    "log",
+    "branch",
+}  # Mutating commands exposed as explicit tools below.
 _ALLOWED_MUTATING = {"add", "commit"}
 
 # Commands the model must never run through these tools.
-BLOCKED = {"push", "pull", "fetch", "rebase", "merge", "reset", "checkout", "clean", "cherry-pick", "revert", "tag", "stash"}
+BLOCKED = {
+    "push",
+    "pull",
+    "fetch",
+    "rebase",
+    "merge",
+    "reset",
+    "checkout",
+    "clean",
+    "cherry-pick",
+    "revert",
+    "tag",
+    "stash",
+}
 
 
 class GitStatusArgs(BaseModel):
@@ -53,16 +73,22 @@ def _clip(text: str) -> str:
     return text[:MAX_OUTPUT] + "\n...truncated..."
 
 
-def _run_git(sandbox: WorkdirSandbox, cwd_arg: str, args: list[str], timeout: int = 30) -> ToolResult:
+def _run_git(
+    sandbox: WorkdirSandbox, cwd_arg: str, args: list[str], timeout: int = 30
+) -> ToolResult:
     """Run git inside the sandbox-resolved repo dir and capture output."""
     try:
         cwd = sandbox.resolve(cwd_arg or ".")
     except Exception as exc:
         return ToolResult(ok=False, payload={"error": str(exc)})
     if not cwd.is_dir():
-        return ToolResult(ok=False, payload={"error": f"directory not found: {cwd_arg}"})
+        return ToolResult(
+            ok=False, payload={"error": f"directory not found: {cwd_arg}"}
+        )
     if not (cwd / ".git").exists():
-        return ToolResult(ok=False, payload={"error": f"not a git repository: {cwd_arg}"})
+        return ToolResult(
+            ok=False, payload={"error": f"not a git repository: {cwd_arg}"}
+        )
     try:
         completed = subprocess.run(
             ["git", *args],
@@ -70,6 +96,7 @@ def _run_git(sandbox: WorkdirSandbox, cwd_arg: str, args: list[str], timeout: in
             capture_output=True,
             text=True,
             timeout=timeout,
+            check=False,
         )
     except subprocess.TimeoutExpired:
         return ToolResult(ok=False, payload={"error": f"git {args[0]} timed out"})
@@ -91,9 +118,23 @@ def git_status(sandbox: WorkdirSandbox, args: GitStatusArgs) -> ToolResult:
     return _run_git(sandbox, args.path, ["status", "--short", "--branch"])
 
 
+_SAFE_REF = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/\-^~:\s]*$")
+
+
+def _validate_ref(ref: str) -> str | None:
+    if not ref or ref.startswith("-") or "\n" in ref or "\r" in ref or "\x00" in ref:
+        return f"invalid ref: {ref!r}"
+    if not _SAFE_REF.match(ref):
+        return f"invalid ref: {ref!r}"
+    return None
+
+
 def git_diff(sandbox: WorkdirSandbox, args: GitDiffArgs) -> ToolResult:
     cmd = ["diff"]
     if args.ref:
+        err = _validate_ref(args.ref)
+        if err:
+            return ToolResult(ok=False, payload={"error": err})
         cmd.append(args.ref)
     if args.staged:
         cmd.append("--staged")
@@ -118,6 +159,8 @@ def git_add(sandbox: WorkdirSandbox, args: GitAddArgs) -> ToolResult:
     if not paths:
         return ToolResult(ok=False, payload={"error": "paths required"})
     for p in paths:
+        if p.startswith("-") or ".." in Path(p).parts:
+            return ToolResult(ok=False, payload={"error": f"path rejected: {p}"})
         try:
             sandbox.resolve(p)
         except Exception as exc:
@@ -130,7 +173,9 @@ def git_commit(sandbox: WorkdirSandbox, args: GitCommitArgs) -> ToolResult:
     if not message:
         return ToolResult(ok=False, payload={"error": "message required"})
     if len(message) > 2000:
-        return ToolResult(ok=False, payload={"error": "message too long (max 2000 chars)"})
+        return ToolResult(
+            ok=False, payload={"error": "message too long (max 2000 chars)"}
+        )
     if args.add_all:
         pre = _run_git(sandbox, args.path, ["add", "-A"])
         if not pre.ok:

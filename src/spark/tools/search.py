@@ -5,6 +5,30 @@ import os
 import re
 from pathlib import Path
 
+
+def _glob_to_regex(pattern: str) -> re.Pattern[str]:
+    i = 0
+    out: list[str] = ["^"]
+    n = len(pattern)
+    while i < n:
+        if pattern.startswith("**/", i):
+            out.append("(?:[^/]+/)*")
+            i += 3
+        elif pattern.startswith("**", i):
+            out.append(".*")
+            i += 2
+        elif pattern[i] == "*":
+            out.append("[^/]*")
+            i += 1
+        elif pattern[i] == "?":
+            out.append("[^/]")
+            i += 1
+        else:
+            out.append(re.escape(pattern[i]))
+            i += 1
+    out.append("$")
+    return re.compile("".join(out))
+
 from pydantic import BaseModel
 
 from spark.models import ToolResult
@@ -64,6 +88,15 @@ def grep_tool(sandbox: WorkdirSandbox, args: GrepArgs) -> ToolResult:
                 continue
             file = dirpath / name
             try:
+                resolved = file.resolve()
+                resolved.relative_to(sandbox.root.resolve())
+            except (OSError, ValueError):
+                continue
+            try:
+                sandbox._check_protected(resolved)
+            except Exception:
+                continue
+            try:
                 if file.stat().st_size > 1_500_000:
                     continue
                 text = file.read_text(encoding="utf-8", errors="replace")
@@ -92,8 +125,8 @@ def glob_tool(sandbox: WorkdirSandbox, args: GlobArgs) -> ToolResult:
     if not base.exists():
         return ToolResult(ok=False, payload={"error": f"path not found: {args.path}"})
     pattern = args.pattern.strip().lstrip("/")
-    collapsed = pattern.replace("**/", "")
     max_results = max(1, min(500, args.max_results))
+    rx = _glob_to_regex(pattern) if "**" in pattern else None
     out: list[str] = []
     truncated = False
     for dirpath, filenames in _walk(base):
@@ -101,8 +134,18 @@ def glob_tool(sandbox: WorkdirSandbox, args: GlobArgs) -> ToolResult:
             break
         for name in filenames:
             file = dirpath / name
+            try:
+                resolved = file.resolve()
+                resolved.relative_to(base.resolve())
+            except (OSError, ValueError):
+                continue
             rel = file.relative_to(base).as_posix()
-            if fnmatch.fnmatch(rel, pattern) or fnmatch.fnmatch(rel, collapsed) or fnmatch.fnmatch(name, pattern):
+            matched = False
+            if rx is not None:
+                matched = bool(rx.match(rel)) or bool(rx.match(name))
+            else:
+                matched = fnmatch.fnmatch(rel, pattern) or fnmatch.fnmatch(name, pattern)
+            if matched:
                 out.append(file.relative_to(sandbox.root).as_posix())
                 if len(out) >= max_results:
                     truncated = True

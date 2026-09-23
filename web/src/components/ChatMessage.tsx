@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import Markdown from "./Markdown"
 import type { ToolCall } from "../types"
 
@@ -26,7 +26,7 @@ function looksLikeDiff(text: string): boolean {
 
 function ToolCallBlock({ name, call, result, ok }: { name: string; call: ToolCall; result?: unknown; ok?: boolean }) {
   const [open, setOpen] = useState(false)
-  const border = ok === undefined ? "border-spark-line" : ok ? "border-emerald-900/60" : "border-red-900/60"
+  const border = ok === undefined ? "border-spark-line" : ok ? "border-spark-ok/45" : "border-spark-err/45"
   const resultText = result === undefined ? "" : typeof result === "string" ? result : JSON.stringify(result, null, 2)
   const isDiff = name === "apply_patch" || looksLikeDiff(resultText)
   return (
@@ -37,7 +37,7 @@ function ToolCallBlock({ name, call, result, ok }: { name: string; call: ToolCal
         className="flex w-full items-center gap-2 px-3 py-2 text-left"
       >
         <span className={`text-[10px] transition-transform ${open ? "rotate-90" : ""} text-spark-muted`}>▶</span>
-        <span className="rounded bg-amber-950 px-1.5 py-0.5 font-mono text-[10px] font-bold text-amber-300">{name}</span>
+        <span className="rounded bg-spark-tool/15 px-1.5 py-0.5 font-mono text-[10px] font-bold text-spark-tool">{name}</span>
         <span className="truncate font-mono text-[11px] text-spark-muted">
           {typeof call.arguments === "object" && call.arguments !== null
             ? String((call.arguments as Record<string, unknown>).path || (call.arguments as Record<string, unknown>).command || JSON.stringify(call.arguments).slice(0, 60))
@@ -52,7 +52,7 @@ function ToolCallBlock({ name, call, result, ok }: { name: string; call: ToolCal
       {open && (
         <div className="border-t border-spark-line px-3 py-2">
           <div className="mb-1 text-[10px] tracking-wider text-spark-muted uppercase">参数</div>
-          <pre className="mb-2 overflow-auto rounded bg-[#0c1117] p-2 font-mono text-[11px] text-spark-muted whitespace-pre-wrap break-all">
+          <pre className="mb-2 overflow-auto rounded bg-spark-code p-2 font-mono text-[11px] text-spark-muted whitespace-pre-wrap break-all">
             {JSON.stringify(call.arguments, null, 2)}
           </pre>
           {resultText && (
@@ -61,7 +61,7 @@ function ToolCallBlock({ name, call, result, ok }: { name: string; call: ToolCal
               {isDiff ? (
                 <Markdown text={"```diff\n" + resultText.replace(/^"|"$/g, "") + "\n```"} />
               ) : (
-                <pre className="max-h-64 overflow-auto rounded bg-[#0c1117] p-2 font-mono text-[11px] whitespace-pre-wrap break-all text-spark-text">
+                <pre className="max-h-64 overflow-auto rounded bg-spark-code p-2 font-mono text-[11px] whitespace-pre-wrap break-all text-spark-text">
                   {resultText.slice(0, 4000)}
                 </pre>
               )}
@@ -74,6 +74,14 @@ function ToolCallBlock({ name, call, result, ok }: { name: string; call: ToolCal
 }
 
 export default function ChatMessage({ item }: { item: ChatItem }) {
+  const [copied, setCopied] = useState(false)
+  const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(
+    () => () => {
+      if (copyTimerRef.current) clearTimeout(copyTimerRef.current)
+    },
+    [],
+  )
   if (item.kind === "tool") {
     return <ToolCallBlock name={item.call?.name || "tool"} call={item.call!} result={item.result} ok={item.ok} />
   }
@@ -86,14 +94,13 @@ export default function ChatMessage({ item }: { item: ChatItem }) {
     )
   }
   const meta = roleMeta[item.role]
-  const [copied, setCopied] = useState(false)
   return (
     <div
       className={`group w-full max-w-4xl rounded-xl border px-4 py-3 ${
         item.role === "user"
-          ? "ml-auto w-fit max-w-[92%] border-blue-900/70 bg-blue-950/20"
+          ? "ml-auto w-fit max-w-[92%] border-spark-user/40 bg-spark-user/10"
           : item.role === "error"
-            ? "border-red-900 bg-red-950/20"
+            ? "border-spark-err/45 bg-spark-err/8"
             : "border-spark-line bg-spark-panel"
       }`}
     >
@@ -107,7 +114,8 @@ export default function ChatMessage({ item }: { item: ChatItem }) {
             onClick={() => {
               navigator.clipboard?.writeText(item.text)
               setCopied(true)
-              setTimeout(() => setCopied(false), 1200)
+              if (copyTimerRef.current) clearTimeout(copyTimerRef.current)
+              copyTimerRef.current = setTimeout(() => setCopied(false), 1200)
             }}
             className="ml-auto shrink-0 rounded px-1.5 py-0.5 text-[10px] text-spark-muted transition-opacity hover:bg-spark-line md:opacity-0 md:group-hover:opacity-100"
           >

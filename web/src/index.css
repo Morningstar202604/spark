@@ -11,7 +11,93 @@
   --color-spark-tool: #fbbf24;
   --color-spark-err: #f87171;
   --color-spark-ok: #34d399;
+  --color-spark-on-accent: #0f172a;
+  --color-spark-side: #0c1117;
+  --color-spark-code: #0c1117;
+  --logo-a: #0c1f1c;
+  --logo-b: #123b35;
+  --logo-stroke: #1d4a43;
+  --logo-glyph: #0c1f1c;
 }
+
+:root,
+[data-theme="dark"] {
+  color-scheme: dark;
+}
+
+[data-theme="light"] {
+  color-scheme: light;
+  --color-spark-bg: #f4f6f9;
+  --color-spark-panel: #ffffff;
+  --color-spark-line: #d7dee8;
+  --color-spark-text: #0f172a;
+  --color-spark-muted: #64748b;
+  --color-spark-accent: #0d9488;
+  --color-spark-user: #2563eb;
+  --color-spark-tool: #b45309;
+  --color-spark-err: #dc2626;
+  --color-spark-ok: #059669;
+  --color-spark-on-accent: #ffffff;
+  --color-spark-side: #e8eef5;
+  --color-spark-code: #f6f8fa;
+  --logo-a: #ccfbf1;
+  --logo-b: #f0fdfa;
+  --logo-stroke: #0d9488;
+  --logo-glyph: #0f766e;
+}
+
+/* Light-theme safety net for remaining hard-coded dark utilities */
+[data-theme="light"] .text-teal-950 { color: #ffffff; }
+[data-theme="light"] .bg-red-950 { background-color: #fef2f2; }
+[data-theme="light"] .bg-red-950\/20 { background-color: rgb(254 242 242 / 0.2); }
+[data-theme="light"] .bg-red-950\/40 { background-color: rgb(254 242 242 / 0.4); }
+[data-theme="light"] .bg-emerald-950\/40 { background-color: rgb(236 253 245 / 0.4); }
+[data-theme="light"] .bg-blue-950\/20 { background-color: rgb(37 99 235 / 0.08); }
+[data-theme="light"] .border-blue-900\/70 { border-color: rgb(29 78 216 / 0.35); }
+[data-theme="light"] .text-red-400 { color: #dc2626; }
+[data-theme="light"] .text-emerald-400 { color: #059669; }
+[data-theme="light"] .bg-red-500 { background-color: #dc2626; }
+[data-theme="light"] .bg-red-900 { background-color: #dc2626; }
+[data-theme="light"] .border-red-900 { border-color: rgb(220 38 38 / 0.45); }
+[data-theme="light"] .border-red-500 { border-color: #dc2626; }
+[data-theme="light"] .border-emerald-800 { border-color: rgb(5 150 105 / 0.45); }
+
+/* highlight.js: light base (github.css) + dark palette override */
+[data-theme="dark"] .hljs { color: #e6edf3; background-color: #0c1117; }
+[data-theme="dark"] .hljs-comment,
+[data-theme="dark"] .hljs-quote { color: #8b949e; font-style: italic; }
+[data-theme="dark"] .hljs-keyword,
+[data-theme="dark"] .hljs-selector-tag,
+[data-theme="dark"] .hljs-literal,
+[data-theme="dark"] .hljs-doctag,
+[data-theme="dark"] .hljs-formula { color: #ff7b72; }
+[data-theme="dark"] .hljs-string,
+[data-theme="dark"] .hljs-regexp,
+[data-theme="dark"] .hljs-addition,
+[data-theme="dark"] .hljs-attribute,
+[data-theme="dark"] .hljs-meta .hljs-string { color: #a5d6ff; }
+[data-theme="dark"] .hljs-title,
+[data-theme="dark"] .hljs-section,
+[data-theme="dark"] .hljs-name,
+[data-theme="dark"] .hljs-selector-id,
+[data-theme="dark"] .hljs-selector-class,
+[data-theme="dark"] .hljs-title.class_,
+[data-theme="dark"] .hljs-title.function_ { color: #d2a8ff; }
+[data-theme="dark"] .hljs-type,
+[data-theme="dark"] .hljs-built_in,
+[data-theme="dark"] .hljs-class .hljs-title { color: #ffa657; }
+[data-theme="dark"] .hljs-number,
+[data-theme="dark"] .hljs-symbol,
+[data-theme="dark"] .hljs-bullet,
+[data-theme="dark"] .hljs-variable,
+[data-theme="dark"] .hljs-template-variable,
+[data-theme="dark"] .hljs-link { color: #79c0ff; }
+[data-theme="dark"] .hljs-attr,
+[data-theme="dark"] .hljs-property { color: #79c0ff; }
+[data-theme="dark"] .hljs-meta { color: #8b949e; }
+[data-theme="dark"] .hljs-deletion { color: #ffa198; }
+[data-theme="dark"] .hljs-emphasis { font-style: italic; }
+[data-theme="dark"] .hljs-strong { font-weight: bold; }
 
 html, body, #root {
   height: 100%;

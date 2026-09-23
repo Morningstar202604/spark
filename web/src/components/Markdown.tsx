@@ -1,7 +1,7 @@
 import { memo } from "react"
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
-import "highlight.js/styles/github-dark.css"
+import "highlight.js/styles/github.css"
 import hljs from "highlight.js/lib/core"
 import bash from "highlight.js/lib/languages/bash"
 import python from "highlight.js/lib/languages/python"
@@ -38,7 +38,7 @@ function CodeBlock({ code, lang }: { code: string; lang: string }) {
   }
   return (
     <div className="my-2 overflow-hidden rounded-lg border border-spark-line">
-      <div className="flex items-center justify-between bg-[#0c1117] px-3 py-1 text-[10px] tracking-wider text-spark-muted uppercase">
+      <div className="flex items-center justify-between bg-spark-side px-3 py-1 text-[10px] tracking-wider text-spark-muted uppercase">
         <span>{lang || "text"}</span>
         <button
           type="button"
@@ -62,14 +62,14 @@ function CodeBlock({ code, lang }: { code: string; lang: string }) {
 function DiffBlock({ code }: { code: string }) {
   const lines = code.split("\n")
   return (
-    <pre className="my-2 overflow-auto rounded-lg border border-spark-line bg-[#0c1117] p-3 font-mono text-xs leading-relaxed">
+    <pre className="my-2 overflow-auto rounded-lg border border-spark-line bg-spark-code p-3 font-mono text-xs leading-relaxed">
       {lines.map((line, i) => {
         const cls = line.startsWith("+")
-          ? "text-emerald-400 bg-emerald-950/40"
+          ? "text-spark-ok bg-spark-ok/12"
           : line.startsWith("-")
-            ? "text-red-400 bg-red-950/40"
+            ? "text-spark-err bg-spark-err/12"
             : line.startsWith("@@")
-              ? "text-sky-400"
+              ? "text-spark-user"
               : "text-spark-muted"
         return (
           <div key={i} className={`px-1 ${cls}`}>
@@ -93,7 +93,7 @@ const Markdown = memo(function Markdown({ text }: { text: string }) {
             const isBlock = raw.includes("\n") || match
             if (!isBlock) {
               return (
-                <code className="rounded bg-[#0c1117] px-1.5 py-0.5 font-mono text-[0.85em] text-spark-accent" {...props}>
+                <code className="rounded bg-spark-code px-1.5 py-0.5 font-mono text-[0.85em] text-spark-accent" {...props}>
                   {raw}
                 </code>
               )
@@ -122,7 +122,7 @@ const Markdown = memo(function Markdown({ text }: { text: string }) {
             )
           },
           th({ children }) {
-            return <th className="border-b border-spark-line bg-[#0c1117] px-3 py-1.5 text-left font-bold">{children}</th>
+            return <th className="border-b border-spark-line bg-spark-side px-3 py-1.5 text-left font-bold">{children}</th>
           },
           td({ children }) {
             return <td className="border-b border-spark-line/50 px-3 py-1.5">{children}</td>

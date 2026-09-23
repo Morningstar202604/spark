@@ -9,8 +9,7 @@
 [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 [![Ruff](https://img.shields.io/badge/linter-ruff-5eead4.svg)]()
 [![TypeScript](https://img.shields.io/badge/TS-zero_errors-brightgreen)](web/)
-![Stars](https://img.shields.io/github/stars/badhope/spark?style=social)
-![Downloads](https://img.shields.io/github/downloads/badhope/spark/total)
+[![GitCode](https://img.shields.io/badge/GitCode-badhope%2Fspark-1e80ff)](https://gitcode.com/badhope/spark)
 
 **[文档](docs/ARCHITECTURE.md)** · **[配置参考](docs/CONFIGURATION.md)** · **[贡献指南](CONTRIBUTING.md)**
 

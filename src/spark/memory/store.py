@@ -1,9 +1,7 @@
 from __future__ import annotations
 
-import json
 import math
 import re
-import struct
 import time
 from array import array
 from pathlib import Path
@@ -153,28 +151,36 @@ class MemoryStore:
         self._conn.commit()
         return int(cur.lastrowid)
 
-    def update_content(self, memory_id: int, content: str, *, importance: float | None = None) -> None:
+    def update_content(
+        self,
+        memory_id: int,
+        content: str,
+        *,
+        importance: float | None = None,
+        embedding: list[float] | None = None,
+        embedding_model: str | None = None,
+    ) -> None:
         now = self._now()
-        if importance is None:
-            self._conn.execute(
-                "UPDATE memories SET content = ?, keywords = ?, updated_at = ? WHERE id = ?",
-                (content.strip()[:400], " ".join(tokenize(content)[:40]), now, memory_id),
-            )
-        else:
-            self._conn.execute(
-                "UPDATE memories SET content = ?, keywords = ?, importance = ?, updated_at = ? WHERE id = ?",
-                (
-                    content.strip()[:400],
-                    " ".join(tokenize(content)[:40]),
-                    max(0.0, min(10.0, float(importance))),
-                    now,
-                    memory_id,
-                ),
-            )
+        sets = ["content = ?", "keywords = ?", "updated_at = ?"]
+        params: list = [content.strip()[:400], " ".join(tokenize(content)[:40]), now]
+        if importance is not None:
+            sets.append("importance = ?")
+            params.append(max(0.0, min(10.0, float(importance))))
+        if embedding is not None:
+            sets.extend(["embedding = ?", "embedding_model = ?"])
+            params.append(pack_vector(embedding))
+            params.append(embedding_model)
+        params.append(memory_id)
+        self._conn.execute(
+            f"UPDATE memories SET {', '.join(sets)} WHERE id = ?",
+            params,
+        )
         self._conn.commit()
 
     def get(self, memory_id: int) -> MemoryRow | None:
-        row = self._conn.execute("SELECT * FROM memories WHERE id = ?", (memory_id,)).fetchone()
+        row = self._conn.execute(
+            "SELECT * FROM memories WHERE id = ?", (memory_id,)
+        ).fetchone()
         return MemoryRow(row) if row else None
 
     def archive(self, memory_id: int) -> None:
@@ -196,7 +202,9 @@ class MemoryStore:
         self._conn.commit()
 
     def all_active(self) -> list[MemoryRow]:
-        rows = self._conn.execute("SELECT * FROM memories WHERE status = 'active' ORDER BY id").fetchall()
+        rows = self._conn.execute(
+            "SELECT * FROM memories WHERE status = 'active' ORDER BY id"
+        ).fetchall()
         return [MemoryRow(r) for r in rows]
 
     def list_all(self, limit: int = 200) -> list[MemoryRow]:
@@ -228,7 +236,9 @@ class MemoryStore:
         boost = min(2.0, math.log2(1 + row.access_count))
         return min(10.0, row.importance + boost)
 
-    def score(self, row: MemoryRow, query_tokens: list[str], query_emb: list[float] | None) -> float:
+    def score(
+        self, row: MemoryRow, query_tokens: list[str], query_emb: list[float] | None
+    ) -> float:
         cfg_w = (0.5, 0.25, 0.15, 0.10)
         w_emb, w_kw, w_rec, w_imp = cfg_w
         if row.embedding is None or query_emb is None:
@@ -256,6 +266,8 @@ class MemoryStore:
         top_k: int | None = None,
         query_embedding: list[float] | None = None,
         min_score: float = 0.0,
+        source_session: str | None = None,
+        exclude_session: str | None = None,
     ) -> list[tuple[MemoryRow, float]]:
         top_k = top_k or self.cfg.top_k
         q_tokens = []
@@ -266,20 +278,43 @@ class MemoryStore:
                 q_tokens.append(t)
         results: list[tuple[MemoryRow, float]] = []
         for row in self.all_active():
+            if source_session is not None and row.source_session not in (
+                None,
+                source_session,
+            ):
+                continue
+            if exclude_session is not None and row.source_session == exclude_session:
+                continue
             s = self.score(row, q_tokens, query_embedding)
             if s > min_score:
                 results.append((row, s))
         results.sort(key=lambda pair: pair[1], reverse=True)
         return results[:top_k]
 
-    def enforce_capacity(self) -> int:
-        count = self._conn.execute("SELECT COUNT(*) AS n FROM memories WHERE status = 'active'").fetchone()["n"]
+    def enforce_capacity(self, *, stale_days: float = 180.0) -> int:
+        archived = 0
+        cutoff = self._now() - int(stale_days * 86400)
+        stale = self._conn.execute(
+            "SELECT id FROM memories WHERE status = 'active' AND last_accessed < ? AND importance < 7.0",
+            (cutoff,),
+        ).fetchall()
+        for row in stale:
+            self.archive(int(row["id"]))
+            archived += 1
+        count = self._conn.execute(
+            "SELECT COUNT(*) AS n FROM memories WHERE status = 'active'"
+        ).fetchone()["n"]
         overflow = int(count) - self.cfg.capacity
         if overflow <= 0:
-            return 0
+            return archived
         rows = self.all_active()
-        rows.sort(key=lambda r: self._importance_eff(r) * 0.6 + self._recency(r.last_accessed) * 0.4)
+        rows.sort(
+            key=lambda r: (
+                self._importance_eff(r) * 0.6 + self._recency(r.last_accessed) * 0.4
+            )
+        )
         victims = rows[:overflow]
         for row in victims:
             self.archive(row.id)
-        return len(victims)
+        archived += len(victims)
+        return archived

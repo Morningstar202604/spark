@@ -10,10 +10,11 @@ export default function ThinkingBlock({ text, active }: Props) {
 
   if (!text) return null
   return (
-    <div className="w-full max-w-4xl overflow-hidden rounded-xl border border-sky-900/50 bg-sky-950/20 text-xs">      <button
+    <div className="w-full max-w-4xl overflow-hidden rounded-xl border border-spark-user/35 bg-spark-user/8 text-xs">
+      <button
         type="button"
         onClick={() => setOpen(!open)}
-        className="flex w-full items-center gap-2 px-3 py-2 text-left text-sky-300"
+        className="flex w-full items-center gap-2 px-3 py-2 text-left text-spark-user"
       >
         <span className={`text-[10px] transition-transform ${open ? "rotate-90" : ""}`}>▶</span>
         {active ? (
@@ -21,10 +22,10 @@ export default function ThinkingBlock({ text, active }: Props) {
         ) : (
           <span className="font-bold">思考过程</span>
         )}
-        <span className="ml-auto text-[10px] text-sky-400/60">{text.length} 字</span>
+        <span className="ml-auto text-[10px] text-spark-muted">{text.length} 字</span>
       </button>
       {open && (
-        <div className="max-h-56 overflow-auto border-t border-sky-900/40 px-3 py-2 whitespace-pre-wrap break-words text-sky-200/70">
+        <div className="max-h-56 overflow-auto border-t border-spark-user/25 px-3 py-2 whitespace-pre-wrap break-words text-spark-text/75">
           {text}
         </div>
       )}

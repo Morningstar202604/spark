@@ -76,6 +76,8 @@ def read_notebook(sandbox: WorkdirSandbox, args: ReadNotebookArgs) -> ToolResult
 
 
 def notebook_edit(sandbox: WorkdirSandbox, args: NotebookEditArgs) -> ToolResult:
+    if not sandbox.write_allowed:
+        return ToolResult(ok=False, payload={"error": "notebook_edit is disabled: sandbox-only access mode"})
     try:
         path = sandbox.resolve(args.path)
         nb = _load(path)
@@ -91,14 +93,23 @@ def notebook_edit(sandbox: WorkdirSandbox, args: NotebookEditArgs) -> ToolResult
     old_source = _source_text(cell)
     cell["cell_type"] = new_type
     cell["source"] = args.new_source.splitlines(keepends=True)
-    if new_type == "code" and "outputs" not in cell:
-        cell["outputs"] = []
     cell.setdefault("metadata", {})
-    cell["execution_count"] = None
-    cell["outputs"] = [] if new_type == "code" else cell.get("outputs", [])
+    if new_type == "code":
+        cell["execution_count"] = None
+        cell["outputs"] = []
+    else:
+        cell.pop("execution_count", None)
+        cell.pop("outputs", None)
+    tmp = path.with_suffix(path.suffix + ".tmp")
     try:
-        path.write_text(json.dumps(nb, ensure_ascii=False, indent=1), encoding="utf-8")
+        tmp.write_text(json.dumps(nb, ensure_ascii=False, indent=1), encoding="utf-8")
+        tmp.replace(path)
     except Exception as exc:
+        if tmp.exists():
+            try:
+                tmp.unlink()
+            except OSError:
+                pass
         return ToolResult(ok=False, payload={"error": str(exc)})
     return ToolResult(
         ok=True,

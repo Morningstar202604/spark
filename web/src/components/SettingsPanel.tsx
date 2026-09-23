@@ -12,6 +12,7 @@ import {
   activateModelProfile,
 } from "../api"
 import MemorySection from "./MemorySection"
+import { applyTheme, getStoredTheme, type Theme } from "../theme"
 
 interface Props {
   status: Status | null
@@ -58,14 +59,20 @@ export default function SettingsPanel({ status, onClose, onSaved }: Props) {
   const [showProfileForm, setShowProfileForm] = useState(false)
   const [profileForm, setProfileForm] = useState({ id: "", name: "", provider: "openai_compat", base_url: "", model: "", api_key: "" })
   const [protectedText, setProtectedText] = useState("")
+  const [theme, setTheme] = useState<Theme>(() => getStoredTheme())
   const dirtyRef = useRef({ cfg: false, mcp: false, md: false })
+
+  function changeTheme(next: Theme) {
+    setTheme(next)
+    applyTheme(next)
+  }
 
   async function refreshProfiles() {
     try {
       const data = await listModelProfiles()
       setProfiles(data.profiles)
-    } catch {
-      /* ignore */
+    } catch (e) {
+      setNotice(`模型档案加载失败：${e instanceof Error ? e.message : String(e)}`)
     }
   }
 
@@ -82,10 +89,10 @@ export default function SettingsPanel({ status, onClose, onSaved }: Props) {
         }
         setProtectedText(data.agent.protected_paths?.join("\n") ?? "")
       })
-      .catch(() => undefined)
+      .catch((e) => setNotice(`配置加载失败：${e instanceof Error ? e.message : String(e)}`))
     fetchAgentsMd().then((d) => {
       if (!dirtyRef.current.md) setAgentsMd(d)
-    }).catch(() => undefined)
+    }).catch((e) => setNotice(`项目记忆加载失败：${e instanceof Error ? e.message : String(e)}`))
   }, [])
 
   function patchAgent(patch: Partial<FullConfig["agent"]>) {
@@ -110,8 +117,8 @@ export default function SettingsPanel({ status, onClose, onSaved }: Props) {
         setMcpRows(data.mcp_servers.map((s) => ({ ...s, args: [...s.args], readonly_tools: [...s.readonly_tools] })))
         setMcpErrors([])
       })
-      .catch(() => undefined)
-    fetchAgentsMd().then(setAgentsMd).catch(() => undefined)
+      .catch((e) => setNotice(`配置加载失败：${e instanceof Error ? e.message : String(e)}`))
+    fetchAgentsMd().then(setAgentsMd).catch((e) => setNotice(`项目记忆加载失败：${e instanceof Error ? e.message : String(e)}`))
   }
 
   async function handleSave() {
@@ -197,7 +204,7 @@ export default function SettingsPanel({ status, onClose, onSaved }: Props) {
               type="button"
               onClick={() => setTab(t.key)}
               className={`shrink-0 rounded-lg px-3 py-1.5 text-xs font-bold transition-colors ${
-                tab === t.key ? "bg-spark-accent text-teal-950" : "text-spark-muted hover:bg-spark-line hover:text-spark-text"
+                tab === t.key ? "bg-spark-accent text-spark-on-accent" : "text-spark-muted hover:bg-spark-line hover:text-spark-text"
               }`}
             >
               {t.label}
@@ -222,7 +229,7 @@ export default function SettingsPanel({ status, onClose, onSaved }: Props) {
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2 text-sm font-bold text-spark-text">
                           <span className="truncate">{p.name}</span>
-                          {p.active && <span className="shrink-0 rounded bg-spark-accent px-1.5 py-0.5 text-[10px] text-teal-950">使用中</span>}
+                          {p.active && <span className="shrink-0 rounded bg-spark-accent px-1.5 py-0.5 text-[10px] text-spark-on-accent">使用中</span>}
                         </div>
                         <div className="truncate text-xs text-spark-text">{p.model}</div>
                         <div className="truncate text-[11px] text-spark-muted">
@@ -249,7 +256,7 @@ export default function SettingsPanel({ status, onClose, onSaved }: Props) {
                                 setBusy(null)
                               }
                             }}
-                            className="flex-1 rounded-lg bg-spark-accent px-3 py-1.5 text-xs font-bold text-teal-950 hover:opacity-90 disabled:opacity-50 sm:flex-none"
+                            className="flex-1 rounded-lg bg-spark-accent px-3 py-1.5 text-xs font-bold text-spark-on-accent hover:opacity-90 disabled:opacity-50 sm:flex-none"
                           >
                             使用
                           </button>
@@ -286,7 +293,7 @@ export default function SettingsPanel({ status, onClose, onSaved }: Props) {
                               setBusy(null)
                             }
                           }}
-                          className="flex-1 rounded-lg bg-red-950 px-3 py-1.5 text-xs font-bold text-spark-err hover:opacity-80 disabled:opacity-50 sm:flex-none"
+                          className="flex-1 rounded-lg bg-spark-err/12 px-3 py-1.5 text-xs font-bold text-spark-err hover:opacity-80 disabled:opacity-50 sm:flex-none"
                         >
                           删除
                         </button>
@@ -396,7 +403,7 @@ export default function SettingsPanel({ status, onClose, onSaved }: Props) {
                           setBusy(null)
                         }
                       }}
-                      className="rounded-lg bg-spark-accent px-4 py-2 text-sm font-bold text-teal-950 hover:opacity-90 disabled:opacity-50"
+                      className="rounded-lg bg-spark-accent px-4 py-2 text-sm font-bold text-spark-on-accent hover:opacity-90 disabled:opacity-50"
                     >
                       保存档案
                     </button>
@@ -439,7 +446,7 @@ export default function SettingsPanel({ status, onClose, onSaved }: Props) {
               ) : (
                 <div
                   className={`rounded-lg border px-3 py-2 font-mono text-xs whitespace-pre-wrap ${
-                    probe.ok ? "border-emerald-800 text-spark-ok" : "border-red-900 text-spark-err"
+                    probe.ok ? "border-spark-ok/50 text-spark-ok" : "border-spark-err/50 text-spark-err"
                   }`}
                 >
                   {probe.ok ? `OK  ${probe.model}  ${probe.latency_ms}ms\n${probe.content}` : `FAIL  ${probe.error || "probe failed"}`}
@@ -476,7 +483,7 @@ export default function SettingsPanel({ status, onClose, onSaved }: Props) {
                   <input type="number" min={200} value={cfg?.agent.max_output_chars ?? 8000} onChange={(e) => patchAgent({ max_output_chars: Number(e.target.value) })} className={inputCls} />
                 </label>
               </div>
-              <button type="button" onClick={handleSave} disabled={busy !== null} className="self-start rounded-lg bg-spark-accent px-4 py-2 text-sm font-bold text-teal-950 hover:opacity-90 disabled:opacity-50">
+              <button type="button" onClick={handleSave} disabled={busy !== null} className="self-start rounded-lg bg-spark-accent px-4 py-2 text-sm font-bold text-spark-on-accent hover:opacity-90 disabled:opacity-50">
                 {busy === "save" ? "保存中…" : "保存设置"}
               </button>
             </div>
@@ -501,7 +508,7 @@ export default function SettingsPanel({ status, onClose, onSaved }: Props) {
                       className={`rounded-lg border p-3 text-left transition-colors ${
                         (cfg?.agent.sandbox_mode || "workspace") === opt.key
                           ? opt.key === "unrestricted"
-                            ? "border-red-500 bg-red-950/40"
+                            ? "border-spark-err bg-spark-err/12"
                             : "border-spark-accent bg-spark-accent/10"
                           : "border-spark-line bg-spark-bg hover:border-spark-muted"
                       }`}
@@ -513,7 +520,7 @@ export default function SettingsPanel({ status, onClose, onSaved }: Props) {
                             : "bg-spark-line"
                         }`} />
                         {opt.title}
-                        {opt.key === "unrestricted" && <span className="rounded bg-red-900 px-1.5 py-0.5 text-[10px] text-red-200">危险</span>}
+                        {opt.key === "unrestricted" && <span className="rounded bg-spark-err/20 px-1.5 py-0.5 text-[10px] text-spark-err">危险</span>}
                       </div>
                       <p className="mt-1 text-xs text-spark-muted">{opt.desc}</p>
                     </button>
@@ -549,7 +556,7 @@ export default function SettingsPanel({ status, onClose, onSaved }: Props) {
                   <p className="text-xs text-spark-muted">暂无探测数据。</p>
                 )}
               </div>
-              <button type="button" onClick={handleSave} disabled={busy !== null} className="self-start rounded-lg bg-spark-accent px-4 py-2 text-sm font-bold text-teal-950 hover:opacity-90 disabled:opacity-50">
+              <button type="button" onClick={handleSave} disabled={busy !== null} className="self-start rounded-lg bg-spark-accent px-4 py-2 text-sm font-bold text-spark-on-accent hover:opacity-90 disabled:opacity-50">
                 {busy === "save" ? "保存中…" : "保存权限设置"}
               </button>
             </div>
@@ -559,6 +566,37 @@ export default function SettingsPanel({ status, onClose, onSaved }: Props) {
 
           {tab === "display" && (
             <div className="flex flex-col gap-4">
+              <div className={sectionCls}>
+                <div className="text-xs font-bold tracking-widest text-spark-accent uppercase">主题颜色</div>
+                <p className="text-xs text-spark-muted">亮色 / 暗色界面，选择后立即生效并记住偏好。</p>
+                <div className="grid grid-cols-2 gap-2">
+                  {([
+                    { key: "light" as const, label: "亮色", desc: "浅色背景，适合日间" },
+                    { key: "dark" as const, label: "暗色", desc: "深色背景，适合夜间" },
+                  ]).map((opt) => (
+                    <button
+                      key={opt.key}
+                      type="button"
+                      onClick={() => changeTheme(opt.key)}
+                      className={`rounded-lg border p-3 text-left transition-colors ${
+                        theme === opt.key
+                          ? "border-spark-accent bg-spark-accent/10"
+                          : "border-spark-line bg-spark-bg hover:border-spark-muted"
+                      }`}
+                    >
+                      <div className="flex items-center gap-2 text-sm font-bold text-spark-text">
+                        <span
+                          className={`h-3 w-3 rounded-full border ${
+                            theme === opt.key ? "border-spark-accent bg-spark-accent" : "border-spark-line bg-spark-panel"
+                          }`}
+                        />
+                        {opt.label}
+                      </div>
+                      <p className="mt-1 text-xs text-spark-muted">{opt.desc}</p>
+                    </button>
+                  ))}
+                </div>
+              </div>
               <div className={sectionCls}>
                 <div className="text-xs font-bold tracking-widest text-spark-accent uppercase">前端展示开关</div>
                 <p className="text-xs text-spark-muted">控制聊天界面中各元素的显示与隐藏，保存后立即生效。</p>
@@ -585,7 +623,7 @@ export default function SettingsPanel({ status, onClose, onSaved }: Props) {
                   })}
                 </div>
               </div>
-              <button type="button" onClick={handleSave} disabled={busy !== null} className="self-start rounded-lg bg-spark-accent px-4 py-2 text-sm font-bold text-teal-950 hover:opacity-90 disabled:opacity-50">
+              <button type="button" onClick={handleSave} disabled={busy !== null} className="self-start rounded-lg bg-spark-accent px-4 py-2 text-sm font-bold text-spark-on-accent hover:opacity-90 disabled:opacity-50">
                 {busy === "save" ? "保存中…" : "保存展示设置"}
               </button>
             </div>
@@ -604,7 +642,7 @@ export default function SettingsPanel({ status, onClose, onSaved }: Props) {
                     </div>
                     <input value={row.args.join(" ")} onChange={(e) => patchMcp(i, { args: e.target.value.split(" ") })} placeholder="参数（空格分隔）" className={inputCls} />
                     <input value={row.readonly_tools.join(" ")} onChange={(e) => patchMcp(i, { readonly_tools: e.target.value.split(" ") })} placeholder="只读工具名（空格分隔，可空）" className={inputCls} />
-                    <button type="button" onClick={() => setMcpRows((rows) => rows.filter((_, idx) => idx !== i))} className="self-start rounded-lg bg-red-950 px-3 py-1.5 text-xs font-bold text-spark-err hover:opacity-80">
+                    <button type="button" onClick={() => setMcpRows((rows) => rows.filter((_, idx) => idx !== i))} className="self-start rounded-lg bg-spark-err/12 px-3 py-1.5 text-xs font-bold text-spark-err hover:opacity-80">
                       移除
                     </button>
                   </div>
@@ -612,7 +650,7 @@ export default function SettingsPanel({ status, onClose, onSaved }: Props) {
                 <button type="button" onClick={() => setMcpRows((rows) => [...rows, { name: "", command: "", args: [], readonly_tools: [] }])} className="self-start rounded-lg bg-spark-line px-3 py-1.5 text-xs font-bold text-spark-text hover:opacity-80">
                   + 添加服务器
                 </button>
-                {mcpErrors.length > 0 && <div className="rounded-lg border border-red-900 px-3 py-2 text-xs text-spark-err">{mcpErrors.join("\n")}</div>}
+                {mcpErrors.length > 0 && <div className="rounded-lg border border-spark-err/45 px-3 py-2 text-xs text-spark-err">{mcpErrors.join("\n")}</div>}
                 <button type="button" onClick={handleSave} disabled={busy !== null} className="self-start rounded-lg bg-spark-line px-4 py-2 text-sm font-bold text-spark-text hover:opacity-80 disabled:opacity-50">
                   {busy === "save" ? "保存中…" : "保存设置"}
                 </button>

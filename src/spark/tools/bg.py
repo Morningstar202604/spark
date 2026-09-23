@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import atexit
 import os
 import signal
 import subprocess
@@ -29,6 +30,9 @@ def attach_store(store) -> None:
         _STORE = store
 
 
+_PERSIST_ERRORS: list[str] = []
+
+
 def _persist_new(job: dict, cwd: str) -> None:
     with _STORE_LOCK:
         store = _STORE
@@ -36,8 +40,8 @@ def _persist_new(job: dict, cwd: str) -> None:
         return
     try:
         store.upsert_bg_job(job["id"], job["command"], cwd, job["started_at"])
-    except Exception:
-        pass
+    except Exception as exc:
+        _PERSIST_ERRORS.append(f"new:{job['id']}:{exc}")
 
 
 def _persist_state(job: dict) -> None:
@@ -52,8 +56,8 @@ def _persist_state(job: dict) -> None:
             finished_at=job["finished_at"],
             exit_code=job["exit_code"],
         )
-    except Exception:
-        pass
+    except Exception as exc:
+        _PERSIST_ERRORS.append(f"state:{job['id']}:{exc}")
 
 
 def _clip(text: str) -> str:
@@ -62,8 +66,25 @@ def _clip(text: str) -> str:
     return text[-MAX_BUFFER:]
 
 
+def _kill_all_running() -> None:
+    with JOBS_LOCK:
+        running = [j for j in JOBS.values() if j["finished_at"] is None]
+    for job in running:
+        try:
+            _kill_job(job)
+        except Exception:
+            pass
+
+
+atexit.register(_kill_all_running)
+
+
 def _start_background(sandbox: WorkdirSandbox, command: str, cwd: str | None) -> dict:
     cwd_path = sandbox.resolve(cwd or ".")
+    with JOBS_LOCK:
+        running_n = sum(1 for j in JOBS.values() if j["finished_at"] is None)
+        if running_n >= MAX_JOBS:
+            raise RuntimeError(f"too many running background jobs (max {MAX_JOBS})")
     job_id = uuid.uuid4().hex[:8]
     proc = subprocess.Popen(
         command,
@@ -99,15 +120,18 @@ def _start_background(sandbox: WorkdirSandbox, command: str, cwd: str | None) ->
     threading.Thread(target=reader, daemon=True, name=f"bg-job-{job_id}").start()
     with JOBS_LOCK:
         JOBS[job_id] = job
-        # keep at most MAX_JOBS finished jobs
         finished = [jid for jid, j in JOBS.items() if j["finished_at"] is not None]
-        for jid in finished[:-MAX_JOBS]:
+        finished.sort(key=lambda jid: JOBS[jid]["finished_at"] or 0)
+        excess = max(0, len(finished) - MAX_JOBS)
+        for jid in finished[:excess]:
             JOBS.pop(jid, None)
     _persist_new(job, str(cwd_path))
     return job
 
 
 def bg_start_tool(sandbox: WorkdirSandbox, args: dict) -> ToolResult:
+    if not sandbox.shell_allowed:
+        return ToolResult(ok=False, payload={"error": "bg_start is disabled: sandbox-only access mode"})
     command = str(args.get("command") or "").strip()
     if not command:
         return ToolResult(ok=False, payload={"error": "command required"})
@@ -118,7 +142,10 @@ def bg_start_tool(sandbox: WorkdirSandbox, args: dict) -> ToolResult:
         cwd_path = sandbox.resolve(str(args.get("cwd") or "."))
     except Exception as exc:
         return ToolResult(ok=False, payload={"error": str(exc)})
-    job = _start_background(sandbox, command, str(args.get("cwd") or "."))
+    try:
+        job = _start_background(sandbox, command, str(args.get("cwd") or "."))
+    except RuntimeError as exc:
+        return ToolResult(ok=False, payload={"error": str(exc)})
     return ToolResult(
         ok=True,
         payload={
@@ -178,19 +205,33 @@ def bg_output_tool(args: dict) -> ToolResult:
 def _kill_job(job: dict) -> None:
     """Kill the whole process group so children of `shell -c 'cmd'` die too."""
     proc = job["process"]
-    try:
-        os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
-    except (ProcessLookupError, PermissionError):
+    if os.name == "nt":
         try:
-            proc.terminate()
-        except ProcessLookupError:
+            subprocess.run(
+                ["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+                capture_output=True,
+                timeout=10,
+                check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired):
             pass
+    else:
+        try:
+            os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+        except (ProcessLookupError, PermissionError):
+            try:
+                proc.terminate()
+            except ProcessLookupError:
+                pass
     try:
         proc.wait(timeout=5)
     except subprocess.TimeoutExpired:
         try:
-            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
-        except (ProcessLookupError, PermissionError):
+            if os.name == "nt":
+                proc.kill()
+            else:
+                os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+        except (ProcessLookupError, PermissionError, OSError):
             try:
                 proc.kill()
             except ProcessLookupError:
@@ -210,10 +251,10 @@ def bg_kill_tool(args: dict) -> ToolResult:
         _kill_job(job)
     except Exception as exc:
         return ToolResult(ok=False, payload={"error": str(exc)})
-    # reflect the kill in memory + persisted record promptly
-    job["exit_code"] = job["process"].returncode if job["process"].poll() is not None else -15
-    if job["finished_at"] is None:
-        job["finished_at"] = time.time()
+    with JOBS_LOCK:
+        job["exit_code"] = job["process"].returncode if job["process"].poll() is not None else -15
+        if job["finished_at"] is None:
+            job["finished_at"] = time.time()
     _persist_state(job)
     return ToolResult(ok=True, payload={"job_id": job_id, "killed": True})
 

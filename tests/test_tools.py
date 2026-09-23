@@ -1,7 +1,16 @@
 from pathlib import Path
 
 from spark.sandbox import WorkdirSandbox
-from spark.tools.fs import ApplyPatchArgs, ListDirArgs, ReadFileArgs, WriteFileArgs, apply_patch, list_dir, read_file, write_file
+from spark.tools.fs import (
+    ApplyPatchArgs,
+    ListDirArgs,
+    ReadFileArgs,
+    WriteFileArgs,
+    apply_patch,
+    list_dir,
+    read_file,
+    write_file,
+)
 from spark.tools.shell import RunShellArgs, run_shell
 
 
@@ -43,7 +52,12 @@ def test_apply_patch_zero_and_many(tmp_path: Path) -> None:
 
 
 def test_shell_timeout(tmp_path: Path) -> None:
+    import sys
+
     box = WorkdirSandbox(tmp_path)
-    result = run_shell(box, RunShellArgs(command="sleep 2"), timeout_sec=1, max_output_chars=100)
+    command = f'"{sys.executable}" -c "import time; time.sleep(2)"'
+    result = run_shell(
+        box, RunShellArgs(command=command), timeout_sec=1, max_output_chars=100
+    )
     assert result.ok is False
     assert result.payload["error"] == "timeout"
