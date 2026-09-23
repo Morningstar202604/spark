@@ -20,7 +20,7 @@ export function applyTheme(theme: Theme): void {
     /* ignore */
   }
   const meta = document.querySelector('meta[name="theme-color"]')
-  if (meta) meta.setAttribute("content", theme === "light" ? "#f4f6f9" : "#0f1419")
+  if (meta) meta.setAttribute("content", theme === "light" ? "#fbf8f4" : "#14110f")
 }
 
 export function initTheme(): Theme {

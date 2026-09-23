@@ -50,7 +50,7 @@ def status_text(cfg: SparkConfig, session_id: str, workdir: str = "") -> str:
 def welcome_text(cfg: SparkConfig, workdir: str = "") -> str:
     marker, key_label = key_status(cfg)
     lines = [
-        "[bold]Spark[/bold] 本地编程智能体已就绪",
+        "[bold #ff7a3d]◆ Spark[/bold #ff7a3d] [dim]Ember[/dim] — 本地编程智能体",
         "",
         f"模型  {cfg.provider.model}",
         f"接口  {cfg.provider.base_url}",
@@ -80,7 +80,7 @@ def welcome_text(cfg: SparkConfig, workdir: str = "") -> str:
 
 
 def help_text() -> str:
-    lines = ["[bold]快捷键[/bold]", ""]
+    lines = ["[bold #ff7a3d]◆ Spark 使用帮助[/bold #ff7a3d]", ""]
     width = max(len(key) for key, _ in SHORTCUTS)
     lines += [f"  {key.ljust(width)}   {desc}" for key, desc in SHORTCUTS]
     lines += [

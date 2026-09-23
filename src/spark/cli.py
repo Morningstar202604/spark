@@ -23,6 +23,7 @@ from spark.errors import ConfigError, SparkError
 from spark.onboard import (
     SetupError,
     apply_setup,
+    banner,
     config_as_dict,
     ensure_skeleton,
     friendly_config_error,
@@ -33,6 +34,7 @@ from spark.onboard import (
     save,
     set_value,
     check_health,
+    version_line,
 )
 
 from spark.sandbox import WorkdirSandbox
@@ -44,7 +46,10 @@ app = typer.Typer(
     add_completion=False,
     invoke_without_command=True,
     no_args_is_help=False,
-    help="Spark local coding agent",
+    help="◆ Spark [Ember] — 本地编程智能体。新手从 spark init → spark doctor → spark web 开始。",
+    epilog=(
+        "常用流程：spark init 首次配置 · spark doctor 体检 · spark web 图形界面 · spark exec 脚本化"
+    ),
     context_settings={"allow_extra_args": True},
 )
 
@@ -365,9 +370,10 @@ def version_cmd() -> None:
     from importlib.metadata import PackageNotFoundError, version
 
     try:
-        typer.echo(f"spark {version('spark-agent')}")
+        detail = version("spark-agent")
     except PackageNotFoundError:
-        typer.echo("spark (development build)")
+        detail = "development build"
+    typer.echo(version_line(detail))
 
 
 @app.command("init")
@@ -394,6 +400,7 @@ def init_cmd(
     probe: bool = typer.Option(True, "--probe/--no-probe", help="保存后立即测试连通性"),
 ) -> None:
     """Interactive setup: write provider credentials and verify them."""
+    typer.echo(banner("首次配置向导"))
     try:
         workdir = Path.cwd()
         path = ensure_skeleton(config)
@@ -476,6 +483,7 @@ def doctor_cmd(
     as_json: bool = typer.Option(False, "--json", help="输出机器可读 JSON"),
 ) -> None:
     """Diagnose configuration and print actionable fixes."""
+    typer.echo(banner("配置体检"))
     try:
         resolved = workdir.resolve()
     except OSError as exc:

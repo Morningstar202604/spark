@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "spark-agent"
 version = "0.1.0"
-description = "Local terminal coding agent with a Codex-style loop"
+description = "Spark [Ember] — local-first coding agent with a Codex-style loop"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [

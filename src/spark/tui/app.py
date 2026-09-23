@@ -87,13 +87,16 @@ class ApprovalScreen(ModalScreen[ApprovalDecision]):
 
 class SparkApp(App):
     TITLE = "Spark"
+    SUB_TITLE = "Ember"
     CSS = """
-    #status { height: 1; color: cyan; }
+    Screen { background: #14110f; }
+    #status { height: 1; color: #ff7a3d; text-style: bold; }
     #toolbar { height: 3; }
     #chat { height: 1fr; }
     #composer { dock: bottom; }
-    #dialog { padding: 1 2; }
+    #dialog { padding: 1 2; background: #1c1815; }
     #help-body { height: 1fr; }
+    #title { color: #ff7a3d; text-style: bold; }
     """
     BINDINGS = [
         Binding("ctrl+c", "cancel_turn", "Cancel turn", show=True),

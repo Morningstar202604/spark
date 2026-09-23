@@ -1,25 +1,27 @@
-# Spark Agent
+# Spark · Ember
 
 <div align="center">
 
-一个**本地自托管**的 AI 编程 Agent，代码在你手，密钥在你手。
+<img src="brand/logo.svg" alt="Spark" width="300" />
 
-[![Python](https://img.shields.io/badge/Python-3.11+-blue.svg)](https://www.python.org/)
-[![Pytest](https://img.shields.io/badge/tests-92_passed-brightgreen)](tests/)
-[![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
-[![Ruff](https://img.shields.io/badge/linter-ruff-5eead4.svg)]()
-[![TypeScript](https://img.shields.io/badge/TS-zero_errors-brightgreen)](web/)
-[![GitCode](https://img.shields.io/badge/GitCode-badhope%2Fspark-1e80ff)](https://gitcode.com/badhope/spark)
+**本地自托管**的 AI 编程 Agent。代码在你手，密钥在你手。
+
+[![Python](https://img.shields.io/badge/Python-3.11+-e08b6a.svg)](https://www.python.org/)
+[![Pytest](https://img.shields.io/badge/tests-182_passed-5fb37a.svg)](tests/)
+[![License](https://img.shields.io/badge/license-MIT-e08b6a.svg)](LICENSE)
+[![Ruff](https://img.shields.io/badge/linter-ruff-ff7a3d.svg)]()
+[![TypeScript](https://img.shields.io/badge/TS-zero_errors-c9a227.svg)](web/)
+[![GitCode](https://img.shields.io/badge/GitCode-badhope%2Fspark-ff7a3d)](https://gitcode.com/badhope/spark)
 
 **[文档](docs/ARCHITECTURE.md)** · **[配置参考](docs/CONFIGURATION.md)** · **[贡献指南](CONTRIBUTING.md)**
 
 </div>
 
 ```
-       ⚡ 本地 · 可审计 · 长会话记忆 · 沙箱四档
+   ◆ 本地 · 可审计 · 长会话记忆 · 沙箱四档
 ```
 
-## 开箱即用
+## 三分钟上手
 
 ```bash
 # 1. 安装
@@ -28,18 +30,24 @@ cd spark
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
 
-# 2. 配置模型密钥（写进 ~/.spark/config.toml 或环境变量）
-cp .env.example .env.local
-# 填写 SPARK_API_KEY / SPARK_BASE_URL / SPARK_MODEL
+# 2. 首次配置（交互式，密钥不回显）
+spark init
 
-# 3. 启动 Web UI（推荐）
-spark web --approval full-auto --workdir /your/project
+# 3. 体检，确认一切正常
+spark doctor
+
+# 4. 启动图形界面（推荐新手）
+spark web --workdir /your/project
 # → http://localhost:8000
 ```
 
-**Web UI 特性：** SSE 流式渲染 · 计划卡片 · 工具审批流 · 多模型切换 · 上下文水位计 · 历史会话 · 一键回滚检查点 · 任务进度持久化 · 长期记忆搜索 · 多设备同步
+不想配命令行？直接编辑 `~/.spark/config.toml`，或用 `spark web` 在浏览器里填。
 
-**CLI 特性：** `spark exec` 无头执行 · `spark sessions` 会话管理 · `spark resume <id>` 恢复现场 · `spark test` 自测循环
+**Web UI 特性：** 亮/暗双主题 · SSE 流式渲染 · 计划卡片 · 工具审批流 · 上下文水位计 · 历史会话 · 一键回滚检查点 · 长期记忆搜索 · 长任务护栏（重复调用熔断 / token 预算）· 生命周期钩子
+
+**CLI 特性：** `spark init` 向导 · `spark doctor` 体检 · `spark config` 读写配置 · `spark exec` 无头执行 · `spark sessions` 会话管理 · `spark resume <id>` 恢复现场 · `spark test` 连通性自测
+
+**TUI 特性：** 欢迎面板 · `?` 帮助浮层 · 快捷键提示 · 中文化审批与错误指引
 
 ## 为什么用 Spark
 

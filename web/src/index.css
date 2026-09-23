@@ -1,23 +1,33 @@
 @import "tailwindcss";
 
+/* ==========================================================================
+   Spark brand — "Ember" identity
+   Warm charcoal + ember orange + bone white. The mark is a fissured block
+   holding a spark core, not a generic lightning bolt.
+   ========================================================================== */
+
 @theme {
-  --color-spark-bg: #0f1419;
-  --color-spark-panel: #161d26;
-  --color-spark-line: #243040;
-  --color-spark-text: #e7ecf3;
-  --color-spark-muted: #8b9bb4;
-  --color-spark-accent: #5eead4;
-  --color-spark-user: #93c5fd;
-  --color-spark-tool: #fbbf24;
-  --color-spark-err: #f87171;
-  --color-spark-ok: #34d399;
-  --color-spark-on-accent: #0f172a;
-  --color-spark-side: #0c1117;
-  --color-spark-code: #0c1117;
-  --logo-a: #0c1f1c;
-  --logo-b: #123b35;
-  --logo-stroke: #1d4a43;
-  --logo-glyph: #0c1f1c;
+  --color-spark-bg: #14110f;
+  --color-spark-panel: #1c1815;
+  --color-spark-line: #2e2721;
+  --color-spark-text: #f2ede7;
+  --color-spark-muted: #a39a90;
+  --color-spark-accent: #ff7a3d;
+  --color-spark-user: #7fa8d9;
+  --color-spark-tool: #d8a657;
+  --color-spark-err: #f4634a;
+  --color-spark-ok: #5fb37a;
+  --color-spark-on-accent: #1a0e07;
+  --color-spark-side: #17130f;
+  --color-spark-code: #100d0b;
+  --logo-a: #2a1a12;
+  --logo-b: #4a2415;
+  --logo-stroke: #7a3a1c;
+  --logo-glyph: #2a1a12;
+  --brand-radius: 0.75rem;
+  --brand-radius-sm: 0.5rem;
+  --brand-font: ui-sans-serif, system-ui, "Segoe UI", "Noto Sans SC", sans-serif;
+  --brand-mono: ui-monospace, SFMono-Regular, "Cascadia Code", Menlo, Consolas, monospace;
 }
 
 :root,
@@ -27,59 +37,59 @@
 
 [data-theme="light"] {
   color-scheme: light;
-  --color-spark-bg: #f4f6f9;
+  --color-spark-bg: #fbf8f4;
   --color-spark-panel: #ffffff;
-  --color-spark-line: #d7dee8;
-  --color-spark-text: #0f172a;
-  --color-spark-muted: #64748b;
-  --color-spark-accent: #0d9488;
-  --color-spark-user: #2563eb;
-  --color-spark-tool: #b45309;
-  --color-spark-err: #dc2626;
-  --color-spark-ok: #059669;
+  --color-spark-line: #e2d9ce;
+  --color-spark-text: #1f1a16;
+  --color-spark-muted: #6f655c;
+  --color-spark-accent: #c2410c;
+  --color-spark-user: #1d5fa8;
+  --color-spark-tool: #8a5a16;
+  --color-spark-err: #b4231a;
+  --color-spark-ok: #3f7a2e;
   --color-spark-on-accent: #ffffff;
-  --color-spark-side: #e8eef5;
-  --color-spark-code: #f6f8fa;
-  --logo-a: #ccfbf1;
-  --logo-b: #f0fdfa;
-  --logo-stroke: #0d9488;
-  --logo-glyph: #0f766e;
+  --color-spark-side: #f4efe8;
+  --color-spark-code: #f6f1ea;
+  --logo-a: #ffedd5;
+  --logo-b: #fed7aa;
+  --logo-stroke: #c2410c;
+  --logo-glyph: #7c2d12;
 }
 
-/* highlight.js: light base (github.css) + dark palette override */
-[data-theme="dark"] .hljs { color: #e6edf3; background-color: #0c1117; }
+/* highlight.js — warm Ember palette for dark mode */
+[data-theme="dark"] .hljs { color: #e8e0d6; background-color: #100d0b; }
 [data-theme="dark"] .hljs-comment,
-[data-theme="dark"] .hljs-quote { color: #8b949e; font-style: italic; }
+[data-theme="dark"] .hljs-quote { color: #8a7f74; font-style: italic; }
 [data-theme="dark"] .hljs-keyword,
 [data-theme="dark"] .hljs-selector-tag,
 [data-theme="dark"] .hljs-literal,
 [data-theme="dark"] .hljs-doctag,
-[data-theme="dark"] .hljs-formula { color: #ff7b72; }
+[data-theme="dark"] .hljs-formula { color: #ff8a5c; }
 [data-theme="dark"] .hljs-string,
 [data-theme="dark"] .hljs-regexp,
 [data-theme="dark"] .hljs-addition,
 [data-theme="dark"] .hljs-attribute,
-[data-theme="dark"] .hljs-meta .hljs-string { color: #a5d6ff; }
+[data-theme="dark"] .hljs-meta .hljs-string { color: #e3b778; }
 [data-theme="dark"] .hljs-title,
 [data-theme="dark"] .hljs-section,
 [data-theme="dark"] .hljs-name,
 [data-theme="dark"] .hljs-selector-id,
 [data-theme="dark"] .hljs-selector-class,
 [data-theme="dark"] .hljs-title.class_,
-[data-theme="dark"] .hljs-title.function_ { color: #d2a8ff; }
+[data-theme="dark"] .hljs-title.function_ { color: #d99a6c; }
 [data-theme="dark"] .hljs-type,
 [data-theme="dark"] .hljs-built_in,
-[data-theme="dark"] .hljs-class .hljs-title { color: #ffa657; }
+[data-theme="dark"] .hljs-class .hljs-title { color: #c9a227; }
 [data-theme="dark"] .hljs-number,
 [data-theme="dark"] .hljs-symbol,
 [data-theme="dark"] .hljs-bullet,
 [data-theme="dark"] .hljs-variable,
 [data-theme="dark"] .hljs-template-variable,
-[data-theme="dark"] .hljs-link { color: #79c0ff; }
+[data-theme="dark"] .hljs-link { color: #e08b6a; }
 [data-theme="dark"] .hljs-attr,
-[data-theme="dark"] .hljs-property { color: #79c0ff; }
-[data-theme="dark"] .hljs-meta { color: #8b949e; }
-[data-theme="dark"] .hljs-deletion { color: #ffa198; }
+[data-theme="dark"] .hljs-property { color: #c98a63; }
+[data-theme="dark"] .hljs-meta { color: #8a7f74; }
+[data-theme="dark"] .hljs-deletion { color: #f4634a; }
 [data-theme="dark"] .hljs-emphasis { font-style: italic; }
 [data-theme="dark"] .hljs-strong { font-weight: bold; }
 
@@ -88,7 +98,7 @@ html, body, #root {
   margin: 0;
   background: var(--color-spark-bg);
   color: var(--color-spark-text);
-  font-family: ui-sans-serif, system-ui, sans-serif;
+  font-family: var(--brand-font);
   overflow-x: hidden;
 }
 

@@ -14,3 +14,4 @@
 2026-09-24 | agent | 从 opencode.json 的 agnes-api provider 恢复密钥与 base_url 到 spark 配置 | 测试覆盖真实配置导致密钥丢失，opencode 配置是同一密钥来源 | user-2026-09-24 | -
 2026-09-24 | agent | 新增 spark init/doctor/config/version 四个面向新手的命令，错误提示改为可操作指引 | 用户要求"面对普通人友好"；原本缺密钥只报环境变量名，新人无从下手 | worktree:onboarding | -
 2026-09-24 | agent | TUI 增加欢迎面板、空状态任务示例、? 帮助浮层、密钥状态指示、中文审批与错误提示 | TUI 原本只有一个输入框和 Test model 按钮，无引导 | worktree:onboarding | -
+2026-09-24 | agent | 品牌升级为 "Spark · Ember"：暖炭黑 + 余烬橙 + 骨白，标志改为裂口方块内火花核（弃通用闪电） | 用户要求打造独特品牌并全面使用；原青绿渐变与市面 AI 产品高度同质 | user-2026-09-24 | -

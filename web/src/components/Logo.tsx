@@ -3,36 +3,35 @@ export default function Logo({ size = 26, withWordmark = true }: { size?: number
     <span className="flex items-center gap-2">
       <svg width={size} height={size} viewBox="0 0 32 32" fill="none" aria-hidden>
         <defs>
-          <linearGradient id="spark-bg" x1="0" y1="0" x2="32" y2="32" gradientUnits="userSpaceOnUse">
+          <linearGradient id="spark-shell" x1="2" y1="2" x2="30" y2="30" gradientUnits="userSpaceOnUse">
             <stop stopColor="var(--logo-a)" />
             <stop offset="1" stopColor="var(--logo-b)" />
           </linearGradient>
-          <linearGradient id="spark-g" x1="6" y1="4" x2="26" y2="28" gradientUnits="userSpaceOnUse">
-            <stop stopColor="#99f6e4" />
-            <stop offset="0.55" stopColor="#5eead4" />
-            <stop offset="1" stopColor="#2dd4bf" />
+          <linearGradient id="spark-core" x1="10" y1="9" x2="23" y2="24" gradientUnits="userSpaceOnUse">
+            <stop stopColor="#ffd9a8" />
+            <stop offset="0.45" stopColor="#ff9d4f" />
+            <stop offset="1" stopColor="#ff6a1f" />
           </linearGradient>
-          <radialGradient id="spark-glow" cx="0.5" cy="0.42" r="0.62">
-            <stop stopColor="#5eead4" stopOpacity="0.38" />
-            <stop offset="1" stopColor="#5eead4" stopOpacity="0" />
+          <radialGradient id="spark-heat" cx="0.5" cy="0.5" r="0.5">
+            <stop stopColor="#ff8a3d" stopOpacity="0.45" />
+            <stop offset="1" stopColor="#ff8a3d" stopOpacity="0" />
           </radialGradient>
-          <filter id="spark-soft" x="-40%" y="-40%" width="180%" height="180%">
-            <feGaussianBlur stdDeviation="0.9" result="b" />
-            <feMerge>
-              <feMergeNode in="b" />
-              <feMergeNode in="SourceGraphic" />
-            </feMerge>
-          </filter>
         </defs>
-        <rect x="0.75" y="0.75" width="30.5" height="30.5" rx="9" fill="url(#spark-bg)" stroke="var(--logo-stroke)" strokeWidth="1.5" />
-        <rect x="0.75" y="0.75" width="30.5" height="30.5" rx="9" fill="url(#spark-glow)" />
+        <rect x="1" y="1" width="30" height="30" rx="9" fill="url(#spark-shell)" stroke="var(--logo-stroke)" strokeWidth="1.5" />
+        <rect x="1" y="1" width="30" height="30" rx="9" fill="url(#spark-heat)" />
         <path
-          d="M18.6 5.6 L9.9 17.3 h4.5 l-1.8 9.1 8.9-12.1 h-4.7 l1.3-8.7 z"
-          fill="url(#spark-g)"
+          d="M9.2 6.6 L9.2 14.1 L12.6 11.4 M22.8 25.4 L22.8 17.9 L19.4 20.6"
+          stroke="var(--logo-stroke)"
+          strokeWidth="1.3"
+          strokeLinecap="round"
+          opacity="0.85"
+        />
+        <path
+          d="M18.2 8.6 L11.6 17.4 h3.9 l-1.4 6.6 6.6-8.9 h-3.9 l1.4-6.5 z"
+          fill="url(#spark-core)"
           stroke="var(--logo-glyph)"
-          strokeWidth="0.8"
+          strokeWidth="0.7"
           strokeLinejoin="round"
-          filter="url(#spark-soft)"
         />
       </svg>
       {withWordmark && (

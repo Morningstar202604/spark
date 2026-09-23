@@ -57,6 +57,18 @@ class SetupError(Exception):
     pass
 
 
+BRAND = "◆ Spark"
+TAGLINE = "本地编程智能体 · 代码在你手，密钥在你手"
+
+
+def banner(title: str) -> str:
+    return f"{BRAND} [Ember] — {title}"
+
+
+def version_line(detail: str) -> str:
+    return f"{BRAND} {detail}\n  {TAGLINE}"
+
+
 def config_target_path(config: Path | None) -> Path:
     return config or (default_home() / "config.toml")
 
