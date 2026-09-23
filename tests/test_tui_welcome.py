@@ -1,0 +1,126 @@
+from __future__ import annotations
+
+import pytest
+
+from spark.config import SparkConfig
+from spark.tui.welcome import (
+    error_hint,
+    help_text,
+    key_status,
+    status_text,
+    welcome_text,
+)
+
+
+def make_cfg(**kwargs) -> SparkConfig:
+    cfg = SparkConfig()
+    cfg.provider.name = "openai_compat"
+    cfg.provider.model = "demo-model"
+    cfg.provider.base_url = "https://example.invalid/v1"
+    for key, value in kwargs.items():
+        section, field = key.split("__")
+        target = getattr(cfg, section)
+        setattr(target, field, value)
+    return cfg
+
+
+def test_key_status_marks_configured_key() -> None:
+    cfg = make_cfg(provider__api_key="sk-abcdefghijklmnop")
+    marker, label = key_status(cfg)
+    assert marker == "OK"
+    assert "sk-a" in label
+    assert "sk-abcdefghijklmnop" not in label
+
+
+def test_key_status_flags_missing_key(monkeypatch) -> None:
+    monkeypatch.delenv("SPARK_API_KEY", raising=False)
+    monkeypatch.delenv("SPARK_KEY", raising=False)
+    cfg = make_cfg(provider__api_key=None)
+    marker, label = key_status(cfg)
+    assert marker == "X"
+    assert "spark" in label.lower() or "?" in label
+
+
+def test_key_status_reads_env(monkeypatch) -> None:
+    monkeypatch.setenv("SPARK_API_KEY", "sk-from-env-1234")
+    cfg = make_cfg(provider__api_key=None)
+    marker, _ = key_status(cfg)
+    assert marker == "OK"
+
+
+def test_key_status_flags_mock_provider() -> None:
+    cfg = SparkConfig()
+    cfg.provider.name = "mock"
+    marker, label = key_status(cfg)
+    assert marker == "!"
+    assert "mock" in label.lower()
+
+
+def test_status_text_lists_core_facts() -> None:
+    text = status_text(make_cfg(provider__api_key="sk-abcdefghijkl"), "sess-1234")
+    assert "demo-model" in text
+    assert "example.invalid" in text
+    assert "sess-12" in text
+
+
+def test_welcome_contains_examples_and_shortcut_hint() -> None:
+    text = welcome_text(make_cfg(provider__api_key="sk-abcdefghijkl"))
+    assert "可以这样说" in text
+    assert "?" in text
+    assert "demo-model" in text
+
+
+def test_welcome_warns_when_key_missing(monkeypatch) -> None:
+    monkeypatch.delenv("SPARK_API_KEY", raising=False)
+    text = welcome_text(make_cfg(provider__api_key=None))
+    assert "spark init" in text
+
+
+def test_help_text_lists_commands_and_shortcuts() -> None:
+    text = help_text()
+    for expected in ("Ctrl+T", "spark web", "spark doctor", "spark init"):
+        assert expected in text
+
+
+def test_error_hint_covers_common_failures() -> None:
+    assert "spark init" in error_hint("Missing User API Key")
+    assert "base_url" in error_hint("connection timeout")
+    assert "max_repeat_calls" in error_hint("Circuit breaker: tool x repeated")
+    assert "max_turn_tokens" in error_hint("Token budget exceeded for this turn")
+    assert "doctor" in error_hint("something odd happened")
+
+
+@pytest.mark.asyncio
+async def test_tui_mounts_and_opens_help_without_crashing(tmp_path) -> None:
+    from spark.providers.mock import MockProvider
+    from spark.sandbox import WorkdirSandbox
+    from spark.store import SessionStore
+    from spark.tools.registry import ToolContext, ToolRegistry
+    from spark.tui.app import HelpScreen, SparkApp
+
+    cfg = make_cfg(provider__api_key="sk-abcdefghijkl")
+    store = SessionStore(tmp_path / "tui.db")
+    ctx = ToolContext(sandbox=WorkdirSandbox(tmp_path), config=cfg)
+    app = SparkApp(
+        workdir=tmp_path,
+        cfg=cfg,
+        store=store,
+        session_id="session-under-test",
+        provider=MockProvider(),
+        registry=ToolRegistry(ctx),
+        bridge=None,
+    )
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        chat = app.query_one("#chat")
+        rendered = "\n".join(str(line) for line in chat.lines)
+        assert rendered.strip(), "welcome panel should render"
+        assert "spark init" in rendered or "可以这样说" in rendered
+        assert any(binding.key == "question_mark" for binding in app.BINDINGS)
+        app.action_toggle_help()
+        await pilot.pause()
+        assert isinstance(app.screen, HelpScreen)
+        await pilot.press("escape")
+        await pilot.pause()
+        assert not isinstance(app.screen, HelpScreen)
+    store.close()

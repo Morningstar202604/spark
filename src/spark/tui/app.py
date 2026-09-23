@@ -5,6 +5,7 @@ from pathlib import Path
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
+from textual.css.query import NoMatches
 from textual.screen import ModalScreen
 from textual.widgets import Button, Footer, Header, Input, RichLog, Static
 
@@ -14,8 +15,35 @@ from spark.models import ApprovalDecision, ApprovalRequest, TurnEvent
 from spark.providers.base import Provider
 from spark.providers.probe import probe_provider
 from spark.store import SessionStore
+from spark.tui.welcome import error_hint, help_text, status_text, welcome_text
 from spark.tools.mcp_bridge import McpBridge
 from spark.tools.registry import ToolRegistry
+
+
+class HelpScreen(ModalScreen[None]):
+    def compose(self) -> ComposeResult:
+        yield Vertical(
+            Static("使用帮助", id="title"),
+            RichLog(id="help-body", wrap=True, markup=True),
+            Horizontal(Button("关闭 (Esc)", id="close", variant="primary")),
+            id="dialog",
+        )
+
+    def on_mount(self) -> None:
+        self.call_after_refresh(self._fill_body)
+
+    def _fill_body(self) -> None:
+        try:
+            self.query_one("#help-body", RichLog).write(help_text())
+        except NoMatches:
+            pass
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        self.dismiss(None)
+
+    def on_key(self, event) -> None:
+        if event.key in {"escape", "question_mark"}:
+            self.dismiss(None)
 
 
 class ApprovalScreen(ModalScreen[ApprovalDecision]):
@@ -29,14 +57,14 @@ class ApprovalScreen(ModalScreen[ApprovalDecision]):
     def compose(self) -> ComposeResult:
         yield Vertical(
             Static(
-                f"Approve {self.request.tool_call.name}?  [access={self.access_mode}]",
+                f"是否允许执行 {self.request.tool_call.name}？  [访问级别={self.access_mode}]",
                 id="title",
             ),
             RichLog(id="detail", wrap=True),
             Horizontal(
-                Button("Allow", id="allow", variant="success"),
-                Button("Deny", id="deny", variant="error"),
-                Button("Allow always", id="always", variant="primary"),
+                Button("允许", id="allow", variant="success"),
+                Button("拒绝", id="deny", variant="error"),
+                Button("始终允许", id="always", variant="primary"),
             ),
             id="dialog",
         )
@@ -58,18 +86,21 @@ class ApprovalScreen(ModalScreen[ApprovalDecision]):
 
 
 class SparkApp(App):
+    TITLE = "Spark"
     CSS = """
     #status { height: 1; color: cyan; }
     #toolbar { height: 3; }
     #chat { height: 1fr; }
     #composer { dock: bottom; }
     #dialog { padding: 1 2; }
+    #help-body { height: 1fr; }
     """
     BINDINGS = [
         Binding("ctrl+c", "cancel_turn", "Cancel turn", show=True),
         Binding("ctrl+d", "quit", "Quit", show=True),
         Binding("ctrl+l", "clear_chat", "Clear view", show=True),
         Binding("ctrl+t", "test_model", "Test model", show=True),
+        Binding("question_mark", "toggle_help", "Help", show=True),
     ]
 
     def __init__(
@@ -108,27 +139,29 @@ class SparkApp(App):
         yield Header()
         yield Static(self._status_text(), id="status")
         yield Horizontal(
-            Button("Test model", id="test-model", variant="primary"), id="toolbar"
+            Button("Test model", id="test-model", variant="primary"),
+            Button("Help (?)", id="help", variant="default"),
+            id="toolbar",
         )
-        yield RichLog(id="chat", wrap=True, highlight=True)
-        yield Input(placeholder="Describe a task and press Enter", id="composer")
+        yield RichLog(id="chat", wrap=True, highlight=True, markup=True)
+        yield Input(
+            placeholder="Describe a task and press Enter (? for help)", id="composer"
+        )
         yield Footer()
 
     def _status_text(self) -> str:
-        return (
-            f"model={self.cfg.provider.model}  "
-            f"provider={self.cfg.provider.name}  "
-            f"base={self.cfg.provider.base_url}  "
-            f"approval={self.cfg.agent.approval}  "
-            f"access={self.cfg.agent.sandbox_mode}  "
-            f"session={self.session_id}"
-        )
+        return status_text(self.cfg, self.session_id, str(self.workdir))
 
     def on_mount(self) -> None:
         chat = self.query_one("#chat", RichLog)
+        chat.write(welcome_text(self.cfg, str(self.workdir)))
+        restored = 0
         for msg in self.loop_engine.history:
             if msg.role in {"user", "assistant"} and msg.content:
                 chat.write(f"{msg.role}: {msg.content}")
+                restored += 1
+        if restored:
+            chat.write(f"（已恢复 {restored} 条历史消息）")
         if self.initial_prompt:
             self.run_worker(self._run_prompt(self.initial_prompt), exclusive=True)
 
@@ -153,10 +186,18 @@ class SparkApp(App):
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "test-model":
             self.action_test_model()
+        elif event.button.id == "help":
+            self.action_toggle_help()
+
+    def action_toggle_help(self) -> None:
+        if isinstance(self.screen, HelpScreen):
+            self.pop_screen()
+        else:
+            self.push_screen(HelpScreen())
 
     async def _test_model(self) -> None:
         chat = self.query_one("#chat", RichLog)
-        chat.write("testing custom model...")
+        chat.write("正在测试模型连通性…")
         try:
             key = require_api_key(self.cfg) or ""
             result = await probe_provider(
@@ -166,14 +207,18 @@ class SparkApp(App):
                 rounds=2,
             )
         except Exception as exc:
-            chat.write(f"test FAIL: {exc}")
+            chat.write(f"[red]测试失败[/red] {exc}")
+            chat.write(f"[yellow]{error_hint(str(exc))}[/yellow]")
             return
         if result.ok:
-            chat.write(f"test OK ({result.latency_ms}ms x{result.rounds})")
+            chat.write(
+                f"[green]连通正常[/green] {result.latency_ms}ms x{result.rounds}"
+            )
             chat.write(f"content: {result.content}")
             chat.write(f"stream: {result.stream_content}")
         else:
-            chat.write(f"test FAIL: {result.error}")
+            chat.write(f"[red]测试失败[/red] {result.error}")
+            chat.write(f"[yellow]{error_hint(result.error or '')}[/yellow]")
 
     async def _approve(self, request: ApprovalRequest) -> ApprovalDecision:
         return await self.push_screen_wait(
@@ -183,7 +228,7 @@ class SparkApp(App):
     async def _run_prompt(self, text: str) -> None:
         self._running = True
         chat = self.query_one("#chat", RichLog)
-        chat.write(f"user: {text}")
+        chat.write(f"[bold cyan]你[/bold cyan] {text}")
         try:
             async for event in self.loop_engine.iter_turn(text):
                 self._render(event, chat)
@@ -217,7 +262,8 @@ class SparkApp(App):
                 f"compacted: {event.data['before_tokens']} -> {event.data.get('after_tokens')} tokens"
             )
         elif event.type == "turn_error":
-            chat.write(f"error: {event.text}")
+            chat.write(f"[red]错误[/red] {event.text}")
+            chat.write(f"[yellow]{error_hint(event.text or '')}[/yellow]")
         elif event.type == "turn_end" and event.text:
             pass
 
