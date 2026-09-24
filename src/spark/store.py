@@ -12,7 +12,11 @@ from spark.models import ChatMessage, ToolCall, ToolResult
 
 class SessionStore:
     def __init__(self, db_path: Path | str) -> None:
-        db_path = Path(db_path) if isinstance(db_path, str) and db_path != ":memory:" else db_path
+        db_path = (
+            Path(db_path)
+            if isinstance(db_path, str) and db_path != ":memory:"
+            else db_path
+        )
         if isinstance(db_path, Path):
             db_path.parent.mkdir(parents=True, exist_ok=True)
         self.db_path = db_path
@@ -71,8 +75,28 @@ class SessionStore:
                 );
                 """
             )
+            # WAL + composite indexes: long sessions otherwise degrade to full
+            # table scans on every load and pay two fsyncs per appended message.
+            if self.db_path != ":memory:":
+                self._conn.execute("PRAGMA journal_mode=WAL")
+            self._conn.execute("PRAGMA synchronous=NORMAL")
+            self._conn.execute("PRAGMA busy_timeout=5000")
+            self._conn.executescript(
+                """
+                CREATE INDEX IF NOT EXISTS idx_messages_session_id
+                    ON messages(session_id, id);
+                CREATE INDEX IF NOT EXISTS idx_tool_events_session_message
+                    ON tool_events(session_id, message_id);
+                CREATE INDEX IF NOT EXISTS idx_checkpoints_session_id
+                    ON checkpoints(session_id, id);
+                CREATE INDEX IF NOT EXISTS idx_sessions_updated_at
+                    ON sessions(updated_at DESC);
+                """
+            )
             try:
-                self._conn.execute("ALTER TABLE sessions ADD COLUMN compact_from INTEGER")
+                self._conn.execute(
+                    "ALTER TABLE sessions ADD COLUMN compact_from INTEGER"
+                )
             except sqlite3.OperationalError:
                 pass
             try:
@@ -105,13 +129,19 @@ class SessionStore:
 
     def get_session(self, session_id: str) -> dict | None:
         with self._lock:
-            row = self._conn.execute("SELECT * FROM sessions WHERE id = ?", (session_id,)).fetchone()
+            row = self._conn.execute(
+                "SELECT * FROM sessions WHERE id = ?", (session_id,)
+            ).fetchone()
             return dict(row) if row else None
 
     def delete_session(self, session_id: str) -> None:
         with self._lock:
-            self._conn.execute("DELETE FROM tool_events WHERE session_id = ?", (session_id,))
-            self._conn.execute("DELETE FROM messages WHERE session_id = ?", (session_id,))
+            self._conn.execute(
+                "DELETE FROM tool_events WHERE session_id = ?", (session_id,)
+            )
+            self._conn.execute(
+                "DELETE FROM messages WHERE session_id = ?", (session_id,)
+            )
             self._conn.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
             self._conn.commit()
 
@@ -124,35 +154,49 @@ class SessionStore:
                     (now, title, session_id),
                 )
             else:
-                self._conn.execute("UPDATE sessions SET updated_at = ? WHERE id = ?", (now, session_id))
+                self._conn.execute(
+                    "UPDATE sessions SET updated_at = ? WHERE id = ?", (now, session_id)
+                )
             self._conn.commit()
 
     def set_title(self, session_id: str, title: str) -> None:
         with self._lock:
-            self._conn.execute("UPDATE sessions SET title = ? WHERE id = ?", (title, session_id))
+            self._conn.execute(
+                "UPDATE sessions SET title = ? WHERE id = ?", (title, session_id)
+            )
             self._conn.commit()
 
     def set_keywords(self, session_id: str, keywords: str) -> None:
         with self._lock:
-            self._conn.execute("UPDATE sessions SET keywords = ? WHERE id = ?", (keywords, session_id))
+            self._conn.execute(
+                "UPDATE sessions SET keywords = ? WHERE id = ?", (keywords, session_id)
+            )
             self._conn.commit()
 
     def append_message(self, session_id: str, message: ChatMessage) -> int:
         now = int(time.time())
         payload = {
-            "tool_calls": [c.model_dump() for c in message.tool_calls] if message.tool_calls else None,
+            "tool_calls": [c.model_dump() for c in message.tool_calls]
+            if message.tool_calls
+            else None,
             "tool_call_id": message.tool_call_id,
             "name": message.name,
-            "images": [i.model_dump() for i in message.images] if message.images else None,
+            "images": [i.model_dump() for i in message.images]
+            if message.images
+            else None,
         }
         with self._lock:
             cur = self._conn.execute(
                 "INSERT INTO messages (session_id, role, content, created_at, payload_json) VALUES (?, ?, ?, ?, ?)",
                 (session_id, message.role, message.content, now, json.dumps(payload)),
             )
-            self._conn.commit()
             last_id = int(cur.lastrowid)
-        self.touch(session_id)
+            # The message and its session timestamp must land together, otherwise a
+            # crash between the two commits leaves a message with stale ordering.
+            self._conn.execute(
+                "UPDATE sessions SET updated_at = ? WHERE id = ?", (now, session_id)
+            )
+            self._conn.commit()
         return last_id
 
     def append_tool_event(
@@ -232,7 +276,9 @@ class SessionStore:
 
     # ---- checkpoints ----
 
-    def add_checkpoint(self, session_id: str, label: str, message_id: int, snapshot_json: str) -> int:
+    def add_checkpoint(
+        self, session_id: str, label: str, message_id: int, snapshot_json: str
+    ) -> int:
         now = int(time.time())
         with self._lock:
             cur = self._conn.execute(
@@ -275,7 +321,9 @@ class SessionStore:
 
     # ---- background jobs ----
 
-    def upsert_bg_job(self, job_id: str, command: str, cwd: str, started_at: float) -> None:
+    def upsert_bg_job(
+        self, job_id: str, command: str, cwd: str, started_at: float
+    ) -> None:
         with self._lock:
             self._conn.execute(
                 """INSERT INTO bg_jobs (id, command, cwd, started_at, finished_at, exit_code, output)
@@ -285,7 +333,14 @@ class SessionStore:
             )
             self._conn.commit()
 
-    def update_bg_job(self, job_id: str, *, output: str, finished_at: float | None, exit_code: int | None) -> None:
+    def update_bg_job(
+        self,
+        job_id: str,
+        *,
+        output: str,
+        finished_at: float | None,
+        exit_code: int | None,
+    ) -> None:
         with self._lock:
             self._conn.execute(
                 "UPDATE bg_jobs SET output = ?, finished_at = ?, exit_code = ? WHERE id = ?",
@@ -304,5 +359,7 @@ class SessionStore:
 
     def get_bg_job(self, job_id: str) -> dict | None:
         with self._lock:
-            row = self._conn.execute("SELECT * FROM bg_jobs WHERE id = ?", (job_id,)).fetchone()
+            row = self._conn.execute(
+                "SELECT * FROM bg_jobs WHERE id = ?", (job_id,)
+            ).fetchone()
             return dict(row) if row else None

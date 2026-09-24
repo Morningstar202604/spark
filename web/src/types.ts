@@ -168,6 +168,7 @@ export interface HistoryMessage {
 export interface ApprovalInfo {
   summary: string
   diff?: string | null
+  id?: string
 }
 
 export interface ModelProfile {

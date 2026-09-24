@@ -24,7 +24,7 @@ class HelpScreen(ModalScreen[None]):
     def compose(self) -> ComposeResult:
         yield Vertical(
             Static("使用帮助", id="title"),
-            RichLog(id="help-body", wrap=True, markup=True),
+            RichLog(id="help-body", wrap=True, markup=True, max_lines=200),
             Horizontal(Button("关闭 (Esc)", id="close", variant="primary")),
             id="dialog",
         )
@@ -72,6 +72,16 @@ class ApprovalScreen(ModalScreen[ApprovalDecision]):
     def on_mount(self) -> None:
         log = self.query_one("#detail", RichLog)
         log.write(self.request.diff or self.request.summary)
+        try:
+            self.query_one("#deny", Button).focus()
+        except Exception:
+            pass
+
+    def on_key(self, event) -> None:
+        if event.key == "escape":
+            self.dismiss(
+                ApprovalDecision(tool_call_id=self.request.tool_call.id, action="deny")
+            )
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         mapping = {
@@ -146,7 +156,9 @@ class SparkApp(App):
             Button("Help (?)", id="help", variant="default"),
             id="toolbar",
         )
-        yield RichLog(id="chat", wrap=True, highlight=True, markup=True)
+        yield RichLog(
+            id="chat", wrap=True, highlight=True, markup=False, max_lines=5000
+        )
         yield Input(
             placeholder="Describe a task and press Enter (? for help)", id="composer"
         )

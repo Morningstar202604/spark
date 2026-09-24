@@ -29,6 +29,9 @@ class ApplyPatchArgs(BaseModel):
     new_text: str
 
 
+MAX_READ_BYTES = 5 * 1024 * 1024
+
+
 def _lines(content: str, offset: int | None, limit: int | None) -> str:
     rows = content.splitlines()
     start = 1 if offset is None else max(offset, 1)
@@ -44,8 +47,31 @@ def read_file(sandbox: WorkdirSandbox, args: ReadFileArgs) -> ToolResult:
         return ToolResult(ok=False, payload={"error": str(exc)})
     if not path.exists() or not path.is_file():
         return ToolResult(ok=False, payload={"error": f"File not found: {args.path}"})
-    text = path.read_text(encoding="utf-8", errors="replace")
-    return ToolResult(ok=True, payload={"path": args.path, "content": _lines(text, args.offset, args.limit)})
+    try:
+        size = path.stat().st_size
+    except OSError as exc:
+        return ToolResult(ok=False, payload={"error": f"cannot stat file: {exc}"})
+    if size > MAX_READ_BYTES:
+        return ToolResult(
+            ok=False,
+            payload={
+                "error": (
+                    f"file is too large to read ({size} bytes, limit "
+                    f"{MAX_READ_BYTES}); use grep or read a slice instead"
+                ),
+                "path": args.path,
+                "size": size,
+            },
+        )
+    try:
+        with path.open("r", encoding="utf-8", errors="replace") as handle:
+            text = handle.read(MAX_READ_BYTES)
+    except OSError as exc:
+        return ToolResult(ok=False, payload={"error": f"cannot read file: {exc}"})
+    return ToolResult(
+        ok=True,
+        payload={"path": args.path, "content": _lines(text, args.offset, args.limit)},
+    )
 
 
 def list_dir(sandbox: WorkdirSandbox, args: ListDirArgs) -> ToolResult:
@@ -54,7 +80,9 @@ def list_dir(sandbox: WorkdirSandbox, args: ListDirArgs) -> ToolResult:
     except (PathEscapeError, SandboxPolicyError) as exc:
         return ToolResult(ok=False, payload={"error": str(exc)})
     if not path.exists() or not path.is_dir():
-        return ToolResult(ok=False, payload={"error": f"Directory not found: {args.path}"})
+        return ToolResult(
+            ok=False, payload={"error": f"Directory not found: {args.path}"}
+        )
     entries = []
     for child in sorted(path.iterdir(), key=lambda p: p.name)[: args.max_entries]:
         item = {"name": child.name, "type": "dir" if child.is_dir() else "file"}
@@ -66,7 +94,10 @@ def list_dir(sandbox: WorkdirSandbox, args: ListDirArgs) -> ToolResult:
 
 def write_file(sandbox: WorkdirSandbox, args: WriteFileArgs) -> ToolResult:
     if not sandbox.write_allowed:
-        return ToolResult(ok=False, payload={"error": "write_file is disabled: sandbox-only access mode"})
+        return ToolResult(
+            ok=False,
+            payload={"error": "write_file is disabled: sandbox-only access mode"},
+        )
     try:
         path = sandbox.resolve(args.path)
     except (PathEscapeError, SandboxPolicyError) as exc:
@@ -76,12 +107,17 @@ def write_file(sandbox: WorkdirSandbox, args: WriteFileArgs) -> ToolResult:
         return ToolResult(ok=False, payload={"error": reason})
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(args.content, encoding="utf-8")
-    return ToolResult(ok=True, payload={"path": args.path, "bytes": len(args.content.encode("utf-8"))})
+    return ToolResult(
+        ok=True, payload={"path": args.path, "bytes": len(args.content.encode("utf-8"))}
+    )
 
 
 def apply_patch(sandbox: WorkdirSandbox, args: ApplyPatchArgs) -> ToolResult:
     if not sandbox.write_allowed:
-        return ToolResult(ok=False, payload={"error": "apply_patch is disabled: sandbox-only access mode"})
+        return ToolResult(
+            ok=False,
+            payload={"error": "apply_patch is disabled: sandbox-only access mode"},
+        )
     try:
         path = sandbox.resolve(args.path)
     except (PathEscapeError, SandboxPolicyError) as exc:
@@ -96,7 +132,10 @@ def apply_patch(sandbox: WorkdirSandbox, args: ApplyPatchArgs) -> ToolResult:
     if count != 1:
         return ToolResult(
             ok=False,
-            payload={"error": f"old_text matched {count} times; expected 1", "path": args.path},
+            payload={
+                "error": f"old_text matched {count} times; expected 1",
+                "path": args.path,
+            },
         )
     path.write_text(text.replace(args.old_text, args.new_text, 1), encoding="utf-8")
     return ToolResult(ok=True, payload={"path": args.path, "patched": True})

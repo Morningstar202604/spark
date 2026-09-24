@@ -3,6 +3,7 @@ from __future__ import annotations
 import fnmatch
 import os
 import re
+import time
 from pathlib import Path
 
 
@@ -29,18 +30,81 @@ def _glob_to_regex(pattern: str) -> re.Pattern[str]:
     out.append("$")
     return re.compile("".join(out))
 
+
 from pydantic import BaseModel
 
 from spark.models import ToolResult
 from spark.sandbox import WorkdirSandbox
 
 SKIP_DIRS = {
-    ".git", ".hg", ".svn", "node_modules", "__pycache__", ".venv", "venv",
-    "dist", "build", "target", ".next", ".nuxt", ".cache", "coverage",
-    ".pytest_cache", ".mypy_cache", ".ruff_cache", ".tox", "vendor",
+    ".git",
+    ".hg",
+    ".svn",
+    "node_modules",
+    "__pycache__",
+    ".venv",
+    "venv",
+    "dist",
+    "build",
+    "target",
+    ".next",
+    ".nuxt",
+    ".cache",
+    "coverage",
+    ".pytest_cache",
+    ".mypy_cache",
+    ".ruff_cache",
+    ".tox",
+    "vendor",
 }
 
 DEFAULT_SKIP_PATTERN = ""
+
+# Hard scan budgets. Without these a repository with no match (or a very large
+# one) makes a single tool call walk the whole tree and can block for minutes.
+MAX_GREP_FILES = 5000
+MAX_GLOB_FILES = 20000
+MAX_SEARCH_BYTES = 128 * 1024 * 1024
+MAX_SEARCH_SECONDS = 30.0
+MAX_FILE_BYTES = 1_500_000
+
+
+class SearchBudget:
+    """Tracks file/byte/time consumption so a search can stop predictably."""
+
+    def __init__(self, max_files: int, deadline_sec: float | None = None) -> None:
+        self.max_files = max(1, int(max_files))
+        self.deadline_sec = (
+            float(deadline_sec)
+            if deadline_sec and deadline_sec > 0
+            else MAX_SEARCH_SECONDS
+        )
+        self.deadline = time.monotonic() + self.deadline_sec
+        self.files = 0
+        self.bytes = 0
+        self.exhausted = False
+        self.reason = ""
+
+    def should_stop(self) -> bool:
+        if self.exhausted:
+            return True
+        if self.files >= self.max_files:
+            self.exhausted = True
+            self.reason = f"file budget reached ({self.max_files} files scanned)"
+            return True
+        if self.bytes >= MAX_SEARCH_BYTES:
+            self.exhausted = True
+            self.reason = "byte budget reached"
+            return True
+        if time.monotonic() > self.deadline:
+            self.exhausted = True
+            self.reason = "time budget reached"
+            return True
+        return False
+
+    def take(self, size: int) -> None:
+        self.files += 1
+        self.bytes += max(0, int(size))
 
 
 class GrepArgs(BaseModel):
@@ -48,17 +112,23 @@ class GrepArgs(BaseModel):
     path: str = "."
     glob: str = ""  # e.g. "*.py"
     max_results: int = 50
+    max_files: int = 0  # 0 = use the global budget
+    deadline_sec: float = 0.0  # 0 = use the global budget
 
 
 class GlobArgs(BaseModel):
     pattern: str  # e.g. "src/**/*.ts"
     path: str = "."
     max_results: int = 200
+    max_files: int = 0
+    deadline_sec: float = 0.0
 
 
 def _walk(root: Path):
     for dirpath, dirnames, filenames in os.walk(root):
-        dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS and not d.startswith(".git")]
+        dirnames[:] = [
+            d for d in dirnames if d not in SKIP_DIRS and not d.startswith(".git")
+        ]
         yield Path(dirpath), filenames
 
 
@@ -75,21 +145,25 @@ def grep_tool(sandbox: WorkdirSandbox, args: GrepArgs) -> ToolResult:
         return ToolResult(ok=False, payload={"error": f"invalid regex: {exc}"})
     glob_filter = args.glob.strip()
     max_results = max(1, min(200, args.max_results))
+    budget = SearchBudget(args.max_files or MAX_GREP_FILES, args.deadline_sec)
     matches: list[str] = []
     truncated = False
+    root = sandbox.root.resolve()
     for dirpath, filenames in _walk(base):
-        if truncated:
+        if budget.should_stop():
             break
         for name in filenames:
             if len(matches) >= max_results:
                 truncated = True
+                break
+            if budget.should_stop():
                 break
             if glob_filter and not fnmatch.fnmatch(name, glob_filter):
                 continue
             file = dirpath / name
             try:
                 resolved = file.resolve()
-                resolved.relative_to(sandbox.root.resolve())
+                resolved.relative_to(root)
             except (OSError, ValueError):
                 continue
             try:
@@ -97,11 +171,13 @@ def grep_tool(sandbox: WorkdirSandbox, args: GrepArgs) -> ToolResult:
             except Exception:
                 continue
             try:
-                if file.stat().st_size > 1_500_000:
+                size = file.stat().st_size
+                if size > MAX_FILE_BYTES:
                     continue
                 text = file.read_text(encoding="utf-8", errors="replace")
             except OSError:
                 continue
+            budget.take(size)
             rel = file.relative_to(sandbox.root).as_posix()
             for lineno, line in enumerate(text.splitlines(), 1):
                 if regex.search(line):
@@ -109,11 +185,20 @@ def grep_tool(sandbox: WorkdirSandbox, args: GrepArgs) -> ToolResult:
                     if len(matches) >= max_results:
                         truncated = True
                         break
+    payload: dict = {
+        "results": matches,
+        "count": len(matches),
+        "scanned_files": budget.files,
+    }
     if not matches:
-        return ToolResult(ok=True, payload={"results": [], "count": 0, "note": "no matches"})
-    payload: dict = {"results": matches, "count": len(matches)}
-    if truncated:
-        payload["note"] = f"truncated at {max_results} matches; narrow the search if needed"
+        payload["note"] = "no matches"
+    if budget.exhausted:
+        payload["truncated"] = True
+        payload["note"] = f"{budget.reason}; narrow the path or pattern to search more"
+    elif truncated:
+        payload["note"] = (
+            f"truncated at {max_results} matches; narrow the search if needed"
+        )
     return ToolResult(ok=True, payload=payload)
 
 
@@ -126,17 +211,27 @@ def glob_tool(sandbox: WorkdirSandbox, args: GlobArgs) -> ToolResult:
         return ToolResult(ok=False, payload={"error": f"path not found: {args.path}"})
     pattern = args.pattern.strip().lstrip("/")
     max_results = max(1, min(500, args.max_results))
+    budget = SearchBudget(args.max_files or MAX_GLOB_FILES, args.deadline_sec)
     rx = _glob_to_regex(pattern) if "**" in pattern else None
     out: list[str] = []
     truncated = False
+    base_resolved = base.resolve()
     for dirpath, filenames in _walk(base):
-        if truncated:
+        if budget.should_stop():
             break
         for name in filenames:
+            if budget.should_stop():
+                break
+            if len(out) >= max_results:
+                truncated = True
+                break
             file = dirpath / name
+            budget.take(0)
+            if budget.exhausted:
+                break
             try:
                 resolved = file.resolve()
-                resolved.relative_to(base.resolve())
+                resolved.relative_to(base_resolved)
             except (OSError, ValueError):
                 continue
             rel = file.relative_to(base).as_posix()
@@ -144,15 +239,24 @@ def glob_tool(sandbox: WorkdirSandbox, args: GlobArgs) -> ToolResult:
             if rx is not None:
                 matched = bool(rx.match(rel)) or bool(rx.match(name))
             else:
-                matched = fnmatch.fnmatch(rel, pattern) or fnmatch.fnmatch(name, pattern)
+                matched = fnmatch.fnmatch(rel, pattern) or fnmatch.fnmatch(
+                    name, pattern
+                )
             if matched:
                 out.append(file.relative_to(sandbox.root).as_posix())
                 if len(out) >= max_results:
                     truncated = True
                     break
+    payload: dict = {
+        "files": out,
+        "count": len(out),
+        "scanned_files": budget.files,
+    }
     if not out:
-        return ToolResult(ok=True, payload={"files": [], "count": 0, "note": "no files matched"})
-    payload: dict = {"files": out, "count": len(out)}
-    if truncated:
+        payload["note"] = "no files matched"
+    if budget.exhausted:
+        payload["truncated"] = True
+        payload["note"] = f"{budget.reason}; narrow the path or pattern to search more"
+    elif truncated:
         payload["note"] = f"truncated at {max_results} files"
     return ToolResult(ok=True, payload=payload)

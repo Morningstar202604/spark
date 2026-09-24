@@ -23,6 +23,9 @@ export default function SessionSidebar({ open, sessions, current, showKeywords =
       {/* mobile overlay */}
       {open && <div className="fixed inset-0 z-20 bg-black/55 md:hidden" onClick={onClose} />}
       <aside
+        id="session-sidebar"
+        aria-hidden={!open ? true : undefined}
+        inert={!open ? true : undefined}
         className={`fixed inset-y-0 left-0 z-30 flex w-64 flex-col border-r border-spark-line bg-spark-side transition-transform duration-200 md:static md:translate-x-0 ${
           open ? "translate-x-0" : "-translate-x-full md:w-0 md:overflow-hidden md:border-r-0"
         }`}

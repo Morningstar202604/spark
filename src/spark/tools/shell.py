@@ -14,9 +14,14 @@ class RunShellArgs(BaseModel):
     cwd: str | None = None
 
 
-def run_shell(sandbox: WorkdirSandbox, args: RunShellArgs, timeout_sec: int, max_output_chars: int) -> ToolResult:
+def run_shell(
+    sandbox: WorkdirSandbox, args: RunShellArgs, timeout_sec: int, max_output_chars: int
+) -> ToolResult:
     if not sandbox.shell_allowed:
-        return ToolResult(ok=False, payload={"error": "run_shell is disabled: sandbox-only access mode"})
+        return ToolResult(
+            ok=False,
+            payload={"error": "run_shell is disabled: sandbox-only access mode"},
+        )
     reason = sandbox.check_shell(args.command)
     if reason:
         return ToolResult(ok=False, payload={"error": reason, "command": args.command})
@@ -31,12 +36,15 @@ def run_shell(sandbox: WorkdirSandbox, args: RunShellArgs, timeout_sec: int, max
             args.command,
             shell=True,
             cwd=cwd,
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=True,
             timeout=timeout_sec,
         )
     except subprocess.TimeoutExpired:
-        return ToolResult(ok=False, payload={"error": "timeout", "command": args.command})
+        return ToolResult(
+            ok=False, payload={"error": "timeout", "command": args.command}
+        )
     stdout = _clip(completed.stdout or "", max_output_chars)
     stderr = _clip(completed.stderr or "", max_output_chars)
     return ToolResult(
@@ -66,7 +74,9 @@ def detect_env(workdir) -> dict:
         if exe is None:
             continue
         try:
-            completed = subprocess.run(cmd, capture_output=True, text=True, timeout=5, cwd=workdir)
+            completed = subprocess.run(
+                cmd, capture_output=True, text=True, timeout=5, cwd=workdir
+            )
             version = (completed.stdout or completed.stderr).strip().splitlines()
             result[name] = version[0][:60] if version else "installed"
         except Exception:

@@ -19,7 +19,7 @@ from spark.models import (
     ToolResult,
     TurnEvent,
 )
-from spark.policy import decide
+from spark.policy import NEVER_PERSIST_ALLOW, call_signature, decide
 from spark.providers.base import Provider
 from spark.store import SessionStore
 from spark.tools.registry import ToolContext, ToolRegistry
@@ -478,8 +478,11 @@ class AgentLoop:
                 await self._persist_tool(call, message_id, result, "deny")
                 yield TurnEvent(type="tool_end", tool_call=call, result=result)
                 return
-            if verdict.action == "allow_always":
-                self.allow_always.add(call.name)
+            if (
+                verdict.action == "allow_always"
+                and call.name not in NEVER_PERSIST_ALLOW
+            ):
+                self.allow_always.add(call_signature(call))
             approval_label = verdict.action
         if call.name == "task" and self.registry.ctx.task_runner is not None:
             prompts: list[str] = []

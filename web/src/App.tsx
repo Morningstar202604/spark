@@ -369,6 +369,9 @@ export default function App() {
                 type="button"
                 onClick={() => setSidebarOpen(!sidebarOpen)}
                 title="切换会话栏"
+                aria-label="切换会话栏"
+                aria-expanded={sidebarOpen}
+                aria-controls="session-sidebar"
                 className="rounded-lg p-2 text-spark-muted transition-colors hover:bg-spark-line hover:text-spark-text"
               >
                 <span className="block h-0.5 w-4 bg-current shadow-[0_5px_0_currentColor,0_-5px_0_currentColor]" />
