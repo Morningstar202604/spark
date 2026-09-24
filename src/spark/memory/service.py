@@ -137,7 +137,7 @@ class MemoryService:
             or not self.cfg.memory.auto_extract
             or not self._llm_ready()
         ):
-            return {"extracted": 0, "ops": []}
+            return {"extracted": 0, "ops": [], "conflicts": []}
         user_text = redact_secrets(user_text)
         assistant_text = redact_secrets(assistant_text)
         tool_summary = redact_secrets(tool_summary)
@@ -159,14 +159,23 @@ class MemoryService:
                 )
             )
         except Exception as exc:
-            return {"extracted": 0, "ops": [], "error": str(exc)}
+            return {
+                "extracted": 0,
+                "ops": [],
+                "conflicts": [],
+                "error": str(exc),
+            }
         if not candidates:
-            return {"extracted": 0, "ops": []}
+            return {"extracted": 0, "ops": [], "conflicts": []}
 
         with self._lock:
             similar: dict[int, list[tuple[MemoryRow, float]]] = {}
             for i, cand in enumerate(candidates):
                 similar[i] = self.search(cand.content, top_k=3)
+            target_versions: dict[int, MemoryRow] = {}
+            for hits in similar.values():
+                for row, _score in hits:
+                    target_versions[row.id] = row
             try:
                 ops = asyncio.run(
                     resolve_operations(
@@ -178,7 +187,12 @@ class MemoryService:
                     )
                 )
             except Exception as exc:
-                return {"extracted": len(candidates), "ops": [], "error": str(exc)}
+                return {
+                    "extracted": len(candidates),
+                    "ops": [],
+                    "conflicts": [],
+                    "error": str(exc),
+                }
 
             new_texts = [op.content for op in ops if op.action == "ADD"]
             update_texts = [
@@ -192,10 +206,42 @@ class MemoryService:
                     vec_map[text] = vec
 
             applied: list[dict] = []
-            for op in ops:
-                if op.action == "ADD":
+            conflicts: list[dict] = []
+            with self.store.transaction():
+                for op in ops:
+                    if op.action not in {"ADD", "UPDATE"}:
+                        continue
+                    if op.action == "UPDATE" and not op.target_id:
+                        continue
                     safe_content = redact_secrets(op.content)
-                    mid = self.store.add(
+                    conflict: dict | None = None
+                    if op.action == "UPDATE" and op.target_id:
+                        target = target_versions.get(op.target_id)
+                        if target is not None and self.store._update_content_if_version(
+                            op.target_id,
+                            safe_content,
+                            target.version,
+                            importance=op.importance,
+                            embedding=vec_map.get(op.content),
+                            embedding_model=self.cfg.memory.embedding_model
+                            if op.content in vec_map
+                            else None,
+                        ):
+                            applied.append(
+                                {
+                                    "action": "UPDATE",
+                                    "id": op.target_id,
+                                    "content": safe_content,
+                                }
+                            )
+                            continue
+                        conflict = {
+                            "action": "UPDATE",
+                            "id": op.target_id,
+                            "expected_version": target.version if target else None,
+                            "reason": "version_conflict",
+                        }
+                    memory_id = self.store.add(
                         safe_content,
                         type=op.type,
                         importance=op.importance,
@@ -206,29 +252,18 @@ class MemoryService:
                         source_session=session_id,
                     )
                     applied.append(
-                        {"action": "ADD", "id": mid, "content": safe_content}
+                        {"action": "ADD", "id": memory_id, "content": safe_content}
                     )
-                elif op.action == "UPDATE" and op.target_id:
-                    if self.store.get(op.target_id):
-                        safe_content = redact_secrets(op.content)
-                        self.store.update_content(
-                            op.target_id,
-                            safe_content,
-                            importance=op.importance,
-                            embedding=vec_map.get(op.content),
-                            embedding_model=self.cfg.memory.embedding_model
-                            if op.content in vec_map
-                            else None,
-                        )
-                        applied.append(
-                            {
-                                "action": "UPDATE",
-                                "id": op.target_id,
-                                "content": safe_content,
-                            }
-                        )
-            archived = self.store.enforce_capacity()
-        return {"extracted": len(candidates), "ops": applied, "archived": archived}
+                    if conflict is not None:
+                        conflict["fallback_id"] = memory_id
+                        conflicts.append(conflict)
+                archived = self.store.enforce_capacity()
+        return {
+            "extracted": len(candidates),
+            "ops": applied,
+            "archived": archived,
+            "conflicts": conflicts,
+        }
 
     # ---------- optimization ----------
 

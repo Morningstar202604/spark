@@ -12,6 +12,7 @@ import {
   activateModelProfile,
 } from "../api"
 import MemorySection from "./MemorySection"
+import Modal from "./Modal"
 import { applyTheme, getStoredTheme, type Theme } from "../theme"
 
 interface Props {
@@ -209,16 +210,15 @@ export default function SettingsPanel({ status, onClose, onSaved }: Props) {
   }
 
   return (
-    <div className="animate-fade fixed inset-0 z-40">
-      <div className="absolute inset-0 bg-black/55" onClick={onClose} />
+    <Modal labelledBy="settings-panel-title" onClose={onClose} className="animate-fade">
       <aside className="animate-in absolute top-0 right-0 flex h-full w-full flex-col border-l border-spark-line bg-spark-panel sm:w-[38rem]">
         <div className="flex items-center justify-between border-b border-spark-line px-4 py-3 sm:px-5">
-          <h2 className="text-base font-bold">设置</h2>
+          <h2 id="settings-panel-title" className="text-base font-bold">设置</h2>
           <div className="flex items-center gap-2">
             <button type="button" onClick={resetForm} title="放弃修改，恢复当前配置" className="rounded-lg bg-spark-line px-3 py-1.5 text-xs text-spark-muted transition-colors hover:text-spark-text">
               重置
             </button>
-            <button type="button" onClick={onClose} className="rounded-lg bg-spark-line px-3 py-1.5 text-sm text-spark-text transition-colors hover:text-spark-accent">
+            <button data-modal-initial-focus type="button" onClick={onClose} className="rounded-lg bg-spark-line px-3 py-1.5 text-sm text-spark-text transition-colors hover:text-spark-accent">
               关闭
             </button>
           </div>
@@ -788,6 +788,6 @@ export default function SettingsPanel({ status, onClose, onSaved }: Props) {
           <span className="ml-auto hidden font-mono text-[10px] sm:inline">session {status?.session_id}</span>
         </div>
       </aside>
-    </div>
+    </Modal>
   )
 }

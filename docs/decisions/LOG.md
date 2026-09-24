@@ -17,3 +17,4 @@
 2026-09-24 | agent | 品牌升级为 "Spark · Ember"：暖炭黑 + 余烬橙 + 骨白，标志改为裂口方块内火花核（弃通用闪电） | 用户要求打造独特品牌并全面使用；原青绿渐变与市面 AI 产品高度同质 | user-2026-09-24 | -
 2026-09-24 | agent | 安全加固：Web 默认仅 127.0.0.1 + 非本机需令牌、run_tests 去 shell=True、hooks 去 cmd.exe 包装、项目配置禁注入 MCP/hooks/provider、agents_md 限裸文件名、/api/test 禁跨域发密钥、checkpoint 改 UUID 且回滚删新增文件、熔断窗口随阈值增长、配置加数值边界 | 全队对抗性压测发现 3 个 Critical + 多个 High | worktree:hardening | -
 2026-09-24 | agent | 第二批：search/glob 加文件/字节/时间预算、SQLite 开 WAL+组合索引+合并事务、记忆聚类改倒排索引去 O(M²)、审批按 (工具+参数) 签名授权且 shell 禁止永久放行、web_fetch 拦截内网与重定向、read_file/web_fetch 加体积上限、TUI 关 markup 加行数上限与审批 Esc、Web 加焦点环/侧栏 inert/审批播报 | 性能与无障碍审查发现的高优先项 | worktree:perf-a11y | -
+2026-09-24 | agent | 第三批（五路并行）：SSE 文本合并+15s 心跳+队列上限+断连即取消+静态资源 immutable 缓存；_usage() 增量缓存（1M 字符 97.9ms→0.25ms）；checkpoint 基线+delta 增量（10k 文件 15.3s→0.33s）；记忆 CAS 版本校验+单事务；Web 分包（504KB→首屏 464KB，零 >500KB 警告）；TUI 窄终端不溢出；shell 有界输出+进程树清理 | 收尾上一批遗留项 | worktree:final-hardening | -

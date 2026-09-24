@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from "react"
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react"
 import ChatMessage, { type ChatItem } from "./components/ChatMessage"
-import SettingsPanel from "./components/SettingsPanel"
+import Modal from "./components/Modal"
 import SessionSidebar from "./components/SessionSidebar"
 import ApprovalCard from "./components/ApprovalCard"
 import InputBox from "./components/InputBox"
@@ -31,11 +31,70 @@ const EXAMPLES = [
   "把 README 里的安装步骤改成中文",
 ]
 
+const SettingsPanel = lazy(() => import("./components/SettingsPanel"))
+
 function historyToItems(messages: { role: "user" | "assistant" | "tool"; content: string; name?: string; images?: string[] }[]): ChatItem[] {
   return messages.map((m) =>
     m.role === "tool"
       ? { kind: "tool", role: "assistant", text: "", call: { id: "", name: m.name || "tool", arguments: {} }, result: m.content, ok: true }
       : { kind: "message", role: m.role, text: m.content, images: m.images },
+  )
+}
+
+interface CheckpointDialogProps {
+  checkpoints: CheckpointRow[]
+  busy: boolean
+  streaming: boolean
+  onClose: () => void
+  onRollback: (id: number) => void
+}
+
+function CheckpointDialog({ checkpoints, busy, streaming, onClose, onRollback }: CheckpointDialogProps) {
+  return (
+    <Modal labelledBy="checkpoint-dialog-title" onClose={onClose} className="animate-fade">
+      <aside className="animate-in absolute top-0 right-0 flex h-full w-full flex-col border-l border-spark-line bg-spark-panel sm:w-[26rem]">
+        <div className="flex items-center justify-between border-b border-spark-line px-4 py-3">
+          <h2 id="checkpoint-dialog-title" className="text-base font-bold">检查点回滚</h2>
+          <button
+            data-modal-initial-focus
+            type="button"
+            onClick={onClose}
+            className="rounded-lg bg-spark-line px-3 py-1.5 text-sm text-spark-text transition-colors hover:text-spark-accent"
+          >
+            关闭
+          </button>
+        </div>
+        <div className="flex-1 overflow-y-auto p-4">
+          <p className="mb-3 text-xs text-spark-muted">
+            每次涉及写文件或执行命令的回合结束后自动创建检查点。回滚会同时恢复工作区文件与对话历史。
+          </p>
+          {busy && <p className="text-xs text-spark-muted">加载中…</p>}
+          {!busy && checkpoints.length === 0 && <p className="text-xs text-spark-muted">暂无检查点。</p>}
+          <ul className="flex flex-col gap-2">
+            {checkpoints.map((cp) => (
+              <li key={cp.id} className="rounded-lg border border-spark-line bg-spark-bg p-3">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <div className="truncate text-sm font-bold text-spark-text">{cp.label || "checkpoint"}</div>
+                    <div className="text-[10px] text-spark-muted">
+                      #{cp.id} · {new Date(cp.created_at * 1000).toLocaleString("zh-CN")}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={busy || streaming}
+                    onClick={() => onRollback(cp.id)}
+                    className="shrink-0 rounded-lg bg-spark-accent px-3 py-1.5 text-xs font-bold text-spark-on-accent transition-all hover:brightness-110 active:scale-95 disabled:opacity-50"
+                  >
+                    回滚
+                  </button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </div>
+      </aside>
+    </Modal>
   )
 }
 
@@ -460,49 +519,18 @@ export default function App() {
         />
       </div>
       {settingsOpen && (
-        <SettingsPanel status={status} onClose={() => setSettingsOpen(false)} onSaved={(s) => setStatus(s)} />
+        <Suspense fallback={null}>
+          <SettingsPanel status={status} onClose={() => setSettingsOpen(false)} onSaved={(s) => setStatus(s)} />
+        </Suspense>
       )}
       {cpsOpen && (
-        <div className="animate-fade fixed inset-0 z-40">
-          <div className="absolute inset-0 bg-black/55" onClick={() => setCpsOpen(false)} />
-          <aside className="animate-in absolute top-0 right-0 flex h-full w-full flex-col border-l border-spark-line bg-spark-panel sm:w-[26rem]">
-            <div className="flex items-center justify-between border-b border-spark-line px-4 py-3">
-              <h2 className="text-base font-bold">检查点回滚</h2>
-              <button type="button" onClick={() => setCpsOpen(false)} className="rounded-lg bg-spark-line px-3 py-1.5 text-sm text-spark-text transition-colors hover:text-spark-accent">
-                关闭
-              </button>
-            </div>
-            <div className="flex-1 overflow-y-auto p-4">
-              <p className="mb-3 text-xs text-spark-muted">
-                每次涉及写文件或执行命令的回合结束后自动创建检查点。回滚会同时恢复工作区文件与对话历史。
-              </p>
-              {cpsBusy && <p className="text-xs text-spark-muted">加载中…</p>}
-              {!cpsBusy && checkpoints.length === 0 && <p className="text-xs text-spark-muted">暂无检查点。</p>}
-              <ul className="flex flex-col gap-2">
-                {checkpoints.map((cp) => (
-                  <li key={cp.id} className="rounded-lg border border-spark-line bg-spark-bg p-3">
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="min-w-0">
-                        <div className="truncate text-sm font-bold text-spark-text">{cp.label || "checkpoint"}</div>
-                        <div className="text-[10px] text-spark-muted">
-                          #{cp.id} · {new Date(cp.created_at * 1000).toLocaleString("zh-CN")}
-                        </div>
-                      </div>
-                      <button
-                        type="button"
-                        disabled={cpsBusy || streaming}
-                        onClick={() => void handleRollback(cp.id)}
-                        className="shrink-0 rounded-lg bg-spark-accent px-3 py-1.5 text-xs font-bold text-spark-on-accent transition-all hover:brightness-110 active:scale-95 disabled:opacity-50"
-                      >
-                        回滚
-                      </button>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          </aside>
-        </div>
+        <CheckpointDialog
+          checkpoints={checkpoints}
+          busy={cpsBusy}
+          streaming={streaming}
+          onClose={() => setCpsOpen(false)}
+          onRollback={(id) => void handleRollback(id)}
+        />
       )}
     </div>
   )

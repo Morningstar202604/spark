@@ -4,6 +4,8 @@ import math
 import re
 import time
 from array import array
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
 from spark.config import MemoryConfig
@@ -58,6 +60,7 @@ class MemoryRow:
         self.status = row["status"]
         self.source_session = row["source_session"]
         self.access_count = int(row["access_count"])
+        self.version = int(row["version"])
         self.created_at = int(row["created_at"])
         self.updated_at = int(row["updated_at"])
         self.last_accessed = int(row["last_accessed"])
@@ -69,6 +72,7 @@ class MemoryRow:
             "content": self.content,
             "importance": self.importance,
             "access_count": self.access_count,
+            "version": self.version,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
             "last_accessed": self.last_accessed,
@@ -85,32 +89,61 @@ class MemoryStore:
         self.cfg = cfg
         db_path.parent.mkdir(parents=True, exist_ok=True)
         self.db_path = db_path
+        self._transaction_depth = 0
         self._conn = sqlite3.connect(db_path, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         self._init()
 
+    @contextmanager
+    def transaction(self) -> Iterator[None]:
+        if self._transaction_depth:
+            yield
+            return
+        self._conn.execute("BEGIN IMMEDIATE")
+        self._transaction_depth = 1
+        try:
+            with self._conn:
+                yield
+        finally:
+            self._transaction_depth = 0
+
+    def _commit_if_needed(self) -> None:
+        if self._transaction_depth == 0:
+            self._conn.commit()
+
     def _init(self) -> None:
-        self._conn.executescript(
-            """
-            CREATE TABLE IF NOT EXISTS memories (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                type TEXT NOT NULL DEFAULT 'general',
-                content TEXT NOT NULL,
-                keywords TEXT NOT NULL DEFAULT '',
-                embedding BLOB,
-                embedding_model TEXT,
-                importance REAL NOT NULL DEFAULT 5.0,
-                status TEXT NOT NULL DEFAULT 'active',
-                source_session TEXT,
-                access_count INTEGER NOT NULL DEFAULT 0,
-                created_at INTEGER NOT NULL,
-                updated_at INTEGER NOT NULL,
-                last_accessed INTEGER NOT NULL
-            );
-            CREATE INDEX IF NOT EXISTS idx_memories_status ON memories(status);
-            """
-        )
-        self._conn.commit()
+        with self.transaction():
+            self._conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS memories (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    type TEXT NOT NULL DEFAULT 'general',
+                    content TEXT NOT NULL,
+                    keywords TEXT NOT NULL DEFAULT '',
+                    embedding BLOB,
+                    embedding_model TEXT,
+                    importance REAL NOT NULL DEFAULT 5.0,
+                    status TEXT NOT NULL DEFAULT 'active',
+                    source_session TEXT,
+                    access_count INTEGER NOT NULL DEFAULT 0,
+                    version INTEGER NOT NULL DEFAULT 1,
+                    created_at INTEGER NOT NULL,
+                    updated_at INTEGER NOT NULL,
+                    last_accessed INTEGER NOT NULL
+                )
+                """
+            )
+            columns = {
+                str(row["name"])
+                for row in self._conn.execute("PRAGMA table_info(memories)").fetchall()
+            }
+            if "version" not in columns:
+                self._conn.execute(
+                    "ALTER TABLE memories ADD COLUMN version INTEGER NOT NULL DEFAULT 1"
+                )
+            self._conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_memories_status ON memories(status)"
+            )
 
     def close(self) -> None:
         self._conn.close()
@@ -148,18 +181,19 @@ class MemoryStore:
                 now,
             ),
         )
-        self._conn.commit()
+        self._commit_if_needed()
         return int(cur.lastrowid)
 
-    def update_content(
+    def _update_content_if_version(
         self,
         memory_id: int,
         content: str,
+        expected_version: int,
         *,
         importance: float | None = None,
         embedding: list[float] | None = None,
         embedding_model: str | None = None,
-    ) -> None:
+    ) -> bool:
         now = self._now()
         sets = ["content = ?", "keywords = ?", "updated_at = ?"]
         params: list = [content.strip()[:400], " ".join(tokenize(content)[:40]), now]
@@ -170,12 +204,36 @@ class MemoryStore:
             sets.extend(["embedding = ?", "embedding_model = ?"])
             params.append(pack_vector(embedding))
             params.append(embedding_model)
-        params.append(memory_id)
-        self._conn.execute(
-            f"UPDATE memories SET {', '.join(sets)} WHERE id = ?",
+        sets.append("version = version + 1")
+        params.extend((memory_id, expected_version))
+        cur = self._conn.execute(
+            f"UPDATE memories SET {', '.join(sets)} "
+            "WHERE id = ? AND version = ? AND status = 'active'",
             params,
         )
-        self._conn.commit()
+        return cur.rowcount == 1
+
+    def update_content(
+        self,
+        memory_id: int,
+        content: str,
+        *,
+        importance: float | None = None,
+        embedding: list[float] | None = None,
+        embedding_model: str | None = None,
+    ) -> None:
+        row = self.get(memory_id)
+        if row is None or row.status != "active":
+            return
+        self._update_content_if_version(
+            memory_id,
+            content,
+            row.version,
+            importance=importance,
+            embedding=embedding,
+            embedding_model=embedding_model,
+        )
+        self._commit_if_needed()
 
     def get(self, memory_id: int) -> MemoryRow | None:
         row = self._conn.execute(
@@ -183,23 +241,33 @@ class MemoryStore:
         ).fetchone()
         return MemoryRow(row) if row else None
 
-    def archive(self, memory_id: int) -> None:
-        self._conn.execute(
-            "UPDATE memories SET status = 'archived', updated_at = ? WHERE id = ?",
-            (self._now(), memory_id),
+    def _archive_if_version(self, memory_id: int, expected_version: int) -> bool:
+        cur = self._conn.execute(
+            "UPDATE memories SET status = 'archived', updated_at = ?, "
+            "version = version + 1 "
+            "WHERE id = ? AND version = ? AND status = 'active'",
+            (self._now(), memory_id, expected_version),
         )
-        self._conn.commit()
+        return cur.rowcount == 1
+
+    def archive(self, memory_id: int) -> None:
+        row = self.get(memory_id)
+        if row is None or row.status != "active":
+            return
+        self._archive_if_version(memory_id, row.version)
+        self._commit_if_needed()
 
     def delete(self, memory_id: int) -> None:
         self._conn.execute("DELETE FROM memories WHERE id = ?", (memory_id,))
-        self._conn.commit()
+        self._commit_if_needed()
 
     def touch_access(self, memory_id: int) -> None:
         self._conn.execute(
-            "UPDATE memories SET access_count = access_count + 1, last_accessed = ? WHERE id = ?",
+            "UPDATE memories SET access_count = access_count + 1, last_accessed = ?, "
+            "version = version + 1 WHERE id = ?",
             (self._now(), memory_id),
         )
-        self._conn.commit()
+        self._commit_if_needed()
 
     def all_active(self) -> list[MemoryRow]:
         rows = self._conn.execute(
@@ -293,28 +361,29 @@ class MemoryStore:
 
     def enforce_capacity(self, *, stale_days: float = 180.0) -> int:
         archived = 0
-        cutoff = self._now() - int(stale_days * 86400)
-        stale = self._conn.execute(
-            "SELECT id FROM memories WHERE status = 'active' AND last_accessed < ? AND importance < 7.0",
-            (cutoff,),
-        ).fetchall()
-        for row in stale:
-            self.archive(int(row["id"]))
-            archived += 1
-        count = self._conn.execute(
-            "SELECT COUNT(*) AS n FROM memories WHERE status = 'active'"
-        ).fetchone()["n"]
-        overflow = int(count) - self.cfg.capacity
-        if overflow <= 0:
-            return archived
-        rows = self.all_active()
-        rows.sort(
-            key=lambda r: (
-                self._importance_eff(r) * 0.6 + self._recency(r.last_accessed) * 0.4
-            )
-        )
-        victims = rows[:overflow]
-        for row in victims:
-            self.archive(row.id)
-        archived += len(victims)
+        with self.transaction():
+            cutoff = self._now() - int(stale_days * 86400)
+            stale = self._conn.execute(
+                "SELECT id, version FROM memories WHERE status = 'active' "
+                "AND last_accessed < ? AND importance < 7.0",
+                (cutoff,),
+            ).fetchall()
+            for row in stale:
+                if self._archive_if_version(int(row["id"]), int(row["version"])):
+                    archived += 1
+            count = self._conn.execute(
+                "SELECT COUNT(*) AS n FROM memories WHERE status = 'active'"
+            ).fetchone()["n"]
+            overflow = int(count) - self.cfg.capacity
+            if overflow > 0:
+                rows = self.all_active()
+                rows.sort(
+                    key=lambda r: (
+                        self._importance_eff(r) * 0.6
+                        + self._recency(r.last_accessed) * 0.4
+                    )
+                )
+                for row in rows[:overflow]:
+                    if self._archive_if_version(row.id, row.version):
+                        archived += 1
         return archived

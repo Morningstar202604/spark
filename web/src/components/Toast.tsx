@@ -43,7 +43,7 @@ export default function Toast({ toasts, onDismiss }: { toasts: ToastItem[]; onDi
   }, [])
   if (toasts.length === 0) return null
   return (
-    <div className="pointer-events-none fixed top-3 left-1/2 z-50 flex w-[92%] max-w-sm -translate-x-1/2 flex-col gap-2">
+    <div role="status" aria-live="polite" className="pointer-events-none fixed top-3 left-1/2 z-50 flex w-[92%] max-w-sm -translate-x-1/2 flex-col gap-2">
       {toasts.map((t) => (
         <button
           key={t.id}

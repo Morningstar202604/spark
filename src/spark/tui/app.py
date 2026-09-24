@@ -6,6 +6,7 @@ from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.css.query import NoMatches
+from textual.events import Resize
 from textual.screen import ModalScreen
 from textual.widgets import Button, Footer, Header, Input, RichLog, Static
 
@@ -18,6 +19,13 @@ from spark.store import SessionStore
 from spark.tui.welcome import error_hint, help_text, status_text, welcome_text
 from spark.tools.mcp_bridge import McpBridge
 from spark.tools.registry import ToolRegistry
+
+
+_NARROW_TERMINAL_WIDTH = 32
+_TOOLBAR_LABELS = {
+    "test-model": ("Test model", "T"),
+    "help": ("Help (?)", "?"),
+}
 
 
 class HelpScreen(ModalScreen[None]):
@@ -47,6 +55,43 @@ class HelpScreen(ModalScreen[None]):
 
 
 class ApprovalScreen(ModalScreen[ApprovalDecision]):
+    CSS = """
+    #dialog {
+        width: 100%;
+        max-width: 60;
+        height: auto;
+        max-height: 100%;
+        padding: 1 2;
+        background: #1c1815;
+    }
+    #title {
+        width: 100%;
+        height: auto;
+        text-wrap: wrap;
+    }
+    #detail {
+        width: 100%;
+        height: auto;
+    }
+    #approval-actions {
+        width: 100%;
+        height: auto;
+    }
+    #approval-actions Button {
+        min-width: 0;
+        width: 1fr;
+    }
+    #dialog.narrow {
+        padding: 0 1;
+    }
+    #approval-actions.narrow {
+        layout: vertical;
+    }
+    #approval-actions.narrow Button {
+        width: 100%;
+    }
+    """
+
     def __init__(
         self, request: ApprovalRequest, access_mode: str = "workspace"
     ) -> None:
@@ -65,17 +110,26 @@ class ApprovalScreen(ModalScreen[ApprovalDecision]):
                 Button("允许", id="allow", variant="success"),
                 Button("拒绝", id="deny", variant="error"),
                 Button("始终允许", id="always", variant="primary"),
+                id="approval-actions",
             ),
             id="dialog",
         )
 
+    def _set_narrow(self, narrow: bool) -> None:
+        self.query_one("#dialog").set_class(narrow, "narrow")
+        self.query_one("#approval-actions").set_class(narrow, "narrow")
+
     def on_mount(self) -> None:
+        self._set_narrow(self.size.width <= _NARROW_TERMINAL_WIDTH)
         log = self.query_one("#detail", RichLog)
         log.write(self.request.diff or self.request.summary)
         try:
             self.query_one("#deny", Button).focus()
         except Exception:
             pass
+
+    def on_resize(self, event: Resize) -> None:
+        self._set_narrow(event.size.width <= _NARROW_TERMINAL_WIDTH)
 
     def on_key(self, event) -> None:
         if event.key == "escape":
@@ -100,13 +154,35 @@ class SparkApp(App):
     SUB_TITLE = "Ember"
     CSS = """
     Screen { background: #14110f; }
-    #status { height: 1; color: #ff7a3d; text-style: bold; }
-    #toolbar { height: 3; }
+    #status {
+        width: 100%;
+        min-width: 0;
+        max-width: 100%;
+        height: 1;
+        overflow-x: hidden;
+        text-overflow: ellipsis;
+        text-wrap: nowrap;
+        color: #ff7a3d;
+        text-style: bold;
+    }
+    #toolbar {
+        width: 100%;
+        min-width: 0;
+        height: 3;
+    }
+    #toolbar Button {
+        min-width: 0;
+        width: 1fr;
+    }
     #chat { height: 1fr; }
     #composer { dock: bottom; }
     #dialog { padding: 1 2; background: #1c1815; }
     #help-body { height: 1fr; }
     #title { color: #ff7a3d; text-style: bold; }
+    #footer FooterKey {
+        min-width: 0;
+        width: 1fr;
+    }
     """
     BINDINGS = [
         Binding("ctrl+c", "cancel_turn", "Cancel turn", show=True),
@@ -162,12 +238,23 @@ class SparkApp(App):
         yield Input(
             placeholder="Describe a task and press Enter (? for help)", id="composer"
         )
-        yield Footer()
+        yield Footer(id="footer")
 
     def _status_text(self) -> str:
         return status_text(self.cfg, self.session_id, str(self.workdir))
 
+    def _set_toolbar_compact(self, compact: bool) -> None:
+        toolbar = self.query_one("#toolbar", Horizontal)
+        toolbar.set_class(compact, "narrow")
+        for button_id, labels in _TOOLBAR_LABELS.items():
+            button = self.query_one(f"#{button_id}", Button)
+            button.label = labels[1] if compact else labels[0]
+
+    def on_resize(self, event: Resize) -> None:
+        self._set_toolbar_compact(event.size.width <= _NARROW_TERMINAL_WIDTH)
+
     def on_mount(self) -> None:
+        self._set_toolbar_compact(self.size.width <= _NARROW_TERMINAL_WIDTH)
         chat = self.query_one("#chat", RichLog)
         chat.write(welcome_text(self.cfg, str(self.workdir)))
         restored = 0

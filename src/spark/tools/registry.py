@@ -45,8 +45,13 @@ class ToolRegistry:
     def __init__(self, ctx: ToolContext) -> None:
         self.ctx = ctx
         self._extra_schemas: list[dict[str, Any]] = []
+        self._schema_revision = 0
         self.readonly_mcp: set[str] = set()
         self.plan: list[dict[str, Any]] = []
+
+    @property
+    def schema_revision(self) -> int:
+        return self._schema_revision
 
     def schemas(self) -> list[dict[str, Any]]:
         builtin = [
@@ -375,6 +380,7 @@ class ToolRegistry:
 
     def add_mcp_schema(self, schema: dict[str, Any]) -> None:
         self._extra_schemas.append(schema)
+        self._schema_revision += 1
 
     def approval_summary(self, call: ToolCall) -> tuple[str, str | None]:
         if call.name == "write_file":

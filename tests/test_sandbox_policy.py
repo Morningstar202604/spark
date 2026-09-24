@@ -25,7 +25,9 @@ def test_full_access_allows_outside_but_protects(tmp_path: Path) -> None:
     sb = WorkdirSandbox(tmp_path, _cfg("full-access"))
     outside = tmp_path.parent / "outside-ok"
     assert sb.resolve(str(outside)) == outside.resolve()
-    sb2 = WorkdirSandbox(tmp_path, _cfg("full-access", protected=["/opt/custom-protected"]))
+    sb2 = WorkdirSandbox(
+        tmp_path, _cfg("full-access", protected=["/opt/custom-protected"])
+    )
     with pytest.raises(SandboxPolicyError):
         sb2.resolve("/opt/custom-protected/secret")
 
@@ -94,7 +96,9 @@ def test_unrestricted_allows_self_and_system(tmp_path: Path) -> None:
 
 
 def test_unrestricted_respects_user_protected_paths(tmp_path: Path) -> None:
-    sb = WorkdirSandbox(tmp_path, _cfg("unrestricted", protected=["/opt/custom-protected"]))
+    sb = WorkdirSandbox(
+        tmp_path, _cfg("unrestricted", protected=["/opt/custom-protected"])
+    )
     with pytest.raises(SandboxPolicyError):
         sb.resolve("/opt/custom-protected/secret")
     assert sb.check_write_path(Path("/etc/hosts")) is None
@@ -102,6 +106,88 @@ def test_unrestricted_respects_user_protected_paths(tmp_path: Path) -> None:
 
 def test_shell_runs_and_captures(tmp_path: Path) -> None:
     sb = WorkdirSandbox(tmp_path, _cfg("workspace"))
-    r = run_shell(sb, RunShellArgs(command="echo hello"), timeout_sec=5, max_output_chars=1000)
+    r = run_shell(
+        sb, RunShellArgs(command="echo hello"), timeout_sec=5, max_output_chars=1000
+    )
     assert r.ok
     assert r.payload["stdout"].strip() == "hello"
+
+
+def test_shell_output_is_bounded_and_marked(tmp_path: Path, monkeypatch) -> None:
+    import subprocess
+    import sys
+
+    import spark.tools.shell as shell
+
+    monkeypatch.setattr(shell, "MAX_SHELL_OUTPUT_BYTES", 64)
+    command = subprocess.list2cmdline(
+        [sys.executable, "-c", "print('x' * 100000, end='')"]
+    )
+    result = run_shell(
+        WorkdirSandbox(tmp_path),
+        RunShellArgs(command=command),
+        timeout_sec=5,
+        max_output_chars=1000,
+    )
+    assert result.ok
+    assert result.payload["truncated"] is True
+    assert result.payload["stdout_truncated"] is True
+    assert len(result.payload["stdout"].encode("utf-8")) <= 64
+
+
+def test_shell_timeout_kills_child_process_tree(tmp_path: Path) -> None:
+    import subprocess
+    import sys
+    import time
+
+    started = tmp_path / "started"
+    release = tmp_path / "release"
+    marker = tmp_path / "child-alive"
+    child_script = tmp_path / "child.py"
+    child_script.write_text(
+        "import sys\n"
+        "import time\n"
+        "from pathlib import Path\n"
+        "Path(sys.argv[1]).write_text('started')\n"
+        "while not Path(sys.argv[2]).exists():\n"
+        "    time.sleep(0.01)\n"
+        "Path(sys.argv[3]).write_text('alive')\n",
+        encoding="utf-8",
+    )
+    parent_script = tmp_path / "parent.py"
+    parent_script.write_text(
+        "import subprocess\n"
+        "import sys\n"
+        "import time\n"
+        "from pathlib import Path\n"
+        "subprocess.Popen([sys.executable, sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]])\n"
+        "deadline = time.monotonic() + 1\n"
+        "while not Path(sys.argv[2]).exists() and time.monotonic() < deadline:\n"
+        "    time.sleep(0.01)\n"
+        "time.sleep(10)\n",
+        encoding="utf-8",
+    )
+    command = subprocess.list2cmdline(
+        [
+            sys.executable,
+            str(parent_script),
+            str(child_script),
+            str(started),
+            str(release),
+            str(marker),
+        ]
+    )
+    result = run_shell(
+        WorkdirSandbox(tmp_path),
+        RunShellArgs(command=command),
+        timeout_sec=2,
+        max_output_chars=100,
+    )
+    assert result.ok is False
+    assert result.payload["error"] == "timeout"
+    assert started.exists()
+    release.write_text("release", encoding="utf-8")
+    deadline = time.monotonic() + 1
+    while time.monotonic() < deadline and not marker.exists():
+        time.sleep(0.01)
+    assert not marker.exists()

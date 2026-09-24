@@ -5,11 +5,13 @@ import hashlib
 import json
 from collections import deque
 from collections.abc import Awaitable, Callable
+from importlib.resources import files
 from pathlib import Path
+from stat import S_ISREG
 
 from spark.config import SparkConfig
-from spark.core.context import build_messages, history_token_usage
-from spark.core.tokens import estimate_message_tokens
+from spark.core.context import build_messages, load_agents_md, load_system_prompt
+from spark.core.tokens import estimate_message_tokens, estimate_tool_overhead
 from spark.hooks import HookRegistry
 from spark.models import (
     ApprovalDecision,
@@ -53,6 +55,17 @@ class AgentLoop:
         self.registry.ctx.task_runner = self.spawn_subtask
         self.registry.ctx.task_runner_parallel = self.spawn_subtasks_parallel
         self.history: list[ChatMessage] = store.load_messages(session_id)
+        self._history_source = self.history
+        self._history_tokens = self._calculate_history_tokens(self.history)
+        self._history_length = len(self.history)
+        self._history_tail = self.history[-1] if self.history else None
+        self._system_prompt_resource = files("spark.prompts").joinpath("system.md")
+        self._system_prompt_cache_key: tuple | None = None
+        self._system_prompt_tokens = 0
+        self._agents_cache_key: tuple = ()
+        self._agents_tokens = 0
+        self._tool_schema_revision = -1
+        self._tool_overhead_tokens = 0
         self._call_window: deque[str] = deque(maxlen=self._breaker_window())
         self._call_counts: dict[str, int] = {}
         self._turn_tokens = 0
@@ -140,23 +153,114 @@ class AgentLoop:
             loop.run_until_complete(agen.aclose())
             loop.close()
 
-    def _usage(self) -> dict:
-        return history_token_usage(
-            cfg=self.cfg,
-            history=self.history,
-            workdir=self.workdir,
-            tool_overhead_tokens=self._tool_overhead(),
+    @staticmethod
+    def _calculate_history_tokens(history: list[ChatMessage]) -> int:
+        return sum(
+            estimate_message_tokens(message)
+            for message in history
+            if message.role != "system"
         )
+
+    def _set_history_cache(self) -> None:
+        self._history_source = self.history
+        self._history_tokens = self._calculate_history_tokens(self.history)
+        self._history_length = len(self.history)
+        self._history_tail = self.history[-1] if self.history else None
+
+    def _sync_history_tokens(self) -> None:
+        tail = self.history[-1] if self.history else None
+        if (
+            self.history is self._history_source
+            and len(self.history) == self._history_length
+            and tail is self._history_tail
+        ):
+            return
+        self._set_history_cache()
+
+    def _replace_history(self, history: list[ChatMessage]) -> None:
+        self.history = history
+        self._set_history_cache()
+
+    def _append_history(self, message: ChatMessage) -> None:
+        self._sync_history_tokens()
+        self.history.append(message)
+        if message.role != "system":
+            self._history_tokens += estimate_message_tokens(message)
+        self._history_length = len(self.history)
+        self._history_tail = message
+
+    def _system_prompt_file_key(self) -> tuple | None:
+        try:
+            stat_result = self._system_prompt_resource.stat()
+        except (OSError, NotImplementedError):
+            return None
+        return (
+            "ok",
+            stat_result.st_mtime_ns,
+            stat_result.st_size,
+            getattr(stat_result, "st_ino", 0),
+        )
+
+    def _agents_file_key(self) -> tuple:
+        name = self.cfg.context.agents_md
+        base = self.workdir.resolve()
+        prefix = (name, self.cfg.context.max_fragment_chars, str(base))
+        if (
+            not name
+            or any(separator in name for separator in ("/", "\\", ":"))
+            or ".." in name
+        ):
+            return prefix + ("invalid",)
+        try:
+            resolved = (base / name).resolve()
+            stat_result = resolved.stat()
+        except OSError as exc:
+            return prefix + ("error", type(exc).__name__)
+        if not resolved.is_relative_to(base) or not S_ISREG(stat_result.st_mode):
+            return prefix + ("not_file", str(resolved))
+        return prefix + (
+            "ok",
+            str(resolved),
+            stat_result.st_mtime_ns,
+            stat_result.st_size,
+            getattr(stat_result, "st_ino", 0),
+        )
+
+    def _prompt_tokens(self) -> int:
+        system_key = self._system_prompt_file_key()
+        if system_key is None or system_key != self._system_prompt_cache_key:
+            system = load_system_prompt() + f"\n\nWorkdir: {self.workdir.resolve()}"
+            self._system_prompt_tokens = estimate_message_tokens(
+                ChatMessage(role="system", content=system)
+            )
+            self._system_prompt_cache_key = system_key
+        agents_key = self._agents_file_key()
+        if agents_key != self._agents_cache_key:
+            agents = load_agents_md(self.workdir, self.cfg)
+            self._agents_tokens = (
+                estimate_message_tokens(ChatMessage(role="user", content=agents))
+                if agents
+                else 0
+            )
+            self._agents_cache_key = agents_key
+        return self._system_prompt_tokens + self._agents_tokens + 512
+
+    def _usage(self) -> dict:
+        self._sync_history_tokens()
+        limit = self.cfg.context.max_context_tokens
+        total = self._prompt_tokens() + self._history_tokens + self._tool_overhead()
+        return {
+            "used": total,
+            "limit": limit,
+            "percent": round(total * 100 / max(1, limit), 1),
+        }
 
     def _tool_overhead(self) -> int:
-        import json
-
-        from spark.core.tokens import estimate_tokens
-
-        schemas = self.registry.schemas()
-        return (
-            estimate_tokens(json.dumps(schemas, ensure_ascii=False)) if schemas else 0
-        )
+        revision = self.registry.schema_revision
+        if revision != self._tool_schema_revision:
+            self._tool_overhead_tokens = estimate_tool_overhead(self.registry.schemas())
+            self._tool_schema_revision = revision
+        return self._tool_overhead_tokens
 
     async def _maybe_compact(self):
         """Auto-compact: when usage crosses threshold, summarize old turns into one summary message."""
@@ -191,7 +295,7 @@ class AgentLoop:
         summary_id = self.store.append_message(self.session_id, summary_msg)
         self.store.set_compact_from(self.session_id, summary_id)
         before_tokens = usage["used"]
-        self.history = self.store.load_messages(self.session_id)
+        self._replace_history(self.store.load_messages(self.session_id))
         after_usage = self._usage()
         return {
             "before_tokens": before_tokens,
@@ -251,7 +355,7 @@ class AgentLoop:
             except Exception:
                 memory_block = None
         user = ChatMessage(role="user", content=user_text, images=images)
-        self.history.append(user)
+        self._append_history(user)
         self.store.append_message(self.session_id, user)
         if (
             self.store.get_session(self.session_id)
@@ -350,7 +454,7 @@ class AgentLoop:
                     content="".join(text_parts) or None,
                     tool_calls=tool_calls,
                 )
-                self.history.append(assistant)
+                self._append_history(assistant)
                 msg_id = self.store.append_message(self.session_id, assistant)
                 for call in tool_calls:
                     async for event in self._run_tool(call, msg_id):
@@ -363,7 +467,7 @@ class AgentLoop:
                 continue
 
             assistant = ChatMessage(role="assistant", content="".join(text_parts))
-            self.history.append(assistant)
+            self._append_history(assistant)
             assistant_id = self.store.append_message(self.session_id, assistant)
             self._maybe_auto_checkpoint(assistant_id)
             yield TurnEvent(
@@ -434,7 +538,7 @@ class AgentLoop:
                 self.store.set_compact_from(self.session_id, 0)
         except Exception:
             pass
-        self.history = self.store.load_messages(self.session_id)
+        self._replace_history(self.store.load_messages(self.session_id))
         return {
             "checkpoint_id": checkpoint_id,
             "label": record["label"],
@@ -549,7 +653,7 @@ class AgentLoop:
             tool_call_id=call.id,
             content=json.dumps(result.payload, ensure_ascii=False),
         )
-        self.history.append(tool_msg)
+        self._append_history(tool_msg)
         self.store.append_message(self.session_id, tool_msg)
         self.store.append_tool_event(
             self.session_id, message_id, call.name, call.arguments, result, approval

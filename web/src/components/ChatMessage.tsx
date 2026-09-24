@@ -52,7 +52,7 @@ function ToolCallBlock({ name, call, result, ok }: { name: string; call: ToolCal
       {open && (
         <div className="border-t border-spark-line px-3 py-2">
           <div className="mb-1 text-[10px] tracking-wider text-spark-muted uppercase">参数</div>
-          <pre className="mb-2 overflow-auto rounded bg-spark-code p-2 font-mono text-[11px] text-spark-muted whitespace-pre-wrap break-all">
+          <pre tabIndex={0} aria-label="工具参数，可滚动" className="mb-2 overflow-auto rounded bg-spark-code p-2 font-mono text-[11px] text-spark-muted whitespace-pre-wrap break-all">
             {JSON.stringify(call.arguments, null, 2)}
           </pre>
           {resultText && (
@@ -61,7 +61,7 @@ function ToolCallBlock({ name, call, result, ok }: { name: string; call: ToolCal
               {isDiff ? (
                 <Markdown text={"```diff\n" + resultText.replace(/^"|"$/g, "") + "\n```"} />
               ) : (
-                <pre className="max-h-64 overflow-auto rounded bg-spark-code p-2 font-mono text-[11px] whitespace-pre-wrap break-all text-spark-text">
+                <pre tabIndex={0} aria-label="工具结果，可滚动" className="max-h-64 overflow-auto rounded bg-spark-code p-2 font-mono text-[11px] whitespace-pre-wrap break-all text-spark-text">
                   {resultText.slice(0, 4000)}
                 </pre>
               )}

@@ -1,15 +1,14 @@
-import { memo } from "react"
+import { memo, useEffect, useState } from "react"
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
 import "highlight.js/styles/github.css"
 import hljs from "highlight.js/lib/core"
+import type { LanguageFn } from "highlight.js"
 import bash from "highlight.js/lib/languages/bash"
 import python from "highlight.js/lib/languages/python"
 import typescript from "highlight.js/lib/languages/typescript"
 import javascript from "highlight.js/lib/languages/javascript"
 import json from "highlight.js/lib/languages/json"
-import toml from "highlight.js/lib/languages/ini"
-import sql from "highlight.js/lib/languages/sql"
 
 hljs.registerLanguage("bash", bash)
 hljs.registerLanguage("shell", bash)
@@ -21,16 +20,57 @@ hljs.registerLanguage("tsx", typescript)
 hljs.registerLanguage("javascript", javascript)
 hljs.registerLanguage("js", javascript)
 hljs.registerLanguage("json", json)
-hljs.registerLanguage("toml", toml)
-hljs.registerLanguage("ini", toml)
-hljs.registerLanguage("sql", sql)
+
+const deferredLanguageLoads = new Map<string, Promise<LanguageFn>>()
+
+function loadDeferredLanguage(language: string): Promise<LanguageFn> {
+  const canonical = language === "toml" ? "ini" : language
+  const existing = deferredLanguageLoads.get(canonical)
+  if (existing) return existing
+
+  const promise = (canonical === "ini" ? import("highlight.js/lib/languages/ini") : import("highlight.js/lib/languages/sql"))
+    .then(({ default: languageFn }) => {
+      hljs.registerLanguage(canonical, languageFn)
+      if (canonical === "ini") hljs.registerLanguage("toml", languageFn)
+      return languageFn
+    })
+    .catch((error: unknown) => {
+      deferredLanguageLoads.delete(canonical)
+      throw error
+    })
+  deferredLanguageLoads.set(canonical, promise)
+  return promise
+}
 
 function CodeBlock({ code, lang }: { code: string; lang: string }) {
+  const language = lang.toLowerCase()
+  const deferred = language === "toml" || language === "ini" || language === "sql"
+  const [ready, setReady] = useState(!deferred || Boolean(hljs.getLanguage(language)))
+
+  useEffect(() => {
+    if (!deferred || hljs.getLanguage(language)) {
+      setReady(true)
+      return
+    }
+    let active = true
+    setReady(false)
+    loadDeferredLanguage(language)
+      .then(() => {
+        if (active) setReady(true)
+      })
+      .catch(() => {
+        if (active) setReady(false)
+      })
+    return () => {
+      active = false
+    }
+  }, [deferred, language])
+
   let highlighted = ""
   let ok = false
-  if (lang && hljs.getLanguage(lang)) {
+  if (ready && hljs.getLanguage(language)) {
     try {
-      highlighted = hljs.highlight(code, { language: lang }).value
+      highlighted = hljs.highlight(code, { language }).value
       ok = true
     } catch {
       ok = false

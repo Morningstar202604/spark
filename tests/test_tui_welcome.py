@@ -124,3 +124,74 @@ async def test_tui_mounts_and_opens_help_without_crashing(tmp_path) -> None:
         await pilot.pause()
         assert not isinstance(app.screen, HelpScreen)
     store.close()
+
+
+@pytest.mark.asyncio
+async def test_tui_narrow_terminal_fits_toolbar_and_status(tmp_path) -> None:
+    from spark.providers.mock import MockProvider
+    from spark.sandbox import WorkdirSandbox
+    from spark.store import SessionStore
+    from spark.tools.registry import ToolContext, ToolRegistry
+    from spark.tui.app import SparkApp
+
+    cfg = make_cfg(provider__api_key="sk-abcdefghijkl")
+    store = SessionStore(tmp_path / "tui-narrow.db")
+    app = SparkApp(
+        workdir=tmp_path,
+        cfg=cfg,
+        store=store,
+        session_id="session-under-test",
+        provider=MockProvider(),
+        registry=ToolRegistry(
+            ToolContext(sandbox=WorkdirSandbox(tmp_path), config=cfg)
+        ),
+        bridge=None,
+    )
+    async with app.run_test(size=(20, 10)) as pilot:
+        await pilot.pause()
+        assert all(
+            widget.region.x >= 0 and widget.region.x + widget.region.width <= 20
+            for widget in app.screen.walk_children()
+        )
+        assert app.query_one("#status").styles.text_overflow == "ellipsis"
+        assert app.query_one("#test-model").label.plain == "T"
+        assert app.query_one("#help").label.plain == "?"
+    store.close()
+
+
+@pytest.mark.asyncio
+async def test_tui_narrow_approval_dialog_fits_buttons(tmp_path) -> None:
+    from spark.models import ApprovalRequest, ToolCall
+    from spark.providers.mock import MockProvider
+    from spark.sandbox import WorkdirSandbox
+    from spark.store import SessionStore
+    from spark.tools.registry import ToolContext, ToolRegistry
+    from spark.tui.app import ApprovalScreen, SparkApp
+
+    cfg = make_cfg(provider__api_key="sk-abcdefghijkl")
+    store = SessionStore(tmp_path / "tui-approval.db")
+    app = SparkApp(
+        workdir=tmp_path,
+        cfg=cfg,
+        store=store,
+        session_id="session-under-test",
+        provider=MockProvider(),
+        registry=ToolRegistry(
+            ToolContext(sandbox=WorkdirSandbox(tmp_path), config=cfg)
+        ),
+        bridge=None,
+    )
+    request = ApprovalRequest(
+        tool_call=ToolCall(id="call", name="run_shell", arguments={}),
+        summary="run a command",
+    )
+    async with app.run_test(size=(20, 10)) as pilot:
+        await pilot.pause()
+        app.push_screen(ApprovalScreen(request))
+        await pilot.pause()
+        assert all(
+            widget.region.x >= 0 and widget.region.x + widget.region.width <= 20
+            for widget in app.screen.walk_children()
+        )
+        assert app.screen.query_one("#dialog").styles.max_width is not None
+    store.close()

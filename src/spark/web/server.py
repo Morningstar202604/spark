@@ -2,8 +2,12 @@ from __future__ import annotations
 
 import asyncio
 import json
+import queue
 import secrets
+import select
+import socket
 import threading
+import time
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -78,6 +82,256 @@ HOOK_EVENTS = tuple(HookRegistry.EVENTS)
 _WINDOWS_RESERVED = {"con", "prn", "aux", "nul"}
 
 MAX_REQUEST_BYTES = 32 * 1024 * 1024
+SSE_TEXT_FLUSH_INTERVAL = 0.04
+SSE_TEXT_MAX_CHARS = 1024
+SSE_HEARTBEAT_INTERVAL = 15.0
+SSE_MAX_QUEUED_EVENTS = 256
+SSE_WRITER_POLL_INTERVAL = 0.25
+SSE_DISCONNECT_ERRORS = (
+    ConnectionError,
+    BrokenPipeError,
+    ConnectionAbortedError,
+    OSError,
+)
+_SSE_DONE = object()
+_SSE_STOP = object()
+
+
+class _SSESession:
+    def __init__(
+        self,
+        wfile,
+        *,
+        connection=None,
+        on_disconnect=None,
+        close_connection=None,
+        flush_interval: float = SSE_TEXT_FLUSH_INTERVAL,
+        heartbeat_interval: float = SSE_HEARTBEAT_INTERVAL,
+        max_text_chars: int = SSE_TEXT_MAX_CHARS,
+        max_queue: int = SSE_MAX_QUEUED_EVENTS,
+    ) -> None:
+        self._wfile = wfile
+        self._connection = connection
+        self._on_disconnect = on_disconnect
+        self._close_connection = close_connection
+        self._peer_monitor_disabled = False
+        self._flush_interval = max(0.001, float(flush_interval))
+        self._heartbeat_interval = max(0.001, float(heartbeat_interval))
+        self._max_text_chars = max(1, int(max_text_chars))
+        self._queue: queue.Queue[object] = queue.Queue(maxsize=max(1, int(max_queue)))
+        self._thread: threading.Thread | None = None
+        self._stop = threading.Event()
+        self._disconnected = threading.Event()
+        self._disconnect_lock = threading.Lock()
+
+    @property
+    def disconnected(self) -> bool:
+        return self._disconnected.is_set()
+
+    def start(self) -> None:
+        if self._thread is not None:
+            return
+        self._thread = threading.Thread(target=self._run, name="spark-sse", daemon=True)
+        self._thread.start()
+
+    def submit(self, event) -> bool:
+        return self._enqueue(event)
+
+    def submit_payload(self, payload: dict) -> bool:
+        data = (
+            b"data: "
+            + json.dumps(payload, ensure_ascii=False).encode("utf-8")
+            + b"\n\n"
+        )
+        return self._enqueue(data)
+
+    def finish(self) -> bool:
+        if self._stop.is_set() or self._disconnected.is_set():
+            self._wait()
+            return False
+        try:
+            self._queue.put(_SSE_DONE, timeout=0.5)
+        except queue.Full:
+            self._disconnect()
+            self._wait()
+            return False
+        self._wait()
+        return not self._disconnected.is_set()
+
+    def abort(self) -> None:
+        if not self._disconnected.is_set():
+            self._stop.set()
+            self._close_transport()
+            try:
+                self._queue.put_nowait(_SSE_STOP)
+            except queue.Full:
+                pass
+        self._wait()
+
+    def _enqueue(self, item: object) -> bool:
+        if self._stop.is_set() or self._disconnected.is_set():
+            return False
+        try:
+            self._queue.put_nowait(item)
+        except queue.Full:
+            self._disconnect()
+            return False
+        return True
+
+    def _next_timeout(self, pending_since: float | None, last_write: float) -> float:
+        now = time.monotonic()
+        deadlines = [
+            now + SSE_WRITER_POLL_INTERVAL,
+            last_write + self._heartbeat_interval,
+        ]
+        if pending_since is not None:
+            deadlines.append(pending_since + self._flush_interval)
+        return max(0.0, min(deadlines) - now)
+
+    def _peer_disconnected(self) -> bool:
+        if self._connection is None or self._peer_monitor_disabled:
+            return False
+        try:
+            readable, _, _ = select.select([self._connection], [], [], 0)
+            if not readable:
+                return False
+            data = self._connection.recv(1, getattr(socket, "MSG_PEEK", 0))
+            if data:
+                self._peer_monitor_disabled = True
+                return False
+            return True
+        except (OSError, ValueError):
+            return True
+
+    def _run(self) -> None:
+        pending_text: list[str] = []
+        pending_chars = 0
+        pending_since: float | None = None
+        last_write = time.monotonic()
+
+        def flush_pending() -> None:
+            nonlocal pending_chars, pending_since, last_write
+            if not pending_text:
+                return
+            self._write(
+                b"data: "
+                + json.dumps(
+                    {"type": "text_delta", "text": "".join(pending_text)},
+                    ensure_ascii=False,
+                ).encode("utf-8")
+                + b"\n\n"
+            )
+            pending_text.clear()
+            pending_chars = 0
+            pending_since = None
+            last_write = time.monotonic()
+
+        try:
+            while True:
+                if self._stop.is_set():
+                    return
+                if self._peer_disconnected():
+                    self._disconnect()
+                    return
+                try:
+                    item = self._queue.get(
+                        timeout=self._next_timeout(pending_since, last_write)
+                    )
+                except queue.Empty:
+                    now = time.monotonic()
+                    if (
+                        pending_text
+                        and pending_since is not None
+                        and now - pending_since >= self._flush_interval
+                    ):
+                        flush_pending()
+                    if time.monotonic() - last_write >= self._heartbeat_interval:
+                        self._write(b": ping\n\n")
+                        last_write = time.monotonic()
+                    continue
+                if item is _SSE_STOP:
+                    return
+                if item is _SSE_DONE:
+                    flush_pending()
+                    self._write(b'data: {"type": "done"}\n\n')
+                    return
+                if isinstance(item, bytes):
+                    flush_pending()
+                    self._write(item)
+                    last_write = time.monotonic()
+                    continue
+                event_type = getattr(item, "type", "")
+                text = getattr(item, "text", None)
+                if event_type == "text_delta" and text:
+                    value = str(text)
+                    while value:
+                        if not pending_text:
+                            pending_since = time.monotonic()
+                        room = self._max_text_chars - pending_chars
+                        part = value[:room]
+                        pending_text.append(part)
+                        pending_chars += len(part)
+                        value = value[len(part) :]
+                        if pending_chars >= self._max_text_chars:
+                            flush_pending()
+                        elif (
+                            pending_since is not None
+                            and time.monotonic() - pending_since >= self._flush_interval
+                        ):
+                            flush_pending()
+                    continue
+                flush_pending()
+                self._write(
+                    b"data: "
+                    + json.dumps(_event_payload(item), ensure_ascii=False).encode(
+                        "utf-8"
+                    )
+                    + b"\n\n"
+                )
+                last_write = time.monotonic()
+        except SSE_DISCONNECT_ERRORS:
+            self._disconnect()
+        except (TypeError, ValueError, UnicodeError):
+            self._disconnect()
+
+    def _write(self, data: bytes) -> None:
+        self._wfile.write(data)
+        flush = getattr(self._wfile, "flush", None)
+        if flush is not None:
+            flush()
+
+    def _disconnect(self) -> None:
+        with self._disconnect_lock:
+            if self._disconnected.is_set():
+                return
+            self._disconnected.set()
+            self._stop.set()
+        try:
+            if self._on_disconnect is not None:
+                self._on_disconnect()
+        finally:
+            self._close_transport()
+
+    def _close_transport(self) -> None:
+        if self._close_connection is None:
+            return
+        try:
+            self._close_connection()
+        except SSE_DISCONNECT_ERRORS:
+            pass
+
+    def _wait(self) -> None:
+        if self._thread is None or self._thread is threading.current_thread():
+            return
+        self._thread.join(timeout=2.0)
+
+
+def _cache_control(path: str) -> str | None:
+    if path in {"/", "/index.html"}:
+        return "no-cache"
+    if path.startswith("/assets/"):
+        return "public, max-age=31536000, immutable"
+    return None
 
 
 def _safe_agents_md_name(filename: str) -> str | None:
@@ -213,24 +467,43 @@ class WebApprover:
     def __init__(self) -> None:
         self.pending = False
         self._event = threading.Event()
+        self._cancel_event = threading.Event()
         self._action = "deny"
 
     async def __call__(self, request) -> ApprovalDecision:
         self.pending = True
         self._action = "deny"
+        cancelled = self._cancel_event.is_set()
+        if cancelled:
+            self._cancel_event.clear()
         self._event = threading.Event()
         self._tool_call_id = request.tool_call.id
-        waited = 0.0
+        deadline = time.monotonic() + 600.0
         try:
-            while not self._event.is_set() and waited < 600.0:
-                await asyncio.sleep(0.2)
-                waited += 0.2
+            while (
+                not self._event.is_set()
+                and not cancelled
+                and not self._cancel_event.is_set()
+            ):
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                await asyncio.sleep(min(0.1, remaining))
         finally:
             self.pending = False
+            if self._cancel_event.is_set():
+                cancelled = True
+            self._cancel_event.clear()
+        if cancelled:
+            self._action = "deny"
         return ApprovalDecision(tool_call_id=self._tool_call_id, action=self._action)
 
     def respond(self, action: str) -> None:
         self._action = action
+        self._event.set()
+
+    def cancel(self) -> None:
+        self._cancel_event.set()
         self._event.set()
 
 
@@ -496,11 +769,14 @@ def serve_web(
             self.end_headers()
             self.wfile.write(data)
 
-        def _html(self) -> None:
+        def _html(self, request_path: str = "/") -> None:
             data = html.encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Content-Length", str(len(data)))
+            cache_control = _cache_control(request_path)
+            if cache_control:
+                self.send_header("Cache-Control", cache_control)
             self.end_headers()
             self.wfile.write(data)
 
@@ -529,7 +805,7 @@ def serve_web(
             if path.startswith("/api/") and self._guard(path):
                 return
             if path in {"/", "/index.html"}:
-                self._html()
+                self._html(path)
                 return
             if ui_dir is not None and not path.startswith("/api/"):
                 rel = path.lstrip("/")
@@ -548,10 +824,13 @@ def serve_web(
                         self.send_response(200)
                         self.send_header("Content-Type", ctype)
                         self.send_header("Content-Length", str(len(data)))
+                        cache_control = _cache_control(path)
+                        if cache_control:
+                            self.send_header("Cache-Control", cache_control)
                         self.end_headers()
                         self.wfile.write(data)
                         return
-                self._html()
+                self._html(path)
                 return
             if path == "/api/status":
                 self._json(200, state.status())
@@ -837,6 +1116,8 @@ def serve_web(
             if path == "/api/cancel":
                 if state.loop:
                     state.loop.cancel()
+                if state.approver is not None:
+                    state.approver.cancel()
                 self._json(200, {"ok": True})
                 return
             if path == "/api/checkpoints/rollback":
@@ -972,19 +1253,45 @@ def serve_web(
                 image_refs = [ImageRef.model_validate(i) for i in images] or None
                 if not prompt and image_refs:
                     prompt = "请分析这些图片。"
-                self.send_response(200)
-                self.send_header("Content-Type", "text/event-stream; charset=utf-8")
-                self.send_header("Cache-Control", "no-store")
-                self.send_header("Connection", "close")
-                self.end_headers()
+                try:
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+                    self.send_header("Cache-Control", "no-store")
+                    self.send_header("Connection", "close")
+                    self.end_headers()
+                except SSE_DISCONNECT_ERRORS:
+                    self.close_connection = True
+                    return
 
-                def send_event(event) -> None:
-                    payload = _event_payload(event)
-                    self.wfile.write(
-                        b"data: "
-                        + json.dumps(payload, ensure_ascii=False).encode("utf-8")
-                        + b"\n\n"
-                    )
+                turn_loop = state.loop
+                approver = state.approver
+
+                def close_stream() -> None:
+                    self.close_connection = True
+                    connection = getattr(self, "connection", None)
+                    if connection is None:
+                        return
+                    try:
+                        connection.shutdown(socket.SHUT_RDWR)
+                    except SSE_DISCONNECT_ERRORS:
+                        try:
+                            connection.close()
+                        except SSE_DISCONNECT_ERRORS:
+                            pass
+
+                def cancel_turn() -> None:
+                    if turn_loop is not None:
+                        turn_loop.cancel()
+                    if approver is not None:
+                        approver.cancel()
+
+                stream = _SSESession(
+                    self.wfile,
+                    connection=self.connection,
+                    on_disconnect=cancel_turn,
+                    close_connection=close_stream,
+                )
+                stream.start()
 
                 memory_collector: dict = {"text": "", "tools": []}
 
@@ -999,17 +1306,25 @@ def serve_web(
                         )
 
                 try:
+                    if stream.disconnected:
+                        return
                     with state.turn_lock:
+                        if stream.disconnected:
+                            return
                         state.busy = True
                         try:
-                            for event in state.loop.iter_turn_sync(
+                            for event in turn_loop.iter_turn_sync(
                                 prompt, images=image_refs
                             ):
                                 collect_event(event)
-                                send_event(event)
+                                if not stream.submit(event):
+                                    break
                         finally:
                             state.busy = False
-                    self.wfile.write(b'data: {"type": "done"}\n\n')
+                    if stream.disconnected:
+                        return
+                    if not stream.finish():
+                        return
                     turn_text = memory_collector["text"]
                     if turn_text:
                         _generate_session_meta_async(state, prompt, turn_text)
@@ -1032,16 +1347,26 @@ def serve_web(
                                 pass
 
                         threading.Thread(target=run_memory, daemon=True).start()
-                except (BrokenPipeError, ConnectionResetError):
-                    return
+                except SSE_DISCONNECT_ERRORS as exc:
+                    if stream.disconnected:
+                        cancel_turn()
+                        stream.abort()
+                        return
+                    if stream.submit_payload({"type": "turn_error", "text": str(exc)}):
+                        stream.finish()
+                    else:
+                        stream.abort()
                 except Exception as exc:
-                    try:
-                        err = json.dumps(
-                            {"type": "turn_error", "text": str(exc)}, ensure_ascii=False
-                        )
-                        self.wfile.write(b"data: " + err.encode("utf-8") + b"\n\n")
-                    except (BrokenPipeError, ConnectionResetError):
-                        pass
+                    if stream.disconnected:
+                        stream.abort()
+                        return
+                    if stream.submit_payload({"type": "turn_error", "text": str(exc)}):
+                        stream.finish()
+                    else:
+                        stream.abort()
+                finally:
+                    if stream.disconnected:
+                        stream.abort()
                 return
             if path == "/api/chat":
                 prompt = str(body.get("prompt") or "").strip()
