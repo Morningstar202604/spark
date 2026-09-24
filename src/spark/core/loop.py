@@ -53,7 +53,7 @@ class AgentLoop:
         self.registry.ctx.task_runner = self.spawn_subtask
         self.registry.ctx.task_runner_parallel = self.spawn_subtasks_parallel
         self.history: list[ChatMessage] = store.load_messages(session_id)
-        self._call_window: deque[str] = deque(maxlen=32)
+        self._call_window: deque[str] = deque(maxlen=self._breaker_window())
         self._call_counts: dict[str, int] = {}
         self._turn_tokens = 0
         self._active_children: list[AgentLoop] = []
@@ -65,6 +65,12 @@ class AgentLoop:
         self.cancelled = True
         for child in list(self._active_children):
             child.cancel()
+
+    def _breaker_window(self) -> int:
+        """Window must hold at least max_repeat_calls+1 entries, or the breaker
+        can never observe a repeat when the limit exceeds the window size."""
+        limit = int(getattr(self.cfg.agent, "max_repeat_calls", 0) or 0)
+        return max(32, limit + 1)
 
     def _fingerprint(self, call: ToolCall) -> str:
         payload = json.dumps(
@@ -82,6 +88,10 @@ class AgentLoop:
         if limit <= 0:
             return None
         fingerprint = self._fingerprint(call)
+        if len(self._call_window) == self._call_window.maxlen:
+            required = self._breaker_window()
+            if required != self._call_window.maxlen:
+                self._call_window = deque(self._call_window, maxlen=required)
         self._call_window.append(fingerprint)
         count = sum(1 for item in self._call_window if item == fingerprint)
         self._call_counts[fingerprint] = count
@@ -251,7 +261,7 @@ class AgentLoop:
 
         rounds = 0
         self._turn_tokens = 0
-        self._call_window.clear()
+        self._call_window = deque(maxlen=self._breaker_window())
         self._call_counts.clear()
         while True:
             if self.cancelled:
@@ -618,30 +628,39 @@ class AgentLoop:
                 return index, f"subtask failed: {exc}"
 
         tasks = [_asyncio.create_task(runner(i, p)) for i, p in enumerate(prompts)]
-        pending = set(tasks)
-
-        def drain():
-            while not queue.empty():
-                _idx, event = queue.get_nowait()
+        try:
+            # Drive the whole fan-out from the queue so a sub-agent that is waiting
+            # on approval or a long tool still delivers its events immediately;
+            # waiting on task completion alone can deadlock on the approval path.
+            remaining = len(tasks)
+            while remaining > 0:
+                index, event = await queue.get()
                 if event is not None:
                     yield event
-
-        while pending or not queue.empty():
-            for ev in drain():
-                yield ev
-            if not pending:
-                break
-            done, pending = await _asyncio.wait(
-                pending, return_when=_asyncio.FIRST_COMPLETED
-            )
-            for t in done:
-                try:
-                    index, summary = t.result()
-                except Exception as exc:
-                    index, summary = -1, f"subtask failed: {exc}"
-                summaries[index] = summary
-        for ev in drain():
-            yield ev
+                    continue
+                remaining -= 1
+                task = tasks[index] if index < len(tasks) else None
+                if task is not None and task.done():
+                    try:
+                        done_index, summary = task.result()
+                        summaries[done_index] = summary
+                    except Exception as exc:
+                        summaries[index] = f"subtask failed: {exc}"
+                elif task is not None:
+                    try:
+                        done_index, summary = await task
+                        summaries[done_index] = summary
+                    except Exception as exc:
+                        summaries[index] = f"subtask failed: {exc}"
+            while not queue.empty():
+                index, event = queue.get_nowait()
+                if event is not None:
+                    yield event
+        finally:
+            for task in tasks:
+                if not task.done():
+                    task.cancel()
+            await _asyncio.gather(*tasks, return_exceptions=True)
         for i in range(len(prompts)):
             label = f"[子任务 {i + 1}]"
             yield TurnEvent(

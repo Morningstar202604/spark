@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import shlex
 import subprocess
 from pathlib import Path
 
@@ -90,6 +91,7 @@ class RunTestsArgs(BaseModel):
 
 _SAFE_BRANCH = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/\-]{0,100}$")
 _TEST_TIMEOUT = 600
+MAX_TEST_TIMEOUT_SEC = 1800
 
 
 def detect_test_command(root: Path) -> str | None:
@@ -299,25 +301,43 @@ def worktree_remove(sandbox: WorkdirSandbox, args: WorktreeRemoveArgs) -> ToolRe
 
 
 def run_tests(sandbox: WorkdirSandbox, args: RunTestsArgs) -> ToolResult:
-    """Run the repo's detected test command and summarize pass/fail for the agent loop."""
+    """Run the repo's detected test command and summarize pass/fail for the agent loop.
+
+    The command always comes from repository signals. The model cannot supply an
+    arbitrary shell string, and execution never goes through a shell.
+    """
+    if args.command and args.command.strip():
+        return ToolResult(
+            ok=False,
+            payload={
+                "error": (
+                    "run_tests does not accept a custom command; it only runs the "
+                    "repository's own test entrypoint"
+                )
+            },
+        )
+    timeout = min(max(1, int(args.timeout_sec or 0)), MAX_TEST_TIMEOUT_SEC)
     try:
         root = sandbox.resolve(args.path or ".")
     except Exception as exc:
         return ToolResult(ok=False, payload={"error": str(exc)})
-    command = args.command.strip() if args.command else detect_test_command(root)
+    command = detect_test_command(root)
     if not command:
         return ToolResult(
             ok=False,
-            payload={"error": "no test command detected; pass command explicitly"},
+            payload={"error": "no test command detected for this repository"},
         )
+    argv = shlex.split(command, posix=False)
+    if not argv:
+        return ToolResult(ok=False, payload={"error": "detected test command is empty"})
     try:
         completed = subprocess.run(
-            command,
-            shell=True,
+            argv,
             cwd=str(root),
             capture_output=True,
             text=True,
-            timeout=args.timeout_sec or _TEST_TIMEOUT,
+            timeout=timeout,
+            shell=False,
             check=False,
         )
     except subprocess.TimeoutExpired:
@@ -325,9 +345,11 @@ def run_tests(sandbox: WorkdirSandbox, args: RunTestsArgs) -> ToolResult:
             ok=False,
             payload={
                 "command": command,
-                "error": f"tests timed out after {args.timeout_sec or _TEST_TIMEOUT}s",
+                "error": f"tests timed out after {timeout}s",
             },
         )
+    except OSError as exc:
+        return ToolResult(ok=False, payload={"command": command, "error": str(exc)})
     output = (completed.stdout or "") + (completed.stderr or "")
     return ToolResult(
         ok=completed.returncode == 0,

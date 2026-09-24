@@ -36,11 +36,11 @@ class AgentConfig(BaseModel):
     workdir_only: bool = True
     sandbox_mode: SandboxMode = "workspace"
     protected_paths: list[str] = Field(default_factory=list)
-    shell_timeout_sec: int = 60
-    max_tool_rounds: int = 30
-    max_repeat_calls: int = 4
-    max_turn_tokens: int = 0
-    max_output_chars: int = 8000
+    shell_timeout_sec: int = Field(default=60, ge=1, le=3600)
+    max_tool_rounds: int = Field(default=30, ge=1, le=1000)
+    max_repeat_calls: int = Field(default=4, ge=0, le=10000)
+    max_turn_tokens: int = Field(default=0, ge=0, le=100_000_000)
+    max_output_chars: int = Field(default=8000, ge=200, le=1_000_000)
     show_thinking: bool = True
     show_tools: bool = True
     show_plan: bool = True
@@ -51,11 +51,11 @@ class AgentConfig(BaseModel):
 
 class ContextConfig(BaseModel):
     agents_md: str = "AGENTS.md"
-    max_fragment_chars: int = 8000
-    history_budget_chars: int = 96000
-    max_context_tokens: int = 32768
-    compact_threshold: float = 0.85
-    keep_recent_messages: int = 8
+    max_fragment_chars: int = Field(default=8000, ge=200, le=1_000_000)
+    history_budget_chars: int = Field(default=96000, ge=1000, le=100_000_000)
+    max_context_tokens: int = Field(default=32768, ge=1024, le=10_000_000)
+    compact_threshold: float = Field(default=0.85, ge=0.1, le=0.99)
+    keep_recent_messages: int = Field(default=8, ge=2, le=200)
 
 
 class McpServerConfig(BaseModel):
@@ -67,8 +67,8 @@ class McpServerConfig(BaseModel):
 
 class MemoryConfig(BaseModel):
     enabled: bool = True
-    top_k: int = 6
-    capacity: int = 500
+    top_k: int = Field(default=6, ge=1, le=50)
+    capacity: int = Field(default=500, ge=1, le=100_000)
     embedding_model: str = "text-embedding-3-small"
     auto_extract: bool = True
 
@@ -158,6 +158,30 @@ def _load_toml(path: Path) -> dict[str, Any]:
     return data
 
 
+def _sanitize_project_config(raw: dict[str, Any]) -> dict[str, Any]:
+    """A repository-local .spark.toml is untrusted input: it must not be able to
+    execute code, hook tools, or redirect credentials to a third-party endpoint."""
+    clean = dict(raw)
+    clean.pop("mcp_servers", None)
+    clean.pop("mcp", None)
+    clean.pop("hooks", None)
+    clean.pop("model_profiles", None)
+    provider = clean.get("provider")
+    if isinstance(provider, dict):
+        provider = dict(provider)
+        provider.pop("base_url", None)
+        provider.pop("api_key", None)
+        provider.pop("api_key_env", None)
+        clean["provider"] = provider
+    agent = clean.get("agent")
+    if isinstance(agent, dict):
+        agent = dict(agent)
+        agent.pop("approval", None)
+        agent.pop("sandbox_mode", None)
+        clean["agent"] = agent
+    return clean
+
+
 def load_config(
     *,
     config_path: Path | None = None,
@@ -186,10 +210,8 @@ def load_config(
                 else candidate.name == ".spark.toml"
             )
             break
-    if from_local_workdir and isinstance(raw.get("agent"), dict):
-        agent_raw = raw["agent"]
-        agent_raw.pop("approval", None)
-        agent_raw.pop("sandbox_mode", None)
+    if from_local_workdir:
+        raw = _sanitize_project_config(raw)
     try:
         cfg = SparkConfig.model_validate(raw)
     except Exception as exc:
@@ -225,7 +247,7 @@ def require_api_key(cfg: SparkConfig) -> str | None:
 def mask_secret(value: str | None) -> str:
     if not value:
         return ""
-    if len(value) <= 8:
+    if len(value) <= 12:
         return "*" * len(value)
     return value[:4] + "..." + value[-4:]
 

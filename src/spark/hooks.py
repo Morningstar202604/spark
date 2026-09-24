@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
+
+SHELL_METACHARACTERS = set("&|<>^%!\n\r\x00")
 
 
 @dataclass
@@ -19,7 +20,7 @@ class Hook(Protocol):
 
 
 class ShellHook:
-    """Runs a configured shell command. Exit 0 allows; non-zero blocks with stderr as reason."""
+    """Runs a configured command directly. Never routed through a shell interpreter."""
 
     def __init__(
         self, name: str, command: list[str], cwd: Path, timeout: int = 15
@@ -30,24 +31,15 @@ class ShellHook:
         self.timeout = timeout
 
     def run(self, payload: dict[str, Any]) -> HookDecision:
-        if os.name == "nt":
-            wrapped = [
-                "cmd.exe",
-                "/d",
-                "/s",
-                "/c",
-                subprocess.list2cmdline(self.command),
-            ]
-        else:
-            wrapped = list(self.command)
         try:
             completed = subprocess.run(
-                wrapped,
+                list(self.command),
                 cwd=str(self.cwd),
                 input=json.dumps(payload, ensure_ascii=False),
                 capture_output=True,
                 text=True,
                 timeout=self.timeout,
+                shell=False,
                 check=False,
             )
         except subprocess.TimeoutExpired:
@@ -99,14 +91,22 @@ class HookRegistry:
             command = item.get("command")
             if event not in cls.EVENTS or not isinstance(command, str):
                 continue
-            args = [command] + [str(part) for part in (item.get("args") or [])]
+            args = [str(part) for part in (item.get("args") or [])]
+            if not command.strip() or _has_shell_metacharacters(command):
+                continue
+            if any(_has_shell_metacharacters(part) for part in args):
+                continue
             registry.register(
                 event,
                 ShellHook(
                     str(item.get("name") or f"{event}:{command}"),
-                    args,
+                    [command, *args],
                     cwd,
                     int(item.get("timeout_sec") or 15),
                 ),
             )
         return registry
+
+
+def _has_shell_metacharacters(value: str) -> bool:
+    return any(char in SHELL_METACHARACTERS for char in value)

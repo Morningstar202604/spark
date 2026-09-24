@@ -237,7 +237,11 @@ async def _exec_async(
 @app.command("web")
 def web_cmd(
     workdir: Path = typer.Option(Path("."), "--workdir"),
-    approval: Optional[str] = typer.Option("full-auto", "--approval"),
+    approval: Optional[str] = typer.Option(
+        None,
+        "--approval",
+        help="suggest | auto-edit | full-auto（默认逐项询问，确认后再执行）",
+    ),
     model: Optional[str] = typer.Option(None, "--model"),
     provider: Optional[str] = typer.Option(None, "--provider"),
     config: Optional[Path] = typer.Option(None, "--config"),
@@ -246,7 +250,11 @@ def web_cmd(
         "--sandbox-mode",
         help="sandbox-only | workspace | full-access | unrestricted",
     ),
-    host: str = typer.Option("0.0.0.0", "--host"),
+    host: str = typer.Option(
+        "127.0.0.1",
+        "--host",
+        help="默认仅本机可访问；改为 0.0.0.0 会把控制面暴露到局域网/公网，风险自负",
+    ),
     port: int = typer.Option(8000, "--port"),
 ) -> None:
     try:

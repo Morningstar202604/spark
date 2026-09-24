@@ -5,6 +5,7 @@ import os
 import tarfile
 import tempfile
 import time
+import uuid
 from pathlib import Path
 
 from spark.config import default_home
@@ -43,12 +44,15 @@ def _iter_workdir_files(root: Path):
 
 
 def snapshot_workdir(workdir: Path) -> str:
-    """Create a tar.gz snapshot of the workdir; returns its opaque snapshot id (sha256 prefix)."""
+    """Create a tar.gz snapshot of the workdir; returns its opaque snapshot id."""
     workdir = workdir.resolve()
     snap_dir = _snapshot_dir()
     snap_dir.mkdir(parents=True, exist_ok=True)
     stamp = time.strftime("%Y%m%d-%H%M%S")
-    sid = f"{stamp}-{hashlib.sha256(str(workdir).encode()).hexdigest()[:8]}"
+    # Uniqueness must not depend on wall-clock seconds: two snapshots in the same
+    # second must not overwrite each other.
+    unique = uuid.uuid4().hex[:12]
+    sid = f"{stamp}-{unique}"
     out = snap_dir / f"{sid}.tar.gz"
     fd, tmp_name = tempfile.mkstemp(
         prefix=f".{sid}.", suffix=".tar.gz.partial", dir=str(snap_dir)
@@ -81,8 +85,10 @@ def restore_workdir(workdir: Path, snapshot_id: str) -> dict:
     if not src.is_file():
         raise FileNotFoundError(f"snapshot not found: {snapshot_id}")
     restored = 0
+    removed = 0
     with tarfile.open(src, "r:gz") as tar:
         members = tar.getmembers()
+        archived = {m.name for m in members if m.isfile()}
         for m in members:
             dest = (workdir / m.name).resolve()
             if not dest.is_relative_to(workdir):
@@ -91,7 +97,21 @@ def restore_workdir(workdir: Path, snapshot_id: str) -> dict:
             if m.isfile():
                 tar.extract(m, workdir, filter="data")
                 restored += 1
-    return {"snapshot_id": snapshot_id, "restored_files": restored}
+        # Files created after the snapshot are not in the archive; leaving them in
+        # place would make rollback a partial restore, so drop the ones we own.
+        for path, rel in _iter_workdir_files(workdir):
+            name = str(rel).replace("\\", "/")
+            if name not in archived:
+                try:
+                    path.unlink()
+                    removed += 1
+                except OSError:
+                    continue
+    return {
+        "snapshot_id": snapshot_id,
+        "restored_files": restored,
+        "removed_new_files": removed,
+    }
 
 
 def latest_snapshot_id() -> str | None:

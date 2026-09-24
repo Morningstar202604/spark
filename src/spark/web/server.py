@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import secrets
 import threading
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -73,6 +74,56 @@ def parse_mcp_servers(items: list) -> list:
 
 
 HOOK_EVENTS = tuple(HookRegistry.EVENTS)
+
+_WINDOWS_RESERVED = {"con", "prn", "aux", "nul"}
+
+MAX_REQUEST_BYTES = 32 * 1024 * 1024
+
+
+def _safe_agents_md_name(filename: str) -> str | None:
+    """Accept only a bare filename inside the workdir. Rejects any path that could
+    escape it (absolute, drive letter, UNC, separators, traversal, device names)."""
+    if not filename or filename != filename.strip():
+        return None
+    if filename in {".", ".."} or len(filename) > 255:
+        return None
+    if any(sep in filename for sep in ("/", "\\", ":", "\x00")):
+        return None
+    if ".." in filename:
+        return None
+    stem = filename.split(".")[0].lower()
+    if stem in _WINDOWS_RESERVED:
+        return None
+    return filename
+
+
+_BLOCKED_HOST_PREFIXES = (
+    "127.",
+    "10.",
+    "192.168.",
+    "169.254.",
+    "0.",
+    "[::1]",
+    "localhost",
+)
+
+
+def _probe_target_allowed(base_url: str, trusted_base_url: str) -> bool:
+    """Only probe the same origin the user already configured; never let a request
+    send the stored credential to an arbitrary host."""
+    from urllib.parse import urlparse
+
+    def host_of(value: str) -> str:
+        try:
+            return (urlparse(value).hostname or "").lower()
+        except ValueError:
+            return ""
+
+    target = host_of(base_url)
+    trusted = host_of(trusted_base_url)
+    if not target or not trusted:
+        return False
+    return target == trusted
 
 
 _CTYPES = {
@@ -195,6 +246,7 @@ class SparkWebState:
         self.busy = False
         self.approver = WebApprover() if cfg.agent.approval != "full-auto" else None
         self.mcp_bridge: McpBridge | None = None
+        self.control_token = secrets.token_urlsafe(32)
         self.memory_store = MemoryStore(default_home() / "memory.db", cfg.memory)
         self.memory = MemoryService(self.memory_store, cfg)
         self.env_info = self._detect_env()
@@ -404,7 +456,7 @@ def serve_web(
     workdir: Path,
     cfg: SparkConfig,
     store: SessionStore,
-    host: str = "0.0.0.0",
+    host: str = "127.0.0.1",
     port: int = 8000,
 ) -> None:
     state = SparkWebState(workdir, cfg, store)
@@ -419,6 +471,21 @@ def serve_web(
         def log_message(self, fmt: str, *args) -> None:
             sys_stderr = __import__("sys").stderr
             sys_stderr.write(f"{self.address_string()} - {fmt % args}\n")
+
+        def _is_loopback(self) -> bool:
+            host = self.client_address[0] if self.client_address else ""
+            return host in {"127.0.0.1", "::1", "localhost", "::ffff:127.0.0.1"}
+
+        def _authorized(self) -> bool:
+            """Loopback callers are trusted; any remote caller must present the
+            per-process control token, so binding to a public interface does not
+            expose an unauthenticated code-execution surface."""
+            if self._is_loopback():
+                return True
+            supplied = self.headers.get("X-Spark-Token") or ""
+            return bool(state.control_token) and secrets.compare_digest(
+                supplied, state.control_token
+            )
 
         def _json(self, code: int, body: dict | list) -> None:
             data = json.dumps(body, ensure_ascii=False).encode("utf-8")
@@ -439,11 +506,28 @@ def serve_web(
 
         def _read_json(self) -> dict:
             length = int(self.headers.get("Content-Length", "0") or 0)
+            if length > MAX_REQUEST_BYTES:
+                raise ValueError("request body too large")
             raw = self.rfile.read(length) if length else b"{}"
             return json.loads(raw.decode("utf-8") or "{}")
 
+        def _guard(self, path: str) -> bool:
+            """Reject unauthenticated remote calls before touching any state."""
+            if self._is_loopback() or self._authorized():
+                return False
+            self._json(
+                401,
+                {
+                    "error": "unauthorized",
+                    "hint": "remote access requires the X-Spark-Token header",
+                },
+            )
+            return True
+
         def do_GET(self) -> None:
             path = urlparse(self.path).path
+            if path.startswith("/api/") and self._guard(path):
+                return
             if path in {"/", "/index.html"}:
                 self._html()
                 return
@@ -593,10 +677,15 @@ def serve_web(
 
         def do_POST(self) -> None:
             path = urlparse(self.path).path
+            if self._guard(path):
+                return
             try:
                 body = self._read_json()
             except json.JSONDecodeError:
                 self._json(400, {"error": "invalid json"})
+                return
+            except ValueError as exc:
+                self._json(413, {"error": str(exc)})
                 return
             if path == "/api/models/save":
                 name = str(body.get("name") or "").strip()
@@ -683,9 +772,17 @@ def serve_web(
                     self._json(409, {"error": "agent is busy"})
                     return
                 content = str(body.get("content") or "")
-                filename = state.cfg.context.agents_md
-                if "/" in filename or ".." in filename:
-                    self._json(400, {"error": "invalid agents_md filename"})
+                filename = _safe_agents_md_name(state.cfg.context.agents_md)
+                if filename is None:
+                    self._json(
+                        400,
+                        {
+                            "error": (
+                                "invalid agents_md filename: it must be a bare filename "
+                                "inside the workdir"
+                            )
+                        },
+                    )
                     return
                 target = state.workdir / filename
                 if content.strip():
@@ -1175,9 +1272,20 @@ def serve_web(
                     body.get("base_url") or state.cfg.provider.base_url
                 ).strip()
                 model = str(body.get("model") or state.cfg.provider.model).strip()
-                api_key = str(body.get("api_key") or "").strip() or (
-                    state.cfg.provider.api_key or ""
-                )
+                stored_key = state.cfg.provider.api_key or ""
+                if not _probe_target_allowed(base_url, state.cfg.provider.base_url):
+                    self._json(
+                        400,
+                        {
+                            "error": (
+                                "refusing to send the stored credential to a different "
+                                "endpoint; change the provider base_url explicitly, or "
+                                "supply an explicit api_key for this address"
+                            )
+                        },
+                    )
+                    return
+                api_key = str(body.get("api_key") or "").strip() or stored_key
                 if not api_key:
                     try:
                         api_key = require_api_key(state.cfg) or ""
@@ -1194,10 +1302,17 @@ def serve_web(
             self._json(404, {"error": "not found"})
 
     server = ThreadingHTTPServer((host, port), Handler)
+    local_only = host in {"127.0.0.1", "localhost", "::1"}
     print(
-        f"Spark web preview at http://{host}:{port} session={state.session_id}",
+        f"Spark web at http://{host}:{port} session={state.session_id}",
         flush=True,
     )
+    if not local_only:
+        print(
+            "WARNING: listening beyond loopback. Remote callers must send the "
+            f"X-Spark-Token header.\n  token: {state.control_token}",
+            flush=True,
+        )
     try:
         server.serve_forever()
     finally:

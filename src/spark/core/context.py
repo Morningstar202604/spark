@@ -13,10 +13,20 @@ def load_system_prompt() -> str:
 
 
 def load_agents_md(workdir: Path, cfg: SparkConfig) -> str | None:
-    path = workdir / cfg.context.agents_md
-    if not path.is_file():
+    name = cfg.context.agents_md
+    # Only a bare filename may be read, and the result must still land inside the
+    # workdir after symlink resolution.
+    if not name or any(sep in name for sep in ("/", "\\", ":")) or ".." in name:
         return None
-    text = path.read_text(encoding="utf-8", errors="replace")
+    base = workdir.resolve()
+    path = base / name
+    try:
+        resolved = path.resolve()
+    except OSError:
+        return None
+    if not resolved.is_relative_to(base) or not resolved.is_file():
+        return None
+    text = resolved.read_text(encoding="utf-8", errors="replace")
     limit = cfg.context.max_fragment_chars
     if len(text) > limit:
         return text[:limit]
@@ -61,7 +71,9 @@ def build_messages(
     kept: list[ChatMessage] = []
     used = 0
     for msg in reversed(recent):
-        size = len(msg.content or "") + sum(len(str(c.arguments)) for c in (msg.tool_calls or []))
+        size = len(msg.content or "") + sum(
+            len(str(c.arguments)) for c in (msg.tool_calls or [])
+        )
         if used + size > budget and kept:
             break
         kept.append(msg)

@@ -206,6 +206,21 @@ def set_value(cfg: SparkConfig, key: str, raw: str) -> None:
     if key in SECRET_FIELDS:
         value = str(value) or None
     setattr(target, field, value)
+    _revalidate(cfg, section)
+
+
+def _revalidate(cfg: SparkConfig, section: str) -> None:
+    """Re-run pydantic validation so range/enum rules cannot be bypassed by direct assignment."""
+    from pydantic import ValidationError
+
+    try:
+        SparkConfig.model_validate(cfg.model_dump())
+    except ValidationError as exc:
+        first = exc.errors()[0] if exc.errors() else None
+        field = ".".join(str(p) for p in (first or {}).get("loc", ())) or section
+        raise SetupError(
+            f"{field} 取值不被接受：{(first or {}).get('msg', 'invalid value')}"
+        ) from exc
 
 
 def check_health(
