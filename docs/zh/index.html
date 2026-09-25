@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Spark — 先征求你同意，才动手的本地 AI 编程助手</title>
+<meta name="description" content="Spark 是本地优先的 AI 编程助手：审批门保护、Prompt Injection 防护、本地语义记忆、国产模型开箱即用（DeepSeek / 通义 / 智谱 / Kimi / 豆包 / Ollama）。轻量、开源、MIT。">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%2314b8a6'/%3E%3Cpath d='M33 13 22 36h6l-3 15 15-23h-7l3-15z' fill='white'/%3E%3C/svg%3E">
+<style>
+  :root{
+    --teal:#14b8a6; --deep:#0f766e; --ink:#1f2937; --mut:#6b7280;
+    --bg:#f8fafc; --card:#ffffff; --line:#e5e7eb;
+  }
+  *{box-sizing:border-box; margin:0; padding:0}
+  html{scroll-behavior:smooth}
+  body{font:16px/1.7 -apple-system,"PingFang SC","Microsoft YaHei","Segoe UI",Roboto,Arial,sans-serif; color:var(--ink); background:var(--bg);}
+  .wrap{max-width:1080px; margin:0 auto; padding:0 24px}
+  nav{position:sticky; top:0; z-index:20; background:rgba(255,255,255,.88); backdrop-filter:blur(10px); border-bottom:1px solid var(--line);}
+  nav .wrap{display:flex; align-items:center; gap:18px; height:58px}
+  .brand{display:flex; align-items:center; gap:9px; font-weight:800; font-size:17px; color:var(--ink); text-decoration:none; padding:8px 0}
+  .brand .lg{width:26px; height:26px; border-radius:7px; background:linear-gradient(135deg,var(--teal),var(--deep)); display:flex; align-items:center; justify-content:center; color:#fff; font-size:14px}
+  nav a.navlink{color:var(--mut); text-decoration:none; font-size:14px; font-weight:600; padding:12px 4px; display:inline-block}
+  nav a.navlink:hover{color:var(--deep)}
+  nav .sp{flex:1}
+  .btn{display:inline-block; padding:9px 18px; border-radius:9px; font-weight:700; font-size:14px; text-decoration:none; cursor:pointer; border:1px solid transparent}
+  .btn.primary{background:linear-gradient(135deg,var(--teal),var(--deep)); color:#fff; box-shadow:0 4px 14px rgba(20,184,166,.3)}
+  .btn.primary:hover{filter:brightness(1.05)}
+  .btn.ghost{background:transparent; color:var(--deep); border-color:var(--line)}
+  .btn.ghost:hover{border-color:var(--teal)}
+  header{text-align:center; padding:96px 24px 72px}
+  .hero-kicker{display:inline-block; font-size:13px; font-weight:800; letter-spacing:.12em; text-transform:uppercase; color:var(--deep); background:rgba(20,184,166,.12); padding:6px 14px; border-radius:999px; margin-bottom:22px}
+  h1{font-size:clamp(32px,5.5vw,52px); line-height:1.25; font-weight:900; letter-spacing:-.01em; margin-bottom:18px}
+  h1 em{font-style:normal; background:linear-gradient(90deg,var(--teal),var(--deep)); -webkit-background-clip:text; background-clip:text; color:transparent}
+  .tagline{font-size:clamp(15px,2.2vw,19px); color:var(--mut); max-width:740px; margin:0 auto 32px}
+  .cta{display:flex; gap:14px; justify-content:center; flex-wrap:wrap}
+  .badges{margin-top:26px; display:flex; gap:8px; justify-content:center; flex-wrap:wrap; font-size:13px; color:var(--mut)}
+  .video-shell{margin:8px auto 0; max-width:880px; border-radius:16px; overflow:hidden; border:1px solid var(--line); box-shadow:0 22px 60px rgba(15,118,110,.14); background:#000}
+  video{display:block; width:100%; height:auto}
+  section{padding:64px 0}
+  .sec-head{text-align:center; margin-bottom:44px}
+  .sec-head .k{font-size:13px; font-weight:800; letter-spacing:.14em; text-transform:uppercase; color:var(--teal)}
+  .sec-head h2{font-size:clamp(26px,4vw,38px); font-weight:900; letter-spacing:-.01em}
+  .sec-head p{color:var(--mut); max-width:660px; margin:10px auto 0}
+  .grid{display:grid; gap:18px}
+  .grid.c3{grid-template-columns:repeat(auto-fit,minmax(290px,1fr))}
+  .grid.c2{grid-template-columns:repeat(auto-fit,minmax(320px,1fr))}
+  .card{background:var(--card); border:1px solid var(--line); border-radius:14px; padding:24px}
+  .card h3{font-size:16.5px; font-weight:800; margin-bottom:8px; display:flex; gap:8px; align-items:center}
+  .card p{font-size:14.5px; color:var(--mut)}
+  .emoji{font-size:22px}
+  .tbl-wrap{overflow-x:auto; -webkit-overflow-scrolling:touch; border-radius:14px}
+  .table{width:100%; border-collapse:collapse; background:var(--card); border:1px solid var(--line); border-radius:14px; overflow:hidden; font-size:14.5px}
+  .table th{background:#f1f5f9; text-align:left; padding:12px 16px; font-size:13px; text-transform:uppercase; letter-spacing:.06em; color:var(--mut)}
+  .table td{padding:12px 16px; border-top:1px solid var(--line); vertical-align:top}
+  .table .yes{color:var(--deep); font-weight:800}
+  .table .no{color:#ef4444; font-weight:700}
+  .shots{display:grid; grid-template-columns:repeat(auto-fit,minmax(300px,1fr)); gap:16px}
+  .shots figure{background:var(--card); border:1px solid var(--line); border-radius:14px; overflow:hidden; margin:0}
+  .shots img{width:100%; display:block; border-bottom:1px solid var(--line)}
+  .shots figcaption{font-size:13.5px; color:var(--mut); padding:10px 14px}
+  .steps{counter-reset:s; display:grid; gap:14px; max-width:780px; margin:0 auto}
+  .step{display:flex; gap:16px; align-items:flex-start; background:var(--card); border:1px solid var(--line); border-radius:14px; padding:20px 22px}
+  .step .n{counter-increment:s; flex:0 0 38px; width:38px; height:38px; border-radius:10px; background:linear-gradient(135deg,var(--teal),var(--deep)); color:#fff; font-weight:900; display:flex; align-items:center; justify-content:center}
+  .step .n::before{content:counter(s)}
+  .step b{display:block; font-size:15.5px; margin-bottom:3px}
+  .step span{font-size:14px; color:var(--mut)}
+  code{background:#f1f5f9; border:1px solid var(--line); border-radius:6px; padding:2px 7px; font-size:13.5px; font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; color:var(--deep)}
+  .codeblock{background:#0f172a; color:#e2e8f0; border-radius:12px; padding:18px 20px; font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:13.5px; overflow-x:auto; margin-top:18px; line-height:1.7}
+  .codeblock .c{color:#64748b}
+  footer{border-top:1px solid var(--line); padding:36px 0 46px; text-align:center; color:var(--mut); font-size:13.5px}
+  footer .brand{justify-content:center; margin-bottom:10px}
+  @media(max-width:640px){ header{padding:72px 16px 56px} .step{flex-direction:column} nav a.navlink{display:none} nav .btn.ghost{display:none} nav .btn{padding:8px 12px; font-size:13px} }
+</style>
+</head>
+<body>
+
+<nav><div class="wrap">
+  <a class="brand" href="../"><span class="lg">⚡</span> Spark</a>
+  <a class="navlink" href="#why">为什么</a>
+  <a class="navlink" href="#features">功能</a>
+  <a class="navlink" href="#compare">对比</a>
+  <a class="navlink" href="#start">快速开始</a>
+  <span class="sp"></span>
+  <a class="btn ghost" href="https://github.com/X33834/spark">GitHub</a>
+  <a class="btn ghost" href="../">English</a>
+  <a class="btn primary" href="#start">快速开始</a>
+</div></nav>
+
+<header>
+  <div class="wrap">
+    <div class="hero-kicker">本地优先 · 开源 · MIT</div>
+    <h1>先征求你同意，<em>才动手的本地 AI 编程助手。</em></h1>
+    <p class="tagline">跑在你本机，每一步都看得见。写文件、执行命令一律先经你确认——国产模型开箱即用，零隐性 AI 调用。</p>
+    <div class="cta">
+      <a class="btn primary" href="#start">30 秒跑起来</a>
+      <a class="btn ghost" href="https://github.com/X33834/spark">去 GitHub 点星</a>
+    </div>
+    <div class="badges">
+      <span>🛡️ 审批门</span><span>🧠 注入防护</span><span>🔒 本地语义记忆</span><span>🇨🇳 DeepSeek · 通义 · 智谱 · Kimi · 豆包 · Ollama</span>
+    </div>
+  </div>
+</header>
+
+<div class="wrap">
+  <div class="video-shell"><video controls playsinline preload="metadata" poster="../media/screenshot-hero.png"><source src="../media/promo.mp4" type="video/mp4">你的浏览器不支持视频播放。</video></div>
+</div>
+
+<section id="why"><div class="wrap">
+  <div class="sec-head"><div class="k">为什么是 Spark</div><h2>刻意做的不一样</h2><p>多数 Agent 悄悄自动改文件、无条件信任工具的输出。Spark 从零重写，做的正是反面。</p></div>
+  <div class="grid c3">
+    <div class="card"><h3><span class="emoji">🛡️</span> 审批门</h3><p>每一次 <code>write_file</code>、<code>apply_patch</code>、<code>run_shell</code> 都会暂停征求你同意——带按文件分组的 diff 预览。询问 / 自动编辑 / 全自动三档，保护路径永远拒绝。</p></div>
+    <div class="card"><h3><span class="emoji">🧠</span> Prompt Injection 防护</h3><p>工具和文件输出一律当作<b>数据，不是指令</b>。注入特征会被检测并内联警告——文件内容不能改写 Agent 的规则。</p></div>
+    <div class="card"><h3><span class="emoji">🔒</span> 本地语义记忆</h3><p>说一句"记住 XX 是 YY"——FTS5 存本地，可选升级为真正的向量语义检索（豆包 API 或离线 BGE-M3）。零隐性模型调用。</p></div>
+    <div class="card"><h3><span class="emoji">🇨🇳</span> 国产模型优先</h3><p>DeepSeek v4 · 通义 · 智谱 GLM · Kimi K3 · 豆包 · Ollama——按 2026 现役型号调好的预设，无需折腾海外账号。</p></div>
+    <div class="card"><h3><span class="emoji">🪶</span> 轻量是设计原则</h3><p>单文件 Web 前端、一个 uvicorn 进程、零 Electron。一条 <code>pip install</code>，全部数据落在 <code>~/.spark2/</code> 的人可读 JSONL。</p></div>
+    <div class="card"><h3><span class="emoji">🧩</span> 可扩展</h3><p>插件就是丢进 <code>~/.spark2/plugins/</code> 的 <code>.py</code> 文件；MCP（stdio + Streamable HTTP）内置；插件工具照样过审批门。</p></div>
+  </div>
+</div></section>
+
+<section id="features"><div class="wrap">
+  <div class="sec-head"><div class="k">功能</div><h2>v0.8.0 一应俱全</h2><p>多文件编辑、持久终端、子 Agent、会话分叉、代码索引、成本面板——完整工作流，一点不臃肿。</p></div>
+  <div class="grid c2">
+    <div class="card"><h3>📦 多文件编辑</h3><p><code>apply_patch</code> 一次补丁改多个文件；审批弹窗按文件分组、可展开/折叠、带 +/- 徽标。全有或全无，内置 git 检查点回滚。</p></div>
+    <div class="card"><h3>🖥️ 持久终端</h3><p>UI 里嵌真实 bash PTY（xterm.js），cwd 锁定工作目录。折叠、刷新都不杀进程——重开即恢复。多 tab、自适应、随时接管输入。</p></div>
+    <div class="card"><h3>👥 子 Agent</h3><p><code>explore</code> 只读调查员，动手前先摸清代码；<code>general</code> 全工具执行器，写操作<b>照样过审批</b>。事件内联进会话，一个取消级联全停。</p></div>
+    <div class="card"><h3>🍴 分叉与并行</h3><p>任意节点把会话复制成独立分支；多会话并行运行，实时"● 运行中"徽标，刷新后仍在。</p></div>
+    <div class="card"><h3>🔎 代码索引</h3><p><code>index_project</code> / <code>search_symbol</code> / <code>lint_file</code>。Python 用标准库 <code>ast</code>（符号+行号），其他语言行级提取；按工作目录缓存、自动失效、全只读。</p></div>
+    <div class="card"><h3>💰 成本面板</h3><p>每次调用的 tokens 与估算费用按会话记录；顶栏"用量"面板带会话排行条。内置 2026-09 已核验官方价（DeepSeek 谷价、豆包方舟），可覆盖。</p></div>
+  </div>
+</div></section>
+
+<section id="compare"><div class="wrap">
+  <div class="sec-head"><div class="k">对比</div><h2>Spark vs 三大主流</h2><p>opencode、ZCode、Codex CLI 都是好工具——下面这些是 Spark 有、它们没有的。</p></div>
+  <div class="tbl-wrap"><table class="table">
+    <tr><th></th><th>Spark</th><th>opencode</th><th>ZCode</th><th>Codex CLI</th></tr>
+    <tr><td>Prompt Injection 防护</td><td class="yes">✓ 内置</td><td class="no">✗</td><td class="no">✗</td><td class="no">✗</td></tr>
+    <tr><td>跨会话语义记忆</td><td class="yes">✓ 本地</td><td class="no">✗</td><td class="no">✗</td><td class="no">✗</td></tr>
+    <tr><td>国产模型开箱即用</td><td class="yes">✓ 预设</td><td>部分</td><td class="yes">✓ GLM 原生</td><td class="no">✗</td></tr>
+    <tr><td>审批体验</td><td>审批门 + 分组 diff</td><td>allow/ask/deny</td><td>Default/Plan/Yolo</td><td>沙箱 × 策略</td></tr>
+    <tr><td>MCP</td><td>stdio + Streamable HTTP</td><td>stdio + HTTP + OAuth</td><td>stdio + SSE + HTTP</td><td>stdio + HTTP</td></tr>
+    <tr><td>本地优先、不依赖云</td><td class="yes">✓ 100%</td><td class="yes">✓</td><td class="yes">✓</td><td class="no">绑定 OpenAI</td></tr>
+  </table></div>
+</div></section>
+
+<section id="start"><div class="wrap">
+  <div class="sec-head"><div class="k">快速开始</div><h2>30 秒跑起来</h2><p>一次安装、一个进程、全本地。</p></div>
+  <div class="codeblock"><span class="c"># 安装并启动</span><br>pip install -e ".[dev]"<br>spark2 web<br><br><span class="c"># 无头 / 终端界面 / 体检</span><br>spark2 run "重构 lib.py" --workdir /path/to/project<br>spark2 tui<br>spark2 doctor</div>
+  <div class="steps" style="margin-top:26px">
+    <div class="step"><div class="n"></div><div><b>选一个模型服务</b><span>DeepSeek · 通义 · 智谱 · Kimi · 豆包 · Ollama——或者<b>演示模式</b>，不填任何密钥先体验完整流程。</span></div></div>
+    <div class="step"><div class="n"></div><div><b>指向你的项目</b><span>在设置里设好工作目录。目录内自由读写；目录之外的操作一律先征求你同意。</span></div></div>
+    <div class="step"><div class="n"></div><div><b>直接说人话</b><span>"帮我修一下登录接口的 bug。"——看着它 计划 → 工具调用 → diff 预览 → 你确认 → 出结果。你的机器，你说了算。</span></div></div>
+  </div>
+  <div class="shots" style="margin-top:34px">
+    <figure><img src="../media/screenshot-hero.png" alt="Spark 空状态" loading="lazy"><figcaption>品牌空状态 · 三步引导</figcaption></figure>
+    <figure><img src="../media/screenshot-approval.png" alt="审批弹窗" loading="lazy"><figcaption>写入先确认 · 分组 diff 审批</figcaption></figure>
+    <figure><img src="../media/screenshot-injection.png" alt="注入防护" loading="lazy"><figcaption>注入指令内联警告，绝不执行</figcaption></figure>
+    <figure><img src="../media/screenshot-multifile.png" alt="多文件编辑" loading="lazy"><figcaption>apply_patch · 按文件 diff 审阅</figcaption></figure>
+    <figure><img src="../media/screenshot-subagent.png" alt="子 Agent" loading="lazy"><figcaption>explore 子 Agent 只读调查</figcaption></figure>
+    <figure><img src="../media/screenshot-index.png" alt="代码索引" loading="lazy"><figcaption>index_project · 符号与行号</figcaption></figure>
+    <figure><img src="../media/screenshot-usage.png" alt="成本面板" loading="lazy"><figcaption>用量面板 · 每会话 tokens 与费用</figcaption></figure>
+    <figure><img src="../media/screenshot-terminal.png" alt="持久终端" loading="lazy"><figcaption>持久 PTY · 折叠刷新不丢</figcaption></figure>
+  </div>
+</div></section>
+
+<footer><div class="wrap">
+  <div class="brand"><span class="lg">⚡</span> Spark</div>
+  MIT 开源 · 站在 ripgrep · difflib · SQLite FTS5 · 官方 MCP SDK · Textual · FastAPI 肩上<br>
+  为喜欢"先问再动手、本地运行、不烧钱"的人而做。
+</div></footer>
+
+</body>
+</html>
