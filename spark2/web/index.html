@@ -1,0 +1,1132 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Spark 编程助手</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230B1220'/%3E%3Cpath d='M20 40l6-16h3l-4 10h10l-3 6z' fill='%232DD4BF'/%3E%3C/svg%3E" />
+<style>
+  :root {
+    /* 浅色为默认主题；[data-theme="dark"] 覆盖为深色 */
+    --bg:#f4f6fa; --panel:#ffffff; --panel2:#e9eef5; --line:#dbe2ec; --line2:#c7d1df;
+    --text:#1b2735; --muted:#5a6a7c; --dim:#8b98a9;
+    --teal:#0d9488; --teal-dim:rgba(13,148,136,.09); --teal-border:rgba(13,148,136,.35);
+    --red:#d64545; --red-dim:rgba(214,69,69,.08); --red-border:rgba(214,69,69,.35);
+    --amber:#b26a00; --green:#0e9d6e; --blue:#2f6fd6;
+    --btn-text:#ffffff; --code-text:#2b3a4d; --hover:rgba(27,39,53,.05); --overlay:rgba(20,30,45,.42);
+    --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,"Courier New",monospace;
+    --sans:"PingFang SC","Noto Sans SC","Microsoft YaHei",system-ui,sans-serif;
+  }
+  [data-theme="dark"] {
+    --bg:#0b1220; --panel:#121b2e; --panel2:#0e1726; --line:#22304a; --line2:#2c3d5c;
+    --text:#e8eef7; --muted:#8fa3bd; --dim:#5c7189;
+    --teal:#2dd4bf; --teal-dim:rgba(45,212,191,.12); --teal-border:rgba(45,212,191,.4);
+    --red:#f87171; --red-dim:rgba(248,113,113,.08); --red-border:rgba(248,113,113,.4);
+    --amber:#f5a524; --green:#34d399; --blue:#60a5fa;
+    --btn-text:#04211c; --code-text:#c9d8ea; --hover:rgba(255,255,255,.02); --overlay:rgba(0,0,0,.6);
+  }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  html,body { height:100%; }
+  body { background:var(--bg); color:var(--text); font:15px/1.7 var(--sans); -webkit-font-smoothing:antialiased; overflow:hidden; }
+  button { font-family:inherit; cursor:pointer; }
+  .app { display:flex; flex-direction:column; height:100dvh; }
+
+  /* 顶栏 */
+  .topbar { display:flex; align-items:center; gap:10px; padding:10px 14px; border-bottom:1px solid var(--line); background:var(--panel); flex:none; }
+  .logo { width:22px; height:22px; flex:none; }
+  .topbar .title { font-weight:700; font-size:15px; }
+  .topbar .sideline { flex:1; min-width:0; }
+  .topbar .sideline .st { color:var(--muted); font-size:12px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .iconbtn { background:var(--panel2); border:1px solid var(--line); color:var(--muted); border-radius:8px; padding:6px 10px; font-size:13px; }
+  .iconbtn:hover { color:var(--text); border-color:var(--line2); }
+  .iconbtn.danger { color:var(--red); border-color:var(--red-border); }
+
+  /* 上下文水位 */
+  .meterwrap { height:3px; background:var(--panel2); flex:none; }
+  .meter { height:100%; width:0%; background:var(--teal); transition:width .4s; }
+  .meter.warn { background:var(--amber); }
+
+  /* 消息区 */
+  main { flex:1; overflow-y:auto; padding:18px 14px 24px; }
+  .inner { max-width:860px; margin:0 auto; display:flex; flex-direction:column; gap:16px; }
+  .msg { max-width:86%; }
+  .msg.user { align-self:flex-end; background:var(--teal-dim); border:1px solid var(--teal-border); border-radius:14px 14px 4px 14px; padding:10px 14px; white-space:pre-wrap; word-break:break-word; }
+  .msg.assistant { align-self:flex-start; width:100%; position:relative; }
+  .msg.assistant .text { white-space:pre-wrap; word-break:break-word; }
+  .msg.assistant .copy { position:absolute; top:2px; right:0; opacity:0; transition:opacity .15s; background:var(--panel2); border:1px solid var(--line); color:var(--muted); border-radius:6px; width:26px; height:24px; display:flex; align-items:center; justify-content:center; }
+  .msg.assistant:hover .copy, .msg.assistant .copy:focus-visible { opacity:1; }
+  .msg.assistant .copy:hover { color:var(--teal); border-color:var(--teal); }
+  .msg.error { align-self:stretch; background:var(--red-dim); border:1px solid var(--red-border); color:var(--red); border-radius:12px; padding:10px 14px; font-size:14px; }
+
+  /* 思考块 */
+  .think { border:1px solid var(--line); border-left:3px solid var(--dim); border-radius:10px; background:var(--panel2); margin:6px 0; }
+  .think summary { cursor:pointer; color:var(--muted); font-size:12.5px; padding:7px 12px; list-style:none; }
+  .think summary::-webkit-details-marker { display:none; }
+  .think pre { font-family:var(--mono); font-size:12px; color:var(--muted); white-space:pre-wrap; word-break:break-word; padding:0 12px 10px; max-height:260px; overflow-y:auto; }
+
+  /* 计划卡 */
+  .plan { border:1px solid var(--line); border-left:3px solid var(--teal); border-radius:10px; background:var(--panel2); padding:10px 14px; }
+  .plan .pt { color:var(--teal); font-size:12.5px; font-weight:700; margin-bottom:6px; letter-spacing:.05em; }
+  .plan ol { margin-left:18px; }
+  .plan li { color:var(--muted); font-size:13.5px; padding:2px 0; }
+  .plan li.done { color:var(--green); text-decoration:line-through; }
+
+  /* 工具卡 */
+  .tool { border:1px solid var(--line); border-radius:10px; background:var(--panel2); margin:6px 0; overflow:hidden; }
+  .tool .thead { display:flex; align-items:center; gap:8px; padding:8px 12px; cursor:pointer; user-select:none; }
+  .tool .thead:hover { background:var(--hover); }
+  .tool .tname { font-family:var(--mono); font-size:13px; color:var(--teal); font-weight:600; }
+  .tool .tsum { flex:1; min-width:0; color:var(--muted); font-size:12.5px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .tool .tdur { color:var(--dim); font-size:11.5px; }
+  .tool .status { width:16px; height:16px; flex:none; }
+  .tool .tbody { display:none; border-top:1px solid var(--line); padding:0; }
+  .tool.open .tbody { display:block; }
+  .tool .tbody pre { font-family:var(--mono); font-size:12px; line-height:1.6; white-space:pre-wrap; word-break:break-word; padding:10px 12px; max-height:320px; overflow-y:auto; color:var(--code-text); }
+  .tool .injwarn { display:flex; align-items:flex-start; gap:8px; border-top:1px solid var(--red-border); padding:9px 12px; font-size:12px; color:var(--red); background:var(--red-dim); }
+  .tool .injwarn .injicon { flex:none; font-size:14px; line-height:1.4; }
+  .tool .injwarn b { display:block; font-size:12.5px; }
+  .tool .injwarn p { color:var(--muted); margin-top:1px; }
+  .tool .diff .add { color:var(--green); } .tool .diff .del { color:var(--red); }
+  .tool .diff .hdr { color:var(--blue); }
+
+  /* 输入栏 */
+  .inputbar { flex:none; border-top:1px solid var(--line); background:var(--panel); padding:10px 14px calc(10px + env(safe-area-inset-bottom)); }
+  .ibox { max-width:860px; margin:0 auto; display:flex; gap:8px; align-items:flex-end; }
+  textarea { flex:1; resize:none; background:var(--panel2); border:1px solid var(--line); color:var(--text); border-radius:12px; padding:10px 14px; font:15px/1.6 var(--sans); min-height:46px; max-height:160px; }
+  textarea:focus { outline:none; border-color:var(--teal); }
+  textarea::placeholder { color:var(--dim); }
+  .sendbtn { background:var(--teal); color:var(--btn-text); border:none; border-radius:12px; padding:12px 18px; font-weight:700; font-size:14px; }
+  .sendbtn:disabled { background:var(--line2); color:var(--dim); cursor:not-allowed; }
+  .hint { max-width:860px; margin:6px auto 0; color:var(--dim); font-size:11.5px; }
+
+  /* 内置终端 */
+  .termbar { flex:none; border-top:1px solid var(--line); background:var(--panel); display:none; flex-direction:column; height:260px; }
+  .termbar.open { display:flex; }
+  .termtabs { display:flex; align-items:center; gap:4px; padding:6px 10px 0; border-bottom:1px solid var(--line); flex:none; }
+  .termtab { background:none; border:1px solid var(--line); border-bottom:none; border-radius:8px 8px 0 0; color:var(--muted); font-size:12px; padding:5px 12px; cursor:pointer; }
+  .termtab.active { background:var(--panel2); color:var(--text); font-weight:600; }
+  .termadd { margin-left:auto; background:none; border:1px solid var(--line); border-radius:6px; color:var(--muted); font-size:13px; padding:2px 10px; cursor:pointer; }
+  .termadd:hover { color:var(--teal); border-color:var(--teal-border); }
+  .termstage { flex:1; min-height:0; background:#0b1220; position:relative; }
+  .termstage .xterm { height:100%; padding:6px 8px; }
+  .termstage .termph { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; color:#8fa3bd; font-size:13px; }
+  .termfoot { flex:none; padding:4px 10px; font-size:11px; color:var(--dim); }
+
+  /* 空状态 */
+  .empty { max-width:540px; margin:8vh auto; text-align:center; color:var(--muted); }
+  .empty h3 { color:var(--text); font-size:21px; letter-spacing:.5px; margin-bottom:6px; }
+  .empty .steps { display:flex; flex-direction:column; gap:9px; margin:20px 0; text-align:left; }
+  .empty .step { display:flex; gap:11px; align-items:flex-start; background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:12px 14px; font-size:13.5px; transition:border-color .15s, transform .15s; }
+  .empty .step:hover { border-color:var(--teal-border); transform:translateY(-1px); }
+  .empty .step .n { flex:none; width:24px; height:24px; border-radius:50%; background:linear-gradient(135deg,var(--teal),#0b7a6f); color:#fff; border:none; display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:700; box-shadow:0 1px 3px rgba(13,148,136,.3); }
+  .empty .cta { background:linear-gradient(135deg,var(--teal),#0b7a6f); color:var(--btn-text); border:none; border-radius:12px; padding:11px 24px; font-weight:700; font-size:14px; box-shadow:0 2px 8px rgba(13,148,136,.25); transition:filter .15s; }
+  .empty .cta:hover { filter:brightness(1.06); }
+
+  /* 抽屉 */
+  .overlay { position:fixed; inset:0; background:var(--overlay); display:none; z-index:40; }
+  .drawer { position:fixed; top:0; right:0; bottom:0; width:min(380px,92vw); background:var(--panel); border-left:1px solid var(--line); transform:translateX(105%); transition:transform .22s ease; z-index:50; display:flex; flex-direction:column; }
+  .drawer.open { transform:none; }
+  .drawer .dhead { display:flex; align-items:center; gap:10px; padding:14px; border-bottom:1px solid var(--line); font-weight:700; }
+  .drawer .dhead .sp { flex:1; }
+  .drawer .dbody { flex:1; overflow-y:auto; padding:14px; }
+  .newbtn { width:100%; background:var(--teal); color:var(--btn-text); border:none; border-radius:10px; padding:10px; font-weight:700; margin-bottom:12px; }
+  .sess { display:block; width:100%; text-align:left; background:var(--panel2); border:1px solid var(--line); border-radius:10px; padding:9px 12px; margin-bottom:8px; }
+  .sess:hover { border-color:var(--line2); }
+  .sess.active { border-color:var(--teal); background:var(--teal-dim); }
+  .sess .t { font-size:13.5px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .sess .rind { color:var(--teal); font-size:11px; font-weight:500; margin-left:4px; animation:blink 1.4s infinite; }
+  @keyframes blink { 50% { opacity:.35; } }
+  .sess .s { font-size:11.5px; color:var(--dim); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .sess .w { font-size:11.5px; color:var(--muted); font-family:var(--mono); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .sess .srow { display:flex; gap:6px; justify-content:flex-end; margin-top:2px; }
+  .sess .mini { background:none; border:none; color:var(--muted); font-size:11.5px; cursor:pointer; padding:3px 8px; border-radius:6px; }
+  .sess .mini:hover { color:var(--teal); background:var(--teal-dim); }
+  .sess .del { background:none; border:none; color:var(--red); font-size:11.5px; cursor:pointer; padding:3px 8px; border-radius:6px; }
+  .sess .del:hover { color:var(--red); background:var(--red-dim); }
+
+  .field { margin-bottom:14px; }
+  .field label { display:block; font-size:12.5px; color:var(--muted); margin-bottom:5px; }
+  .field input, .field select { width:100%; background:var(--panel2); border:1px solid var(--line); color:var(--text); border-radius:9px; padding:9px 11px; font:14px var(--sans); }
+  .field input:focus, .field select:focus { outline:none; border-color:var(--teal); }
+  .field .hint2 { font-size:11.5px; color:var(--dim); margin-top:4px; }
+  .row2 { display:flex; gap:8px; }
+  .btn { flex:1; background:var(--panel2); border:1px solid var(--line); color:var(--text); border-radius:9px; padding:9px; font-size:13.5px; }
+  .btn.primary { background:var(--teal); color:var(--btn-text); border-color:transparent; font-weight:700; }
+  .statusline { font-size:12.5px; color:var(--muted); margin-top:10px; word-break:break-all; }
+  .statusline.ok { color:var(--green); } .statusline.bad { color:var(--red); }
+
+  /* MCP 服务器管理 */
+  .mcprow { background:var(--panel2); border:1px solid var(--line); border-radius:10px; padding:9px 10px; margin-bottom:8px; }
+  .mcprow.http { border-color:var(--teal-border); background:var(--teal-dim); }
+  .mcprow .mcphead { display:flex; gap:6px; align-items:center; margin-bottom:6px; }
+  .mcprow .mcphead input { flex:1; min-width:0; background:var(--panel); border:1px solid var(--line); color:var(--text); border-radius:8px; padding:7px 9px; font:13px var(--sans); }
+  .mcprow .mcphead select { background:var(--panel); border:1px solid var(--line); color:var(--text); border-radius:8px; padding:6px 8px; font:13px var(--sans); }
+  .mcprow .mcphead input:focus, .mcprow .mcphead select:focus { outline:none; border-color:var(--teal); }
+  .mcprow .mcphead .del { background:none; border:none; color:var(--muted); font-size:13px; cursor:pointer; padding:4px 6px; border-radius:6px; }
+  .mcprow .mcphead .del:hover { color:var(--red); background:var(--red-dim); }
+  .mcprow .mcplines { display:flex; flex-direction:column; gap:5px; }
+  .mcprow .mcplines input { background:var(--panel); border:1px solid var(--line); color:var(--text); border-radius:8px; padding:7px 9px; font:12.5px var(--mono); min-width:0; width:100%; }
+  .mcprow .mcplines input:focus { outline:none; border-color:var(--teal); }
+  .mcprow .mcpdesc { font-size:11px; color:var(--dim); margin-top:6px; }
+  .mcpadd { display:block; width:100%; background:var(--panel2); border:1px dashed var(--line2); color:var(--muted); border-radius:9px; padding:9px; font-size:13px; }
+  .mcpadd:hover { color:var(--teal); border-color:var(--teal); }
+
+  /* 长期记忆 */
+  .sec-divider { margin:18px 0 10px; padding-top:14px; border-top:1px solid var(--line); font-size:12px; color:var(--muted); }
+  .mem { display:flex; gap:8px; align-items:flex-start; background:var(--panel2); border:1px solid var(--line); border-radius:9px; padding:8px 10px; margin-bottom:7px; }
+  .ubar { height:6px; border-radius:3px; background:var(--line); overflow:hidden; margin-top:3px; }
+  .ubar div { height:100%; background:linear-gradient(90deg,var(--teal),#0d9488); border-radius:3px; }
+  .about .ablogo { margin:0 0 8px; }
+  .about .abname { font-size:14px; font-weight:600; margin-bottom:6px; }
+  .rd { display:inline-block; margin:3px 4px 3px 0; padding:3px 8px; font-size:11.5px; color:var(--text); background:var(--panel2); border:1px solid var(--line); border-radius:999px; cursor:pointer; max-width:220px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; vertical-align:middle; }
+  .rd:hover { border-color:var(--teal); color:var(--teal); }
+  .mem .mk { flex:none; font-size:12px; font-weight:700; color:var(--teal); max-width:130px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; padding-top:1px; }
+  .mem .mv { flex:1; font-size:12.5px; color:var(--text); word-break:break-all; line-height:1.5; }
+  .mem .md { flex:none; color:var(--dim); font-size:11px; padding-top:2px; }
+  .mem button { flex:none; background:none; border:none; color:var(--red); font-size:12px; cursor:pointer; padding:0 2px; }
+  .memempty { color:var(--dim); font-size:12.5px; text-align:center; padding:14px 0; }
+
+  /* 审批弹窗 */
+  .modalwrap { position:fixed; inset:0; display:none; align-items:center; justify-content:center; z-index:60; background:var(--overlay); padding:16px; }
+  .modalwrap.open { display:flex; }
+  .modal { width:min(680px,100%); max-height:86dvh; display:flex; flex-direction:column; background:var(--panel); border:1px solid var(--line2); border-radius:16px; overflow:hidden; }
+  .modal .mhead { display:flex; align-items:center; gap:10px; padding:14px 16px; border-bottom:1px solid var(--line); }
+  .modal .mhead .mt { font-weight:700; font-size:15px; color:var(--amber); }
+  .modal .mhead .sp { flex:1; }
+  .modal .mbody { flex:1; overflow-y:auto; padding:14px 16px; }
+  .modal .msum { font-size:14px; margin-bottom:10px; word-break:break-word; }
+  .modal .mreason { font-size:12.5px; color:var(--muted); margin-bottom:8px; }
+  .apstat { font-size:12px; color:var(--dim); margin-bottom:8px; }
+  /* 多文件 diff：按文件分组的可折叠卡片 */
+  .apdiff { display:flex; flex-direction:column; gap:8px; max-height:46vh; overflow-y:auto; }
+  .apdiff .dfile { background:var(--panel2); border:1px solid var(--line); border-radius:10px; overflow:hidden; }
+  .apdiff .dfile.open { border-color:var(--teal-border); }
+  .apdiff .dfhead { display:flex; align-items:center; gap:8px; padding:8px 12px; cursor:pointer; user-select:none; font-size:12.5px; }
+  .apdiff .dfhead .dname { font-family:var(--mono); font-weight:600; color:var(--text); min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .apdiff .dfhead .dbadge { flex:none; font-size:11px; color:var(--muted); background:var(--panel); border:1px solid var(--line); border-radius:99px; padding:1px 8px; }
+  .apdiff .dfhead .darrow { flex:none; color:var(--dim); font-size:10px; transition:transform .15s; }
+  .apdiff .dfile.open .darrow { transform:rotate(90deg); }
+  .apdiff .dfbody { display:none; }
+  .apdiff .dfile.open .dfbody { display:block; }
+  .apdiff .dfbody pre { font-family:var(--mono); font-size:12px; line-height:1.6; white-space:pre-wrap; word-break:break-word; background:var(--panel); border-top:1px solid var(--line); padding:10px 12px; max-height:34vh; overflow-y:auto; margin:0; }
+  .modal .mfoot { display:flex; gap:8px; padding:12px 16px; border-top:1px solid var(--line); }
+  .modal .mfoot .btn { padding:11px; font-size:14px; }
+  .btn.allow { background:var(--green); color:var(--btn-text); border:none; font-weight:700; }
+  .btn.deny { background:var(--red); color:var(--btn-text); border:none; font-weight:700; }
+  .kbd { display:inline-block; border:1px solid var(--line2); border-bottom-width:2px; border-radius:5px; background:var(--panel2); padding:0 6px; font-family:var(--mono); font-size:11px; color:var(--muted); }
+
+  /* 令牌弹窗 */
+  .tokmodal { width:min(420px,94vw); }
+  .tokmodal .field input { font-size:16px; }
+
+  /* toast */
+  #toast { position:fixed; left:50%; bottom:24px; transform:translateX(-50%); background:var(--panel); border:1px solid var(--line2); color:var(--text); border-radius:10px; padding:9px 16px; font-size:13px; opacity:0; pointer-events:none; transition:opacity .25s; z-index:80; max-width:86vw; }
+  #toast.show { opacity:1; }
+
+  @media (max-width:600px) {
+    body { font-size:15px; }
+    textarea { font-size:16px; }
+    .msg { max-width:96%; }
+    .drawer { width:100%; }
+    .modal { width:100%; max-height:92dvh; }
+    .topbar .title { display:none; }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="topbar">
+    <div class="logo" style="width:22px;height:22px;flex:none"></div>
+    <div class="title">Spark</div>
+    <span id="version" style="color:var(--dim);font-size:11px"></span>
+    <div class="sideline"><div class="st" id="sessionLine">未选择会话</div></div>
+    <button class="iconbtn danger" id="btnCancel" style="display:none">停止</button>
+    <button class="iconbtn" id="btnTheme" title="切换浅色/深色主题"></button>
+    <button class="iconbtn" id="btnTerm" title="打开内置终端">终端</button>
+    <button class="iconbtn" id="btnUsage" title="用量统计">用量</button>
+    <button class="iconbtn" id="btnSessions">会话</button>
+    <button class="iconbtn" id="btnSettings">设置</button>
+  </div>
+  <div class="meterwrap"><div class="meter" id="meter" title="上下文占用"></div></div>
+  <main id="chat">
+    <div class="inner" id="msgList"></div>
+    <div class="empty" id="emptyState" style="display:none">
+      <svg class="logo" viewBox="0 0 64 64" width="56" height="56" style="margin:0 auto 10px;display:block" aria-hidden="true"><defs><linearGradient id="lg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#14b8a6"/><stop offset="1" stop-color="#0f766e"/></linearGradient></defs><rect width="64" height="64" rx="16" fill="url(#lg)"/><path d="M33 13 22 36h6l-3 15 15-23h-7l3-15z" fill="#ffffff"/></svg>
+      <h3>Spark 编程助手</h3>
+      <p style="font-size:13.5px">本地 AI 编程助手 · 审批门保护 · 记忆 · MCP · 国产模型开箱即用</p>
+      <div class="steps">
+        <div class="step"><span class="n">1</span><span>打开右上角「设置」，选一个模型服务（DeepSeek / 通义 / 智谱 / Kimi / 豆包 / Ollama），填 API Key 并保存；不填也能用「演示模式」先体验。</span></div>
+        <div class="step"><span class="n">2</span><span>在设置里把「工作目录」指向你的项目文件夹（Agent 只能在此内自由读写，之外需你确认）。</span></div>
+        <div class="step"><span class="n">3</span><span>回来点「＋ 新建会话」，描述你想做的事，例如：帮我修一下登录接口的 bug。</span></div>
+      </div>
+      <button class="cta" id="btnStart">＋ 新建会话，开始使用</button>
+    </div>
+  </main>
+  <div class="inputbar">
+    <div class="ibox">
+      <textarea id="input" placeholder="描述你想做的事，例如：帮我修一下登录接口的 bug…" rows="1"></textarea>
+      <button class="sendbtn" id="btnSend">发送</button>
+    </div>
+    <div class="hint">Enter 发送 · Shift+Enter 换行 · 写入文件与执行命令会先征求你确认</div>
+  </div>
+  <!-- 内置终端（用户自己的持久 PTY；Agent 的命令仍需审批，两者互不干扰） -->
+  <div class="termbar" id="termbar">
+    <div class="termtabs" id="termTabs"><button class="termadd" id="btnTermAdd" title="新建终端">＋</button></div>
+    <div class="termstage" id="termStage"></div>
+  </div>
+</div>
+
+<!-- 会话抽屉 -->
+<div class="overlay" id="ovSessions"></div>
+<div class="drawer" id="drawerSessions">
+  <div class="dhead"><span>会话</span><span class="sp"></span><button class="iconbtn" data-close="drawerSessions">关闭</button></div>
+  <div class="dbody">
+    <button class="newbtn" id="btnNewSession">＋ 新建会话</button>
+    <div id="sessionList"></div>
+  </div>
+</div>
+
+<!-- 设置抽屉 -->
+<div class="overlay" id="ovSettings"></div>
+<div class="drawer" id="drawerSettings">
+  <div class="dhead"><span>设置</span><span class="sp"></span><button class="iconbtn" data-close="drawerSettings">关闭</button></div>
+  <div class="dbody">
+    <div class="field"><label>模型服务</label><select id="fProvider"></select></div>
+    <div class="field"><label>接口地址</label><input id="fBaseUrl" placeholder="https://api.deepseek.com/v1" /></div>
+    <div class="field"><label>模型名</label><input id="fModel" placeholder="deepseek-v4-pro" /></div>
+    <div class="field"><label>快速模型 <span class="opt">可选</span></label><input id="fFastModel" placeholder="deepseek-flash" /><div class="hint2">多模型路由：简单问答自动走它，留空 = 不启用（动手任务始终走主模型）</div></div>
+    <div class="field"><label>API Key</label><input id="fKey" type="password" placeholder="sk-…" /></div>
+    <div class="field"><label>工作目录</label><input id="fWorkdir" placeholder="/home/me/projects" /><div class="hint2">Agent 只能在此内自由读写，之外写入需你确认</div><div id="recentDirs"></div></div>
+    <div class="field"><label>审批模式</label><select id="fApproval"></select></div>
+    <div class="field"><label>上下文上限（tokens）</label><input id="fMaxCtx" type="number" min="4000" max="262144" step="1000" /><div class="hint2">超出时自动把最早对话压缩成摘要，不丢关键信息</div></div>
+    <div class="field"><label>记忆检索</label><select id="fMemoryEmbed">
+      <option value="off">关键词检索（零依赖，默认）</option>
+      <option value="api">语义检索 · 豆包向量（复用上方接口与 Key）</option>
+      <option value="local">语义检索 · 本地模型（需 pip install sentence-transformers）</option>
+    </select></div>
+    <div class="field" id="fMemModelRow" style="display:none"><label>本地嵌入模型</label><input id="fMemModel" placeholder="BAAI/bge-m3" /></div>
+    <div class="row2">
+      <button class="btn" id="btnTest">测试连接</button>
+      <button class="btn primary" id="btnSaveCfg">保存设置</button>
+    </div>
+    <div class="statusline" id="cfgStatus"></div>
+    <div class="sec-divider">MCP 服务器（官方 MCP SDK，工具自动并入 Agent）</div>
+    <div id="mcpList"></div>
+    <button class="mcpadd" id="btnAddMcp">＋ 添加 MCP 服务器</button>
+    <div class="field hint2">只读工具（readOnlyHint）自动放行；写类工具进审批门。示例：npx -y @modelcontextprotocol/server-filesystem /path</div>
+    <div class="sec-divider">长期记忆（Agent 记住的事，随工作目录隔离）</div>
+    <div id="memoryList"></div>
+    <div class="sec-divider">插件（本地 ~/.spark2/plugins/ 的 .py，重启生效）</div>
+    <div id="pluginList" class="hint2">正在加载…</div>
+    <div class="sec-divider">代码索引</div>
+    <div class="hint2">Agent 动手前可用 index_project / search_symbol 摸清项目符号（Python 用标准库 AST 精确解析，其他语言行级提取），lint_file 做语法自查（.py / .js）——零重依赖，索引缓存在 ~/.spark2/codeindex/。</div>
+    <div class="sec-divider">关于 Spark</div>
+    <div id="aboutBox" class="about">
+      <div class="ablogo"><svg class="logo" viewBox="0 0 64 64" width="30" height="30" aria-hidden="true"><defs><linearGradient id="lga" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#14b8a6"/><stop offset="1" stop-color="#0f766e"/></linearGradient></defs><rect width="64" height="64" rx="16" fill="url(#lga)"/><path d="M33 13 22 36h6l-3 15 15-23h-7l3-15z" fill="#ffffff"/></svg></div>
+      <div class="abname">Spark <span id="aboutVer"></span></div>
+      <div class="hint2">本地 AI 编程助手。核心能力：审批门保护（写文件/执行命令先征求你确认）、Prompt Injection 防护、本地语义记忆、多模型路由（国产模型开箱即用）、多文件编辑（diff 审批）、内置持久终端、多 Agent（explore/general）、会话分叉、代码索引、轻量插件点、成本可观测面板。</div>
+      <div class="hint2">数据都在本地：会话存 ~/.spark2/sessions/、记忆 ~/.spark2/memory/、用量 ~/.spark2/usage/、索引 ~/.spark2/codeindex/。仅在你配置 API Key 的模型服务上发生调用。</div>
+    </div>
+  </div>
+</div>
+
+<!-- 用量统计抽屉 -->
+<div class="overlay" id="ovUsage"></div>
+<div class="drawer" id="drawerUsage">
+  <div class="dhead"><span>用量统计</span><span class="sp"></span><button class="iconbtn" data-close="drawerUsage">关闭</button></div>
+  <div class="dbody">
+    <div id="usageBox" class="hint2">加载中…</div>
+  </div>
+</div>
+
+<!-- 审批弹窗 -->
+<div class="modalwrap" id="approvalModal">
+  <div class="modal">
+    <div class="mhead"><span class="mt">需要你确认</span><span class="sp"></span><button class="iconbtn" id="btnDenyX">拒绝</button></div>
+    <div class="mbody">
+      <div class="msum" id="apSummary"></div>
+      <div class="mreason" id="apReason"></div>
+      <div class="apstat" id="apStat"></div>
+      <div id="apDiff"></div>
+    </div>
+    <div class="mfoot">
+      <button class="btn deny" id="btnDeny">拒绝 <span class="kbd">D</span></button>
+      <button class="btn" id="btnAlways">本次始终允许 <span class="kbd">S</span></button>
+      <button class="btn allow" id="btnAllow">允许 <span class="kbd">A</span></button>
+    </div>
+  </div>
+</div>
+
+<!-- 令牌弹窗 -->
+<div class="modalwrap" id="tokenModal">
+  <div class="modal tokmodal">
+    <div class="mhead"><span class="mt">访问令牌</span></div>
+    <div class="mbody">
+      <p style="font-size:13.5px;color:var(--muted);margin-bottom:10px">该服务需要访问令牌。运行 <code style="font-family:var(--mono);background:var(--panel2);padding:1px 6px;border-radius:5px;border:1px solid var(--line)">spark2 web</code> 时会在终端打印带令牌的地址。</p>
+      <div class="field"><label>令牌</label><input id="fToken" style="font-size:16px" placeholder="粘贴终端里的 token=…" /></div>
+    </div>
+    <div class="mfoot"><button class="btn primary" id="btnTokenOk" style="width:100%">进入</button></div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+(() => {
+  "use strict";
+  const $ = s => document.querySelector(s);
+  const state = {
+    token: localStorage.getItem("spark2_token") || "",
+    cfg: null, presets: {}, modes: [],
+    sessions: [], sid: null, running: false,
+    approval: null, lastUsage: 0,
+    mcpServers: [],
+  };
+  let curAssistant = null; // 当前回合的助手消息元素
+
+  /* ---------- 通用 ---------- */
+  let toastTimer;
+  function toast(msg) {
+    const t = $("#toast"); t.textContent = msg; t.classList.add("show");
+    clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove("show"), 2600);
+  }
+  async function api(path, opts = {}) {
+    opts.headers = Object.assign({ "Content-Type": "application/json" }, opts.headers || {});
+    if (state.token) opts.headers["X-Spark-Token"] = state.token;
+    const res = await fetch(path, opts);
+    if (res.status === 401) { $("#tokenModal").classList.add("open"); throw new Error("auth"); }
+    return res;
+  }
+  function esc(s) { return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+  function fmtTime(iso) { const d = new Date(iso); return isNaN(d) ? "" : (d.getMonth()+1) + "月" + d.getDate() + "日 " + String(d.getHours()).padStart(2,"0") + ":" + String(d.getMinutes()).padStart(2,"0"); }
+  function safeParseHeaders(s) {
+    try {
+      const o = JSON.parse(s);
+      return (o && typeof o === "object" && !Array.isArray(o)) ? o : {};
+    } catch (e) { toast("请求头需是 JSON 对象（如 {\"Authorization\":\"Bearer xxx\"}）"); return {}; }
+  }
+
+  /* ---------- 主题（浅色默认 / 深色可选，本地记忆） ---------- */
+  const THEME_SUN = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M4.9 4.9l1.4 1.4m11.4 11.4 1.4 1.4M2 12h2m16 0h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>';
+  const THEME_MOON = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>';
+  function applyTheme(t) {
+    document.documentElement.dataset.theme = t;
+    localStorage.setItem("spark2_theme", t);
+    $("#btnTheme").innerHTML = t === "dark" ? THEME_SUN : THEME_MOON;
+    $("#btnTheme").title = t === "dark" ? "切换到浅色" : "切换到深色";
+  }
+
+  /* ---------- 初始化 ---------- */
+  async function loadConfig() {
+    const res = await api("/api/config");
+    const data = await res.json();
+    state.cfg = data.current; state.cfg.version = data.version; state.presets = data.presets; state.modes = data.approval_modes;
+    const sel = $("#fProvider"); sel.innerHTML = "";
+    for (const [k, v] of Object.entries(data.presets)) {
+      const o = document.createElement("option"); o.value = k; o.textContent = v.label; if (k === data.current.provider) o.selected = true; sel.appendChild(o);
+    }
+    const am = $("#fApproval"); am.innerHTML = "";
+    for (const m of data.approval_modes) { const o = document.createElement("option"); o.value = m.value; o.textContent = m.label; if (m.value === data.current.approval_mode) o.selected = true; am.appendChild(o); }
+    $("#fBaseUrl").value = data.current.base_url || "";
+    $("#fModel").value = data.current.model || "";
+    $("#fFastModel").value = data.current.model_fast || "";
+    $("#fKey").value = data.current.api_key || "";
+    $("#fWorkdir").value = data.current.workdir || "";
+    $("#fMaxCtx").value = data.current.max_context_tokens || 32000;
+    $("#fMemoryEmbed").value = data.current.memory_embedding || "off";
+    $("#fMemModel").value = data.current.memory_embed_model || "";
+    memModelRow();
+    $("#version").textContent = "v" + (data.version || "");
+    state.mcpServers = (data.mcp && data.mcp.servers) || [];
+    state.mcpServers.forEach(s => { s.transport = s.transport || "stdio"; s.headersJson = (s.headers && Object.keys(s.headers).length) ? JSON.stringify(s.headers) : ""; });
+    renderMcp();
+    updateMeter(0);
+  }
+  async function loadSessions(silent) {
+    try {
+      const res = await api("/api/sessions"); state.sessions = await res.json();
+    } catch (e) { if (!silent) throw e; return; }
+    renderSessions();
+  }
+  function renderSessions() {
+    const box = $("#sessionList"); box.innerHTML = "";
+    if (!state.sessions.length) { box.innerHTML = '<div style="color:var(--dim);font-size:13px;text-align:center;padding:20px 0">还没有会话，点上面新建</div>'; return; }
+    for (const s of state.sessions) {
+      const b = document.createElement("div"); b.className = "sess" + (s.id === state.sid ? " active" : "");
+      b.innerHTML = '<div class="t">' + esc(s.title) + (s.running ? ' <span class="rind" title="正在运行">● 运行中</span>' : "") + '</div><div class="s">' + fmtTime(s.updated) + ' · ' + s.messages + " 条消息</div><div class='w'>" + esc(s.workdir || "") + '</div><div class="srow"><button class="mini" data-act="rename">重命名</button><button class="mini" data-act="fork">分叉</button><button class="mini" data-act="export">导出</button><button class="del" data-del="1">删除</button></div>';
+      b.querySelector(".t").onclick = () => selectSession(s.id);
+      b.querySelector("[data-act=rename]").onclick = async () => {
+        const title = prompt("会话新标题（留空取消）", s.title);
+        if (!title) return;
+        try {
+          const r = await api("/api/sessions/" + s.id, { method: "PATCH", body: JSON.stringify({ title: title.trim().slice(0, 60) }) });
+          if (!r.ok) { toast("重命名失败"); return; }
+          toast("已重命名");
+          if (state.sid === s.id) $("#sessionLine").textContent = title.trim().slice(0, 60) + " · " + (s.workdir || "");
+          await loadSessions(true);
+        } catch (err) { toast("重命名失败"); }
+      };
+      b.querySelector("[data-act=export]").onclick = async () => {
+        try {
+          const r = await api("/api/sessions/" + s.id);
+          const d = await r.json();
+          let md = "# " + (d.meta.title || "会话") + "\n\n";
+          for (const m of d.messages) {
+            if (m.role === "user") md += "## 你\n\n" + (m.content || "") + "\n\n";
+            else if (m.role === "assistant") md += "## Spark\n\n" + (m.content || "") + "\n\n";
+          }
+          const blob = new Blob([md], { type: "text/markdown;charset=utf-8" });
+          const a = document.createElement("a");
+          a.href = URL.createObjectURL(blob);
+          a.download = (d.meta.title || "会话").replace(/[\\/:*?"<>|]/g, "_").slice(0, 40) + ".md";
+          document.body.appendChild(a); a.click(); a.remove();
+          URL.revokeObjectURL(a.href);
+          toast("已导出 Markdown");
+        } catch (err) { toast("导出失败"); }
+      };
+      b.querySelector("[data-act=fork]").onclick = async () => {
+        try {
+          const r = await api("/api/sessions/" + s.id + "/fork", { method: "POST" });
+          if (!r.ok) { toast("分叉失败"); return; }
+          const meta = await r.json();
+          toast("已分叉出新会话");
+          await loadSessions(true);
+          selectSession(meta.id);
+        } catch (err) { toast("分叉失败"); }
+      };
+      b.querySelector(".del").onclick = async e => {
+        e.stopPropagation();
+        if (!confirm("删除会话「" + s.title + "」？此操作不可恢复。")) return;
+        try {
+          const r = await api("/api/sessions/" + s.id, { method: "DELETE" });
+          if (!r.ok) { toast("删除失败"); return; }
+          toast("会话已删除");
+          if (state.sid === s.id) { state.sid = null; $("#msgList").innerHTML = ""; curAssistant = null; showEmptyIfNeeded(); }
+          await loadSessions(true);
+        } catch (err) { toast("删除失败"); }
+      };
+      box.appendChild(b);
+    }
+  }
+  function showEmptyIfNeeded() {
+    const e = $("#emptyState");
+    if (!state.sid) { e.style.display = ""; return; }
+    const has = $("#msgList").children.length > 0;
+    e.style.display = has ? "none" : "";
+  }
+  async function selectSession(sid) {
+    state.sid = sid; closeDrawer("drawerSessions");
+    const res = await api("/api/sessions/" + sid);
+    const data = await res.json();
+    const meta = data.meta || {};
+    $("#sessionLine").textContent = (meta.title || "会话") + " · " + (meta.workdir || "");
+    $("#msgList").innerHTML = ""; curAssistant = null;
+    for (const m of data.messages) renderHistory(m);
+    renderSessions();
+    showEmptyIfNeeded();
+    autoScroll();
+  }
+  function renderHistory(m) {
+    if (m.role === "user") { addUserMsg(m.content || ""); }
+    else if (m.role === "assistant") { const el = newAssistant(); el.querySelector(".text").textContent = m.content || ""; }
+  }
+  async function newSession() {
+    const res = await api("/api/sessions", { method: "POST", body: JSON.stringify({ workdir: state.cfg ? state.cfg.workdir : "" }) });
+    if (res.status === 400) { const e = await res.json(); toast(e.detail || "请先设置工作目录"); openDrawer("drawerSettings"); return; }
+    const meta = await res.json();
+    await loadSessions(true); await selectSession(meta.id);
+  }
+
+  /* ---------- 消息渲染 ---------- */
+  function addUserMsg(text) {
+    const el = document.createElement("div"); el.className = "msg user"; el.textContent = text;
+    $("#msgList").appendChild(el); showEmptyIfNeeded(); autoScroll();
+  }
+  function newAssistant() {
+    const el = document.createElement("div"); el.className = "msg assistant";
+    el.innerHTML = '<div class="text"></div><button class="copy" title="复制内容" aria-label="复制内容"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button>';
+    el.querySelector(".copy").onclick = () => {
+      const t = el.querySelector(".text").textContent;
+      navigator.clipboard.writeText(t).then(() => toast("已复制"), () => toast("复制失败"));
+    };
+    $("#msgList").appendChild(el); curAssistant = el;
+    return el;
+  }
+  function getStreamSpan() {
+    if (!curAssistant) newAssistant();
+    return curAssistant.querySelector(".text");
+  }
+  function appendThinking(text) {
+    let t = curAssistant ? curAssistant.querySelector(".think") : null;
+    if (!t) {
+      const wrap = curAssistant || newAssistant();
+      const d = document.createElement("details"); d.className = "think";
+      d.innerHTML = "<summary>思考过程</summary><pre></pre>";
+      wrap.appendChild(d); t = d;
+    }
+    t.querySelector("pre").textContent += text;
+    autoScroll();
+  }
+  function planCard(steps) {
+    const el = document.createElement("div"); el.className = "plan";
+    let lis = ""; steps.forEach((s, i) => { lis += "<li>" + esc(s) + "</li>"; });
+    el.innerHTML = '<div class="pt">计划</div><ol>' + lis + "</ol>";
+    $("#msgList").appendChild(el);
+  }
+  function markPlanDone() {
+    const p = $("#msgList").querySelector(".plan:not(.done)");
+    if (p) { p.classList.add("done"); p.querySelectorAll("li").forEach(li => li.classList.add("done")); }
+  }
+  function toolCard(ev) {
+    const card = document.createElement("div"); card.className = "tool";
+    card.innerHTML =
+      '<div class="thead"><span class="status">⏳</span><span class="tname">' + esc(ev.name) + '</span>' +
+      '<span class="tsum">' + esc(ev.args_summary || "") + '</span><span class="tdur"></span></div>' +
+      '<div class="tbody"><pre class="out"></pre></div>';
+    card.querySelector(".thead").onclick = () => card.classList.toggle("open");
+    const pre = card.querySelector(".out");
+    if (ev.diff) { pre.classList.add("diff"); pre.innerHTML = highlightDiff(ev.diff); }
+    $("#msgList").appendChild(card);
+    autoScroll();
+    return card;
+  }
+  function highlightDiff(diff) {
+    return esc(diff).split("\n").map(l => {
+      if (l.startsWith("+++") || l.startsWith("---") || l.startsWith("@@")) return '<span class="hdr">' + esc(l) + "</span>";
+      if (l.startsWith("+")) return '<span class="add">' + esc(l) + "</span>";
+      if (l.startsWith("-")) return '<span class="del">' + esc(l) + "</span>";
+      return esc(l);
+    }).join("\n");
+  }
+  function findToolCard(id) {
+    const cards = $("#msgList").querySelectorAll(".tool");
+    for (const c of cards) if (c.dataset.id === id) return c;
+    return null;
+  }
+  function updateToolResult(ev) {
+    const card = findToolCard(ev.id);
+    if (!card) return;
+    const ok = !!ev.approved;
+    card.querySelector(".status").textContent = ok ? "✓" : "✗";
+    card.querySelector(".status").style.color = ok ? "var(--green)" : "var(--red)";
+    card.querySelector(".tdur").textContent = ev.duration_ms ? (ev.duration_ms / 1000).toFixed(1) + "s" : "";
+    const pre = card.querySelector(".out");
+    pre.classList.remove("diff");
+    pre.textContent = ev.output || "";
+    // 注入防护提示：工具返回内容疑似含注入指令（事件带 injected 标记）
+    let warn = card.querySelector(".injwarn");
+    if (ev.injected) {
+      if (!warn) {
+        warn = document.createElement("div");
+        warn.className = "injwarn";
+        warn.innerHTML = '<span class="injicon">⚠</span><div><b>已拦截注入指令</b><p>工具返回内容疑似包含恶意指令，已按普通文本忽略</p></div>';
+        card.appendChild(warn);
+      }
+    } else if (warn) {
+      warn.remove();
+    }
+    card.classList.add("open");
+  }
+  function errorMsg(text) {
+    const el = document.createElement("div"); el.className = "msg error"; el.textContent = text;
+    $("#msgList").appendChild(el); autoScroll();
+  }
+  function autoScroll() { const m = $("#chat"); m.scrollTop = m.scrollHeight; }
+
+  /* ---------- 上下文水位 ---------- */
+  function updateMeter(est) {
+    if (est) state.lastUsage = est;
+    const max = state.cfg ? (state.cfg.max_context_tokens || 32000) : 32000;
+    const pct = Math.min(100, Math.round(state.lastUsage / max * 100));
+    const m = $("#meter"); m.style.width = pct + "%"; m.classList.toggle("warn", pct > 80);
+    m.title = "上下文约 " + state.lastUsage + " / " + max + " tokens（" + pct + "%）";
+  }
+
+  /* ---------- 内置终端（持久 PTY，用户自己的终端） ---------- */
+  // xterm.js 随包本地化（web/vendor/），零外网依赖、开箱即用
+  const termState = { tabs: [], activeId: null };
+  function loadXterm(cb) {
+    if (window.Terminal) { cb(); return; }
+    const css = document.createElement("link");
+    css.rel = "stylesheet";
+    css.href = "/vendor/xterm.min.css";
+    document.head.appendChild(css);
+    const s = document.createElement("script");
+    s.src = "/vendor/xterm.min.js";
+    s.onload = () => cb();
+    s.onerror = () => toast("终端组件加载失败：缺少 web/vendor/xterm.min.js");
+    document.head.appendChild(s);
+  }
+  function termWsUrl(tabId) {
+    const proto = location.protocol === "https:" ? "wss://" : "ws://";
+    return proto + location.host + "/ws/pty?token=" + encodeURIComponent(state.token) +
+      "&sid=" + encodeURIComponent(state.sid || "") + "&tab=" + encodeURIComponent(tabId);
+  }
+  function activateTermTab(id) {
+    termState.activeId = id;
+    termState.tabs.forEach(t => {
+      t.box.style.display = t.id === id ? "" : "none";
+      t.btn.classList.toggle("active", t.id === id);
+    });
+    const tab = termState.tabs.find(t => t.id === id);
+    if (tab) tab.term.focus();
+  }
+  function addTermTab() {
+    loadXterm(() => {
+      if (!state.token) { toast("需要先访问令牌（页面已带令牌时忽略）"); }
+      const tabId = Math.random().toString(16).slice(2, 10);
+      const btn = document.createElement("button");
+      btn.className = "termtab";
+      btn.textContent = "终端 " + (termState.tabs.length + 1);
+      btn.onclick = () => activateTermTab(tabId);
+      $("#termTabs").insertBefore(btn, $("#btnTermAdd"));
+      const box = document.createElement("div");
+      box.style.display = "none";
+      box.innerHTML = '<div class="termph">连接中…</div>';
+      $("#termStage").appendChild(box);
+      const term = new Terminal({
+        fontFamily: '"PingFang SC","Noto Sans SC",ui-monospace,Menlo,Consolas,monospace',
+        fontSize: 13, lineHeight: 1.25, cursorBlink: true, scrollback: 5000,
+        theme: { background: "#0b1220", foreground: "#e8eef7", cursor: "#2dd4bf", selectionBackground: "#22304a" },
+      });
+      const ws = new WebSocket(termWsUrl(tabId));
+      termState.tabs.push({ id: tabId, term, ws, box, btn });
+      activateTermTab(tabId);
+      ws.onopen = () => {
+        const ph = box.querySelector(".termph");
+        if (ph) ph.remove();
+        term.open(box);
+        term.focus();
+        sendTermSize(tabId, box, ws);
+      };
+      ws.onmessage = e => {
+        let m; try { m = JSON.parse(e.data); } catch { return; }
+        if (m.type === "out") term.write(m.data);
+        else if (m.type === "err") term.write("\r\n[终端] " + m.message + "\r\n");
+        else if (m.type === "exit") term.write("\r\n[终端] 进程已退出，可关闭此页或新建终端\r\n");
+      };
+      ws.onclose = () => term.write("\r\n[终端] 连接已断开（重新打开面板可恢复）\r\n");
+      term.onData(d => { if (ws.readyState === 1) ws.send(JSON.stringify({ type: "in", data: d })); });
+      window.addEventListener("resize", () => { if (termState.activeId === tabId) sendTermSize(tabId, box, ws); });
+    });
+  }
+  function sendTermSize(tabId, box, ws) {
+    if (ws.readyState !== 1) return;
+    const w = box.clientWidth || 640, h = box.clientHeight || 240;
+    const cols = Math.max(20, Math.floor(w / 9));
+    const rows = Math.max(5, Math.floor(h / 18));
+    ws.send(JSON.stringify({ type: "resize", cols, rows }));
+  }
+  function toggleTerm() {
+    const bar = $("#termbar");
+    const willOpen = !bar.classList.contains("open");
+    bar.classList.toggle("open", willOpen);
+    if (willOpen) {
+      if (!termState.tabs.length) addTermTab();
+      else {
+        const tab = termState.tabs.find(t => t.id === termState.activeId) || termState.tabs[0];
+        if (tab) tab.term.focus();
+      }
+    }
+  }
+
+  /* ---------- SSE ---------- */
+  async function send() {
+    const prompt = $("#input").value.trim();
+    if (!prompt) return;
+    if (!state.sid) { toast("请先新建或选择一个会话"); openDrawer("drawerSessions"); return; }
+    if (state.running) return;
+    state.running = true; updateRunningUI();
+    addUserMsg(prompt); $("#input").value = ""; autoGrow();
+    curAssistant = null;
+    try {
+      const res = await fetch("/api/chat/stream", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Spark-Token": state.token },
+        body: JSON.stringify({ session_id: state.sid, prompt }),
+      });
+      if (res.status === 401) { $("#tokenModal").classList.add("open"); return; }
+      if (!res.ok) { const e = await res.json().catch(() => ({})); errorMsg(e.detail || "请求失败（" + res.status + "）"); return; }
+      const reader = res.body.getReader(); const dec = new TextDecoder();
+      let buf = "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += dec.decode(value, { stream: true });
+        let idx;
+        while ((idx = buf.indexOf("\n\n")) >= 0) {
+          const chunk = buf.slice(0, idx); buf = buf.slice(idx + 2);
+          const line = chunk.trim(); if (!line.startsWith("data:")) continue;
+          let ev; try { ev = JSON.parse(line.slice(5).trim()); } catch { continue; }
+          handleEvent(ev);
+        }
+      }
+    } catch (e) { errorMsg("连接中断：" + (e.message || e)); }
+    state.running = false; updateRunningUI(); markPlanDone();
+    loadSessions(true);
+  }
+  function handleEvent(ev) {
+    switch (ev.type) {
+      case "text": getStreamSpan().textContent += ev.delta; autoScroll(); break;
+      case "reasoning": appendThinking(ev.delta); break;
+      case "plan": planCard(ev.steps || []); break;
+      case "tool_start": { const card = toolCard(ev); card.dataset.id = ev.id; break; }
+      case "tool_result": updateToolResult(ev); break;
+      case "approval": openApproval(ev); break;
+      case "error": errorMsg(ev.message || "出错了"); break;
+      case "usage": updateMeter(ev.estimated); break;
+      case "done": if (ev.reason === "max_turns") errorMsg("已达到最大轮次，请分步提问。"); break;
+    }
+  }
+
+  /* ---------- 审批 ---------- */
+  function openApproval(ev) {
+    state.approval = ev;
+    $("#apSummary").textContent = ev.summary || "";
+    $("#apReason").textContent = "原因：" + (ev.reason || "");
+    // diff 里的绝对路径换成相对路径，更易读
+    let diff = ev.diff || "";
+    const wd = state.cfg ? state.cfg.workdir : "";
+    if (wd) diff = diff.split(wd).join(".");
+    renderDiffPanel(diff);
+    $("#approvalModal").classList.add("open");
+  }
+  /* 多文件 diff：按 "--- " 文件头切成文件块，逐块可展开/折叠 */
+  function splitDiffBlocks(diff) {
+    const lines = diff.split("\n");
+    const blocks = [];
+    let cur = null;
+    for (const ln of lines) {
+      if (ln.startsWith("--- ")) {
+        if (cur) blocks.push(cur);
+        cur = { head: [ln], body: [] };
+      } else if (cur) {
+        cur.body.push(ln);
+      }
+    }
+    if (cur) blocks.push(cur);
+    return blocks;
+  }
+  function diffCounts(block) {
+    let add = 0, rem = 0;
+    for (const ln of block.body) {
+      if (ln.startsWith("+++") || ln.startsWith("@@")) continue; // 文件头/行号头不算增删
+      if (ln.startsWith("+")) add++;
+      else if (ln.startsWith("-")) rem++;
+    }
+    return [add, rem];
+  }
+  function renderDiffPanel(diff) {
+    const statEl = $("#apStat");
+    const box = $("#apDiff");
+    box.classList.add("apdiff");
+    const blocks = splitDiffBlocks(diff);
+    if (!blocks.length) {
+      statEl.textContent = "";
+      box.innerHTML = '<div class="dfile"><div class="dfbody" style="display:block"><pre>' + esc(diff || "（无 diff）") + "</pre></div></div>";
+      return;
+    }
+    let totalA = 0, totalR = 0;
+    const cards = blocks.map((b, i) => {
+      const [a, r] = diffCounts(b);
+      totalA += a; totalR += r;
+      const pathLine = (b.head[0] || "").slice(4).trim().replace(/^[ab]\//, "") || "(未知文件)";
+      const openCls = i === 0 ? " open" : "";
+      return '<div class="dfile' + openCls + '">' +
+        '<div class="dfhead"><span class="darrow">▶</span><span class="dname">' + esc(pathLine) + '</span>' +
+        '<span class="dbadge">+' + a + ' −' + r + '</span></div>' +
+        '<div class="dfbody"><pre>' + highlightDiff(b.body.join("\n")) + '</pre></div></div>';
+    }).join("");
+    statEl.textContent = blocks.length + " 个文件 · +" + totalA + " −" + totalR + " · 点文件名展开/收起，允许后全部应用";
+    box.innerHTML = cards;
+    box.querySelectorAll(".dfhead").forEach(h => {
+      h.onclick = () => h.parentElement.classList.toggle("open");
+    });
+  }
+  async function answerApproval(action) {
+    const ev = state.approval; if (!ev) return;
+    state.approval = null; $("#approvalModal").classList.remove("open");
+    try {
+      await api("/api/approval", { method: "POST", body: JSON.stringify({ request_id: ev.request_id, action, tool: ev.tool }) });
+    } catch (e) { toast("审批提交失败"); }
+  }
+
+  /* ---------- 最近工作目录（体验增强） ---------- */
+  async function loadRecentDirs() {
+    const box = $("#recentDirs"); if (!box) return;
+    let dirs = [];
+    try { const r = await api("/api/recent-dirs"); const d = await r.json(); dirs = d.dirs || []; }
+    catch (e) { return; }
+    if (!dirs.length) { box.innerHTML = ""; return; }
+    box.innerHTML = '<div class="hint2" style="margin-top:4px">最近使用：</div>' +
+      dirs.map(d => '<button class="rd" data-d="' + esc(d) + '" title="' + esc(d) + '">' + esc(shortPath(d)) + '</button>').join("");
+    box.querySelectorAll(".rd").forEach(b => b.onclick = () => { $("#fWorkdir").value = b.dataset.d; });
+  }
+  function shortPath(p) { const s = String(p); const seg = s.split("/"); return seg.length > 3 ? "/…/" + seg.slice(-2).join("/") : s; }
+
+  /* ---------- 用量统计（P3：成本可观测） ---------- */
+  function fmtTokens(n) { return n >= 1e6 ? (n / 1e6).toFixed(2) + "M" : n >= 1e3 ? (n / 1e3).toFixed(1) + "k" : String(n); }
+  async function loadUsage() {
+    const box = $("#usageBox");
+    let data;
+    try {
+      const res = await api("/api/usage");
+      data = await res.json();
+    } catch (e) { box.innerHTML = '<div class="memempty">加载失败</div>'; return; }
+    const t = data.totals || {};
+    const rows = data.top_sessions || [];
+    if (!t.calls) { box.innerHTML = '<div class="memempty">还没有用量记录。每轮模型调用都会统计 tokens 与估算费用（单价按 2026-09 现役官方价，可在配置里覆盖）。</div>'; return; }
+    let html = '<div style="font-size:13px;line-height:1.9">' +
+      '<div><b>' + fmtTokens(t.total_tokens || 0) + '</b> tokens（输入 ' + fmtTokens(t.prompt_tokens || 0) + ' / 输出 ' + fmtTokens(t.completion_tokens || 0) + '）· ' + (t.calls || 0) + ' 次调用</div>' +
+      '<div>估算费用：<b style="color:var(--teal)">¥' + (t.est_cost || 0).toFixed(4) + '</b> <span class="hint2">（近 ' + (data.days || 30) + ' 天）</span></div>' +
+      '</div>';
+    if (rows.length) {
+      const max = Math.max(...rows.map(r => r.est_cost || 0), 0.0001);
+      html += '<div class="sec-divider">会话排行</div>';
+      for (const r of rows) {
+        const w = Math.max(4, Math.round(((r.est_cost || 0) / max) * 100));
+        html += '<div style="margin:6px 0"><div style="font-size:12px;display:flex;justify-content:space-between"><span>' + esc(String(r.session_id).slice(0, 8)) + '</span><span>' + fmtTokens(r.total_tokens || 0) + ' · ¥' + (r.est_cost || 0).toFixed(4) + '</span></div>' +
+          '<div class="ubar"><div style="width:' + w + '%"></div></div></div>';
+      }
+    }
+    box.innerHTML = html;
+  }
+
+  /* ---------- 插件（P3：轻量插件点） ---------- */
+  async function loadPlugins() {
+    const box = $("#pluginList");
+    let data;
+    try {
+      const res = await api("/api/plugins");
+      data = await res.json();
+    } catch (e) { box.innerHTML = '<span>加载失败</span>'; return; }
+    const items = data.plugins || [];
+    if (!items.length) {
+      box.innerHTML = '<span>暂无插件。在 ' + esc(data.dir || "~/.spark2/plugins") + ' 放一个 .py（导出 tools 或 register(registry)），重启生效。</span>';
+      return;
+    }
+    box.innerHTML = items.map(p =>
+      '<div class="mem"><span class="mk">' + esc(p.name) + '</span><span class="mv">' +
+      (p.error ? '<span style="color:var(--red)">加载失败：' + esc(p.error) + '</span>' : '工具：' + esc((p.tools || []).join("、") || "（无）")) +
+      '</span></div>'
+    ).join("");
+  }
+
+  /* ---------- 长期记忆 ---------- */
+  async function loadMemory() {
+    const box = $("#memoryList");
+    if (!state.cfg || !state.cfg.workdir) { box.innerHTML = '<div class="memempty">先在工作目录设置里指定项目路径</div>'; return; }
+    let data;
+    try {
+      const res = await api("/api/memory?workdir=" + encodeURIComponent(state.cfg.workdir));
+      data = await res.json();
+    } catch (e) { box.innerHTML = '<div class="memempty">加载失败</div>'; return; }
+    if (!data.items.length) { box.innerHTML = '<div class="memempty">还没有记忆。对话里说「记住 XX 是 YY」，Agent 就会记在这里。</div>'; return; }
+    box.innerHTML = "";
+    for (const it of data.items) {
+      const d = document.createElement("div"); d.className = "mem";
+      d.innerHTML = '<span class="mk">' + esc(it.key) + '</span><span class="mv">' + esc(it.value) + '</span><span class="md">' + fmtTime(it.created_at) + '</span><button data-id="' + it.id + '">删除</button>';
+      box.appendChild(d);
+    }
+    box.querySelectorAll("button[data-id]").forEach(b => b.onclick = async () => {
+      try {
+        await api("/api/memory/" + b.dataset.id, { method: "DELETE" });
+        toast("已删除这条记忆");
+        loadMemory();
+      } catch (e) { toast("删除失败"); }
+    });
+  }
+
+  /* ---------- MCP 服务器管理（本地 stdio / 远程 Streamable HTTP） ---------- */
+  function renderMcp() {
+    const box = $("#mcpList"); box.innerHTML = "";
+    state.mcpServers.forEach((s, i) => {
+      s.transport = s.transport || "stdio";
+      const http = s.transport === "http";
+      const d = document.createElement("div"); d.className = "mcprow" + (http ? " http" : "");
+      d.innerHTML =
+        '<div class="mcphead">' +
+          '<input data-k="name" placeholder="名称，如 filesystem" value="' + esc(s.name || "") + '">' +
+          '<select data-k="transport">' +
+            '<option value="stdio"' + (!http ? " selected" : "") + '>本地进程</option>' +
+            '<option value="http"' + (http ? " selected" : "") + '>远程 HTTP</option>' +
+          '</select>' +
+          '<button class="del" data-del="' + i + '" title="删除">✕</button>' +
+        '</div>' +
+        '<div class="mcplines" data-k="stdioLines"' + (http ? ' style="display:none"' : "") + '>' +
+          '<input data-k="command" placeholder="命令，如 npx / python" value="' + esc(s.command || "") + '">' +
+          '<input data-k="args" placeholder="参数，空格分隔，如 -y @modelcontextprotocol/server-filesystem /path" value="' + esc((s.args || []).join(" ")) + '">' +
+        '</div>' +
+        '<div class="mcplines" data-k="httpLines"' + (!http ? ' style="display:none"' : "") + '>' +
+          '<input data-k="url" placeholder="https://mcp.example.com/mcp" value="' + esc(s.url || "") + '">' +
+          '<input data-k="headers" placeholder="请求头 JSON，如 {\"Authorization\":\"Bearer xxx\"}" value="' + esc(s.headersJson || "") + '">' +
+        '</div>' +
+        '<div class="mcpdesc">' + (http ? "Streamable HTTP · 2026 无状态协议" : "本地子进程 · stdio") + '</div>';
+      d.querySelectorAll("input[data-k], select[data-k]").forEach(inp => {
+        const apply = () => {
+          const k = inp.dataset.k;
+          if (k === "args") s.args = inp.value.trim() ? inp.value.trim().split(/\s+/) : [];
+          else if (k === "headers") s.headersJson = inp.value;
+          else s[k] = inp.value.trim();
+        };
+        // input 用 oninput；select 用 onchange（select 不触发 input 事件）
+        if (inp.tagName === "SELECT") {
+          inp.onchange = () => {
+            s.transport = inp.value;
+            renderMcp();
+            const rows = box.querySelectorAll(".mcprow");
+            const cur = rows[i];
+            if (cur) cur.querySelector("input[data-k=" + (s.transport === "http" ? "url" : "command") + "]").focus();
+          };
+        } else {
+          inp.oninput = apply;
+        }
+      });
+      d.querySelector(".del").onclick = () => { state.mcpServers.splice(i, 1); renderMcp(); };
+      box.appendChild(d);
+    });
+  }
+  function addMcp() {
+    state.mcpServers.push({ name: "", command: "", args: [], env: {}, transport: "stdio", url: "", headersJson: "" });
+    renderMcp();
+    const rows = $("#mcpList").querySelectorAll(".mcprow");
+    const last = rows[rows.length - 1];
+    if (last) last.querySelector("input[data-k=name]").focus();
+  }
+
+  /* ---------- 设置 ---------- */
+  function presetChanged() {
+    const p = state.presets[$("#fProvider").value];
+    if (p) { $("#fBaseUrl").value = p.base_url || ""; $("#fModel").value = p.model || ""; }
+  }
+  function memModelRow() {
+    $("#fMemModelRow").style.display = $("#fMemoryEmbed").value === "local" ? "" : "none";
+  }
+  async function saveCfg() {
+    const body = {
+      provider: $("#fProvider").value,
+      base_url: $("#fBaseUrl").value.trim(),
+      model: $("#fModel").value.trim(),
+      model_fast: $("#fFastModel").value.trim(),
+      api_key: $("#fKey").value,
+      workdir: $("#fWorkdir").value.trim(),
+      approval_mode: $("#fApproval").value,
+      max_context_tokens: parseInt($("#fMaxCtx").value, 10) || 32000,
+      memory_embedding: $("#fMemoryEmbed").value,
+      memory_embed_model: $("#fMemModel").value.trim(),
+      mcp_servers: state.mcpServers.map(s => ({
+        name: s.name, transport: s.transport || "stdio",
+        command: s.command || "", args: s.args || [],
+        url: s.url || "",
+        headers: (s.headersJson && s.headersJson.trim()) ? safeParseHeaders(s.headersJson) : {},
+      })),
+    };
+    try {
+      const res = await api("/api/config", { method: "POST", body: JSON.stringify(body) });
+      const data = await res.json(); state.cfg = data.current;
+      $("#cfgStatus").className = "statusline ok"; $("#cfgStatus").textContent = "已保存。";
+      toast("设置已保存");
+      loadSessions(true);
+      loadMemory();
+      loadRecentDirs();
+    } catch (e) { $("#cfgStatus").className = "statusline bad"; $("#cfgStatus").textContent = "保存失败：" + (e.message || e); }
+  }
+  async function testConn() {
+    $("#cfgStatus").className = "statusline"; $("#cfgStatus").textContent = "正在测试…";
+    const body = {
+      base_url: $("#fBaseUrl").value.trim(),
+      model: $("#fModel").value.trim(),
+      api_key: $("#fKey").value,
+    };
+    try {
+      const res = await api("/api/test-connection", { method: "POST", body: JSON.stringify(body) });
+      const d = await res.json();
+      $("#cfgStatus").className = "statusline " + (d.ok ? "ok" : "bad");
+      $("#cfgStatus").textContent = d.ok ? "连接成功" : d.message;
+    } catch (e) { $("#cfgStatus").className = "statusline bad"; $("#cfgStatus").textContent = "请求失败：" + (e.message || e); }
+  }
+
+  /* ---------- 抽屉 ---------- */
+  function openDrawer(id) { $("#" + id).classList.add("open"); $("#ov" + id.replace("drawer", "")).style.display = "block"; }
+  function closeDrawer(id) { $("#" + id).classList.remove("open"); $("#ov" + id.replace("drawer", "")).style.display = "none"; }
+  function updateRunningUI() {
+    $("#btnSend").disabled = state.running;
+    $("#btnCancel").style.display = state.running ? "" : "none";
+    $("#input").placeholder = state.running ? "正在处理…" : "描述你想做的事，例如：帮我修一下登录接口的 bug…";
+  }
+  function autoGrow() { const t = $("#input"); t.style.height = "auto"; t.style.height = Math.min(160, t.scrollHeight) + "px"; }
+
+  /* ---------- 事件绑定 ---------- */
+  function bind() {
+    $("#btnSend").onclick = send;
+    $("#input").addEventListener("keydown", e => {
+      if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); send(); }
+    });
+    $("#input").addEventListener("input", autoGrow);
+    $("#btnCancel").onclick = async () => { try { await api("/api/cancel", { method: "POST", body: JSON.stringify({ session_id: state.sid }) }); } catch {} };
+    $("#btnSessions").onclick = () => { openDrawer("drawerSessions"); loadSessions(true).catch(() => {}); };
+    $("#btnUsage").onclick = () => { openDrawer("drawerUsage"); loadUsage(); };
+    $("#btnSettings").onclick = () => {
+      openDrawer("drawerSettings"); loadMemory(); loadPlugins(); loadRecentDirs();
+      const v = (state.cfg && state.cfg.version) || "";
+      $("#aboutVer").textContent = v ? "v" + v : "";
+    };
+    $("#btnTheme").onclick = () => applyTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark");
+    $("#btnTerm").onclick = toggleTerm;
+    $("#btnTermAdd").onclick = addTermTab;
+    $("#btnNewSession").onclick = newSession;
+    document.querySelectorAll(".drawer .iconbtn[data-close]").forEach(b => b.onclick = () => closeDrawer(b.dataset.close));
+    $("#ovSessions").onclick = () => closeDrawer("drawerSessions");
+    $("#ovSettings").onclick = () => closeDrawer("drawerSettings");
+    $("#ovUsage").onclick = () => closeDrawer("drawerUsage");
+    $("#btnAllow").onclick = () => answerApproval("allow");
+    $("#btnDeny").onclick = () => answerApproval("deny");
+    $("#btnDenyX").onclick = () => answerApproval("deny");
+    $("#btnAlways").onclick = () => answerApproval("always");
+    $("#btnAddMcp").onclick = addMcp;
+    $("#btnStart").onclick = newSession;
+    $("#fProvider").onchange = presetChanged;
+    $("#fMemoryEmbed").onchange = memModelRow;
+    $("#btnTest").onclick = testConn;
+    $("#btnSaveCfg").onclick = saveCfg;
+    $("#btnTokenOk").onclick = () => {
+      const t = $("#fToken").value.trim(); if (!t) return;
+      state.token = t; localStorage.setItem("spark2_token", t);
+      $("#tokenModal").classList.remove("open");
+      init(true);
+    };
+    document.addEventListener("keydown", e => {
+      if ($("#approvalModal").classList.contains("open")) {
+        const k = e.key.toLowerCase();
+        if (k === "a") { e.preventDefault(); answerApproval("allow"); }
+        else if (k === "d") { e.preventDefault(); answerApproval("deny"); }
+        else if (k === "s") { e.preventDefault(); answerApproval("always"); }
+        else if (e.key === "Escape") { e.preventDefault(); answerApproval("deny"); } // Esc = 拒绝（与终端版一致）
+        return;
+      }
+      if (e.key === "Escape") { closeDrawer("drawerSessions"); closeDrawer("drawerSettings"); return; }
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey) {
+        const k = e.key.toLowerCase();
+        if (k === "n") { e.preventDefault(); newSession(); }
+        else if (k === "s") { e.preventDefault(); openDrawer("drawerSessions"); }
+      }
+    });
+  }
+
+  async function init(force) {
+    applyTheme(localStorage.getItem("spark2_theme") || "light");
+    try { await loadConfig(); } catch (e) { if (e.message === "auth") return; toast("配置加载失败"); }
+    try { await loadSessions(); } catch {}
+    if (state.sessions.length && !state.sid) selectSession(state.sessions[0].id).catch(() => {});
+    if (!state.sessions.length) {
+      $("#sessionLine").textContent = "还没有会话";
+      showEmptyIfNeeded();
+    }
+  }
+
+  bind();
+  init();
+})();
+</script>
+</body>
+</html>

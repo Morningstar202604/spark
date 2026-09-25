@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%2314b8a6'/%3E%3Cpath d='M33 13 22 36h6l-3 15 15-23h-7l3-15z' fill='white'/%3E%3C/svg%3E">
+<title>Spark — The local AI coding agent that asks before it acts</title>
+<meta name="description" content="Spark is a local-first AI coding agent with an approval gate, prompt-injection defense, local semantic memory, and Chinese model providers out of the box. Lightweight, open source, MIT.">
+<style>
+  :root{
+    --teal:#14b8a6; --deep:#0f766e; --ink:#1f2937; --mut:#6b7280;
+    --bg:#f8fafc; --card:#ffffff; --line:#e5e7eb;
+  }
+  *{box-sizing:border-box; margin:0; padding:0}
+  html{scroll-behavior:smooth}
+  body{font:16px/1.65 -apple-system,"PingFang SC","Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif; color:var(--ink); background:var(--bg);}
+  .wrap{max-width:1080px; margin:0 auto; padding:0 24px}
+  nav{position:sticky; top:0; z-index:20; background:rgba(255,255,255,.88); backdrop-filter:blur(10px); border-bottom:1px solid var(--line);}
+  nav .wrap{display:flex; align-items:center; gap:18px; height:58px}
+  .brand{display:flex; align-items:center; gap:9px; font-weight:800; font-size:17px; color:var(--ink); text-decoration:none; padding:8px 0}
+  .brand .lg{width:26px; height:26px; border-radius:7px; background:linear-gradient(135deg,var(--teal),var(--deep)); display:flex; align-items:center; justify-content:center; color:#fff; font-size:14px}
+  nav a.navlink{color:var(--mut); text-decoration:none; font-size:14px; font-weight:600; padding:12px 4px; display:inline-block}
+  nav a.navlink:hover{color:var(--deep)}
+  nav .sp{flex:1}
+  .btn{display:inline-block; padding:9px 18px; border-radius:9px; font-weight:700; font-size:14px; text-decoration:none; cursor:pointer; border:1px solid transparent}
+  .btn.primary{background:linear-gradient(135deg,var(--teal),var(--deep)); color:#fff; box-shadow:0 4px 14px rgba(20,184,166,.3)}
+  .btn.primary:hover{filter:brightness(1.05)}
+  .btn.ghost{background:transparent; color:var(--deep); border-color:var(--line)}
+  .btn.ghost:hover{border-color:var(--teal)}
+  header{text-align:center; padding:96px 24px 72px}
+  .hero-kicker{display:inline-block; font-size:13px; font-weight:800; letter-spacing:.12em; text-transform:uppercase; color:var(--deep); background:rgba(20,184,166,.12); padding:6px 14px; border-radius:999px; margin-bottom:22px}
+  h1{font-size:clamp(34px,6vw,56px); line-height:1.16; font-weight:900; letter-spacing:-.02em; margin-bottom:18px}
+  h1 em{font-style:normal; background:linear-gradient(90deg,var(--teal),var(--deep)); -webkit-background-clip:text; background-clip:text; color:transparent}
+  .tagline{font-size:clamp(16px,2.4vw,20px); color:var(--mut); max-width:720px; margin:0 auto 34px}
+  .cta{display:flex; gap:14px; justify-content:center; flex-wrap:wrap}
+  .badges{margin-top:26px; display:flex; gap:8px; justify-content:center; flex-wrap:wrap; font-size:13px; color:var(--mut)}
+  .video-shell{margin:8px auto 0; max-width:880px; border-radius:16px; overflow:hidden; border:1px solid var(--line); box-shadow:0 22px 60px rgba(15,118,110,.14); background:#000}
+  video{display:block; width:100%; height:auto}
+  section{padding:64px 0}
+  .sec-head{text-align:center; margin-bottom:44px}
+  .sec-head .k{font-size:13px; font-weight:800; letter-spacing:.14em; text-transform:uppercase; color:var(--teal)}
+  .sec-head h2{font-size:clamp(26px,4vw,38px); font-weight:900; letter-spacing:-.01em}
+  .sec-head p{color:var(--mut); max-width:640px; margin:10px auto 0}
+  .grid{display:grid; gap:18px}
+  .grid.c3{grid-template-columns:repeat(auto-fit,minmax(290px,1fr))}
+  .grid.c2{grid-template-columns:repeat(auto-fit,minmax(320px,1fr))}
+  .card{background:var(--card); border:1px solid var(--line); border-radius:14px; padding:24px}
+  .card h3{font-size:16.5px; font-weight:800; margin-bottom:8px; display:flex; gap:8px; align-items:center}
+  .card p{font-size:14.5px; color:var(--mut)}
+  .emoji{font-size:22px}
+  .table{width:100%; border-collapse:collapse; background:var(--card); border:1px solid var(--line); border-radius:14px; overflow:hidden; font-size:14.5px}
+  .tbl-wrap{overflow-x:auto; -webkit-overflow-scrolling:touch; border-radius:14px}
+  .table th{background:#f1f5f9; text-align:left; padding:12px 16px; font-size:13px; text-transform:uppercase; letter-spacing:.06em; color:var(--mut)}
+  .table td{padding:12px 16px; border-top:1px solid var(--line); vertical-align:top}
+  .table .yes{color:var(--deep); font-weight:800}
+  .table .no{color:#ef4444; font-weight:700}
+  .shots{display:grid; grid-template-columns:repeat(auto-fit,minmax(300px,1fr)); gap:16px}
+  .shots figure{background:var(--card); border:1px solid var(--line); border-radius:14px; overflow:hidden; margin:0}
+  .shots img{width:100%; display:block; border-bottom:1px solid var(--line)}
+  .shots figcaption{font-size:13.5px; color:var(--mut); padding:10px 14px}
+  .steps{counter-reset:s; display:grid; gap:14px; max-width:760px; margin:0 auto}
+  .step{display:flex; gap:16px; align-items:flex-start; background:var(--card); border:1px solid var(--line); border-radius:14px; padding:20px 22px}
+  .step .n{counter-increment:s; flex:0 0 38px; width:38px; height:38px; border-radius:10px; background:linear-gradient(135deg,var(--teal),var(--deep)); color:#fff; font-weight:900; display:flex; align-items:center; justify-content:center}
+  .step .n::before{content:counter(s)}
+  .step b{display:block; font-size:15.5px; margin-bottom:3px}
+  .step span{font-size:14px; color:var(--mut)}
+  code{background:#f1f5f9; border:1px solid var(--line); border-radius:6px; padding:2px 7px; font-size:13.5px; font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; color:var(--deep)}
+  .codeblock{background:#0f172a; color:#e2e8f0; border-radius:12px; padding:18px 20px; font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:13.5px; overflow-x:auto; margin-top:18px; line-height:1.7}
+  .codeblock .c{color:#64748b}
+  footer{border-top:1px solid var(--line); padding:36px 0 46px; text-align:center; color:var(--mut); font-size:13.5px}
+  footer .brand{justify-content:center; margin-bottom:10px}
+  @media(max-width:640px){ header{padding:72px 16px 56px} .step{flex-direction:column} nav a.navlink{display:none} }
+</style>
+</head>
+<body>
+
+<nav><div class="wrap">
+  <a class="brand" href="#"><span class="lg">⚡</span> Spark</a>
+  <a class="navlink" href="#why">Why Spark</a>
+  <a class="navlink" href="#features">Features</a>
+  <a class="navlink" href="#compare">Compare</a>
+  <a class="navlink" href="#start">Get started</a>
+  <span class="sp"></span>
+  <a class="btn ghost" href="https://github.com/X33834/spark">GitHub</a>
+  <a class="btn primary" href="#start">Quick start</a>
+</div></nav>
+
+<header>
+  <div class="wrap">
+    <div class="hero-kicker">Local-first · Open source · MIT</div>
+    <h1>The local AI coding agent that <em>asks before it acts.</em></h1>
+    <p class="tagline">Runs on your machine. Sees every step. Nothing writes to disk or runs commands without your approval. Chinese model providers out of the box — zero hidden AI calls.</p>
+    <div class="cta">
+      <a class="btn primary" href="#start">Get started in 30 seconds</a>
+      <a class="btn ghost" href="https://github.com/X33834/spark">Star on GitHub</a>
+    </div>
+    <div class="badges">
+      <span>🛡️ Approval gate</span><span>🧠 Prompt-injection defense</span><span>🔒 Local semantic memory</span><span>🇨🇳 DeepSeek · Qwen · Zhipu · Kimi · Doubao · Ollama</span>
+    </div>
+  </div>
+</header>
+
+<div class="wrap">
+  <div class="video-shell"><video controls playsinline preload="metadata" poster="media/screenshot-hero.png"><source src="media/promo.mp4" type="video/mp4">Your browser does not support video.</video></div>
+</div>
+
+<section id="why"><div class="wrap">
+  <div class="sec-head"><div class="k">Why Spark</div><h2>Built different, on purpose</h2><p>Most agents auto-edit silently and trust whatever the tools say. Spark was rebuilt from zero to be the opposite.</p></div>
+  <div class="grid c3">
+    <div class="card"><h3><span class="emoji">🛡️</span> Approval gate</h3><p>Every <code>write_file</code>, <code>apply_patch</code> and <code>run_shell</code> pauses and asks you first — with a grouped diff preview. Three modes: suggest, auto-edit, full-auto. Protected paths are always refused, period.</p></div>
+    <div class="card"><h3><span class="emoji">🧠</span> Prompt-injection defense</h3><p>Tool and file output is treated as <b>data, never instructions</b>. Injection patterns are detected and flagged inline — the file can't rewire the agent.</p></div>
+    <div class="card"><h3><span class="emoji">🔒</span> Local semantic memory</h3><p>Say <i>"remember X is Y"</i> — stored locally with FTS5, optionally upgraded to real embeddings (Doubao API or offline BGE-M3). Zero hidden model calls. Ever.</p></div>
+    <div class="card"><h3><span class="emoji">🇨🇳</span> Chinese models first</h3><p>DeepSeek v4 · Qwen · Zhipu GLM · Kimi K3 · Doubao · Ollama — presets tuned to 2026 current models. No OpenAI-account gymnastics.</p></div>
+    <div class="card"><h3><span class="emoji">🪶</span> Lightweight by design</h3><p>Single-file web UI, one uvicorn process, zero Electron. One <code>pip install</code>. Everything lives in <code>~/.spark2/</code> as readable JSONL.</p></div>
+    <div class="card"><h3><span class="emoji">🧩</span> Extensible</h3><p>Plugins are just <code>.py</code> files dropped into <code>~/.spark2/plugins/</code>. MCP (stdio + Streamable HTTP) included. Plugin tools still respect the approval gate.</p></div>
+  </div>
+</div></section>
+
+<section id="features"><div class="wrap">
+  <div class="sec-head"><div class="k">Features</div><h2>Everything in v0.8.0</h2><p>Multi-file edits, persistent terminal, sub-agents, session fork, code index, cost dashboard — a complete workflow, no bloat.</p></div>
+  <div class="grid c2">
+    <div class="card"><h3>📦 Multi-file edits</h3><p><code>apply_patch</code> applies one unified diff across many files. The approval popup groups changes per file with expand/collapse cards and +/− badges. All-or-nothing apply, git checkpoint rollback built in.</p></div>
+    <div class="card"><h3>🖥️ Persistent terminal</h3><p>A real bash PTY embedded in the UI (xterm.js), cwd locked to your workdir. Folding or refreshing never kills it — reopen and continue. Multi-tab, resize-aware, take over input anytime.</p></div>
+    <div class="card"><h3>👥 Sub-agents</h3><p><code>explore</code> — read-only scout that maps the code before you touch it. <code>general</code> — full-tool executor whose writes still go through approval. Events stream inline into your session; one cancel kills the whole tree.</p></div>
+    <div class="card"><h3>🍴 Fork & parallel sessions</h3><p>Fork any session at any point into an independent branch. Run multiple sessions concurrently with live “● running” badges that survive refresh.</p></div>
+    <div class="card"><h3>🔎 Code index</h3><p><code>index_project</code> / <code>search_symbol</code> / <code>lint_file</code>. Python parsed with stdlib <code>ast</code> (symbols + line numbers); other languages line-level. Per-workdir cache, auto-invalidation, read-only.</p></div>
+    <div class="card"><h3>💰 Cost dashboard</h3><p>Every call's tokens & estimated fee logged per session. Top-bar Usage panel with session ranking bars. 2026-09 verified official pricing (DeepSeek valley price, Doubao), overridable.</p></div>
+  </div>
+</div></section>
+
+<section id="compare"><div class="wrap">
+  <div class="sec-head"><div class="k">Compare</div><h2>Spark vs. the big three</h2><p>opencode, ZCode and Codex CLI are great tools — here's what Spark brings that they don't.</p></div>
+  <div class="tbl-wrap"><table class="table">
+    <tr><th></th><th>Spark</th><th>opencode</th><th>ZCode</th><th>Codex CLI</th></tr>
+    <tr><td>Prompt-injection defense</td><td class="yes">✓ built-in</td><td class="no">✗</td><td class="no">✗</td><td class="no">✗</td></tr>
+    <tr><td>Cross-session semantic memory</td><td class="yes">✓ local</td><td class="no">✗</td><td class="no">✗</td><td class="no">✗</td></tr>
+    <tr><td>Chinese models out of the box</td><td class="yes">✓ presets</td><td>partial</td><td class="yes">✓ GLM-native</td><td class="no">✗</td></tr>
+    <tr><td>Approval UX</td><td>gate + grouped diff</td><td>allow/ask/deny</td><td>Default/Plan/Yolo</td><td>sandbox × policy</td></tr>
+    <tr><td>MCP</td><td>stdio + Streamable HTTP</td><td>stdio + HTTP + OAuth</td><td>stdio + SSE + HTTP</td><td>stdio + HTTP</td></tr>
+    <tr><td>Local-first, no cloud</td><td class="yes">✓ 100%</td><td class="yes">✓</td><td class="yes">✓</td><td class="no">OpenAI-bound</td></tr>
+  </table></div>
+</div></section>
+
+<section id="start"><div class="wrap">
+  <div class="sec-head"><div class="k">Get started</div><h2>Live in 30 seconds</h2><p>One install, one process, everything local.</p></div>
+  <div class="codeblock"><span class="c"># install & launch</span><br>pip install -e ".[dev]"<br>spark2 web<br><br><span class="c"># headless / terminal UI / health check</span><br>spark2 run "refactor lib.py" --workdir /path/to/project<br>spark2 tui<br>spark2 doctor</div>
+  <div class="steps" style="margin-top:26px">
+    <div class="step"><div class="n"></div><div><b>Pick a provider</b><span>DeepSeek · Qwen · Zhipu · Kimi · Doubao · Ollama — or <b>demo mode</b> with zero API key to try the full experience.</span></div></div>
+    <div class="step"><div class="n"></div><div><b>Point at your project</b><span>Set the workdir in Settings. Spark can read/write freely inside; anything outside always asks you first.</span></div></div>
+    <div class="step"><div class="n"></div><div><b>Just talk</b><span>“Fix the login endpoint bug.” Watch the plan → tool calls → diff preview → approve → result. It's your machine, your call.</span></div></div>
+  </div>
+  <div class="shots" style="margin-top:34px">
+    <figure><img src="media/screenshot-hero.png" alt="Spark empty state" loading="lazy"><figcaption>Branded empty state · three-step onboarding</figcaption></figure>
+    <figure><img src="media/screenshot-approval.png" alt="Approval popup" loading="lazy"><figcaption>Writes always ask first — grouped diff approval</figcaption></figure>
+    <figure><img src="media/screenshot-injection.png" alt="Injection defense" loading="lazy"><figcaption>Prompt-injection flagged inline, never executed</figcaption></figure>
+    <figure><img src="media/screenshot-multifile.png" alt="Multi-file edit" loading="lazy"><figcaption>apply_patch · per-file diff review</figcaption></figure>
+    <figure><img src="media/screenshot-subagent.png" alt="Sub-agent" loading="lazy"><figcaption>explore sub-agent scouts read-only</figcaption></figure>
+    <figure><img src="media/screenshot-index.png" alt="Code index" loading="lazy"><figcaption>index_project · symbols + line numbers</figcaption></figure>
+    <figure><img src="media/screenshot-usage.png" alt="Cost dashboard" loading="lazy"><figcaption>Usage panel · tokens & estimated fee per session</figcaption></figure>
+    <figure><img src="media/screenshot-terminal.png" alt="Persistent terminal" loading="lazy"><figcaption>Persistent PTY · survives fold & refresh</figcaption></figure>
+  </div>
+</div></section>
+
+<footer><div class="wrap">
+  <div class="brand"><span class="lg">⚡</span> Spark</div>
+  MIT licensed · Built on ripgrep · difflib · SQLite FTS5 · official MCP SDK · Textual · FastAPI<br>
+  Made for people who like their agent to ask first, run locally, and stay out of their wallet.
+</div></footer>
+
+</body>
+</html>
