@@ -13,12 +13,12 @@
   同样受路径边界约束，审批事件直接嵌入主对话流，用户照常拒绝/允许。
 - 取消信号与主 Agent 共享：用户点"停止"，子 Agent 一并终止。
 """
+
 from __future__ import annotations
 
 import asyncio
 from pathlib import Path
 
-from spark2.config import CONFIG_DIR
 from spark2.loop import AgentLoop
 from spark2.tools import build_readonly_registry, build_registry
 
@@ -58,6 +58,7 @@ def make_subagent(
     memory,
     log_path,
     cancel_event: asyncio.Event | None,
+    extra_protected: list[str] | None = None,
 ) -> AgentLoop:
     """构造子 Agent（复用 AgentLoop，限定工具集与系统提示）。"""
     if agent_type == "general":
@@ -68,10 +69,6 @@ def make_subagent(
         registry = build_readonly_registry()
         role = ROLE_EXPLORE
         guide = _EXPLORE_GUIDE
-    system_text = SUBAGENT_SYSTEM_TEMPLATE.format(
-        workdir=workdir, role=role, roleguide=guide,
-        protected="、".join(str(p) for p in (CONFIG_DIR.resolve(), (workdir / ".git").resolve())),
-    )
     loop = AgentLoop(
         workdir=workdir,
         provider_cfg=provider_cfg,
@@ -82,6 +79,13 @@ def make_subagent(
         mcp=None,  # MCP 由主 Agent 合并，子 Agent 不重复启动
         log_path=log_path,
         cancel_event=cancel_event,
-        system_prompt_text=system_text,
+        extra_protected=extra_protected,
+    )
+    # 保护路径展示与 loop.ctx.protected 严格一致（含用户自定义追加项），避免文案与实际边界漂移
+    loop.system_prompt_text = SUBAGENT_SYSTEM_TEMPLATE.format(
+        workdir=workdir,
+        role=role,
+        roleguide=guide,
+        protected="、".join(str(p) for p in loop.ctx.protected),
     )
     return loop

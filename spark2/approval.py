@@ -71,17 +71,18 @@ class ApprovalGate:
 
     async def await_result(
         self, request_id: str, fut: asyncio.Future, timeout: float = 600.0
-    ) -> bool:
+    ) -> bool | None:
+        """等待审批结果：True=放行，False=拒绝，None=超时未响应。"""
         try:
             return await asyncio.wait_for(fut, timeout)
         except asyncio.TimeoutError:
-            return False
+            return None
         finally:
             self.pending.pop(request_id, None)
 
     async def request(
         self, request_id: str, timeout: float = 600.0, tool_name: str | None = None
-    ) -> bool:
+    ) -> bool | None:
         """便捷版：register + await_result（供非事件流场景使用）。"""
         fut = self.register(request_id, tool_name)
         return await self.await_result(request_id, fut, timeout)

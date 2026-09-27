@@ -3,6 +3,7 @@
 写文件前由审批门展示统一 diff（unified_diff），不再整文件倾倒。
 搜索调用 ripgrep（未安装时降级为 Python 遍历）。
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -10,6 +11,7 @@ import difflib
 import shutil
 from pathlib import Path
 
+from spark2.patch_apply import detect_newline
 from spark2.tools.base import Tool, ToolContext, is_within, resolve_path
 
 MAX_READ_LINES = 2000
@@ -56,7 +58,12 @@ async def write_file(args: dict, ctx: ToolContext) -> str:
             old = ""
     try:
         p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(content, encoding="utf-8")
+        # 行尾一致性：先把内容行尾统一为 \n，再按目标文件既有约定写出
+        # （避免 Windows 文本模式把 LF 文件整体翻译成 CRLF、或写出 \r\r\n）。
+        nl = detect_newline(p)
+        normalized = content.replace("\r\n", "\n")
+        with open(p, "w", encoding="utf-8", newline=nl) as fh:
+            fh.write(normalized)
     except OSError as e:
         return f"错误：写入失败 {e}"
     added = sum(1 for ln in content.splitlines() if ln.strip())
@@ -101,7 +108,13 @@ async def glob_tool(args: dict, ctx: ToolContext) -> str:
         hits = list(p.glob(pattern))[:MAX_SEARCH_LINES]
     except OSError as e:
         return f"错误：{e}"
-    return "\n".join(str(h.relative_to(ctx.workdir) if is_within(h, ctx.workdir) else h) for h in hits) or "（无匹配）"
+    return (
+        "\n".join(
+            str(h.relative_to(ctx.workdir) if is_within(h, ctx.workdir) else h)
+            for h in hits
+        )
+        or "（无匹配）"
+    )
 
 
 async def search(args: dict, ctx: ToolContext) -> str:
@@ -127,7 +140,7 @@ async def search(args: dict, ctx: ToolContext) -> str:
             return f"错误：搜索失败 {e}"
         text = out.decode("utf-8", "replace")
         if proc.returncode not in (0, 1):
-            return f"错误：rg 退出码 {proc.returncode}: {err.decode('utf-8','replace')[:300]}"
+            return f"错误：rg 退出码 {proc.returncode}: {err.decode('utf-8', 'replace')[:300]}"
         lines = text.splitlines()[:MAX_SEARCH_LINES]
         joined = "\n".join(lines)
         if len(text.splitlines()) > MAX_SEARCH_LINES:
@@ -137,7 +150,11 @@ async def search(args: dict, ctx: ToolContext) -> str:
     hits = []
     try:
         for f in p.rglob("*"):
-            if f.is_file() and query.lower() in f.read_text(errors="ignore").lower():
+            if (
+                f.is_file()
+                and query.lower()
+                in f.read_text(encoding="utf-8", errors="ignore").lower()
+            ):
                 rel = f.relative_to(ctx.workdir) if is_within(f, ctx.workdir) else f
                 hits.append(str(rel))
                 if len(hits) >= MAX_SEARCH_LINES:
@@ -159,7 +176,11 @@ def _preview_write(args: dict, ctx: ToolContext) -> tuple[str, str]:
     new = str(args.get("content", ""))
     diff = "\n".join(
         difflib.unified_diff(
-            old.splitlines(), new.splitlines(), fromfile=str(p), tofile=str(p), lineterm=""
+            old.splitlines(),
+            new.splitlines(),
+            fromfile=str(p),
+            tofile=str(p),
+            lineterm="",
         )
     )
     if not diff:
@@ -178,7 +199,10 @@ def build_file_tools() -> list[Tool]:
                 "type": "object",
                 "properties": {
                     "path": {"type": "string", "description": "文件路径"},
-                    "limit": {"type": "integer", "description": "最多读取行数，默认 2000"},
+                    "limit": {
+                        "type": "integer",
+                        "description": "最多读取行数，默认 2000",
+                    },
                 },
                 "required": ["path"],
             },

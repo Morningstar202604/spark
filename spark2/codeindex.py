@@ -6,6 +6,7 @@
 - 语法诊断：.py 用 py_compile（进程内秒级）；.js/.mjs/.cjs 用 node --check（node 现役可用）；
 - 索引缓存到 ~/.spark2/codeindex/<workdir_hash>.json，按文件 mtime 增量失效，不污染用户项目目录。
 """
+
 from __future__ import annotations
 
 import ast
@@ -17,33 +18,61 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-from spark2.config import CONFIG_DIR
+from spark2.config import config_dir
 
 INDEX_EXT = {
     ".py": "python",
-    ".js": "javascript", ".mjs": "javascript", ".cjs": "javascript",
-    ".ts": "typescript", ".jsx": "javascript", ".tsx": "typescript",
+    ".js": "javascript",
+    ".mjs": "javascript",
+    ".cjs": "javascript",
+    ".ts": "typescript",
+    ".jsx": "javascript",
+    ".tsx": "typescript",
     ".java": "java",
     ".go": "go",
     ".rs": "rust",
-    ".c": "c", ".h": "c", ".cpp": "cpp", ".cc": "cpp", ".hpp": "cpp",
+    ".c": "c",
+    ".h": "c",
+    ".cpp": "cpp",
+    ".cc": "cpp",
+    ".hpp": "cpp",
 }
 EXCLUDE_DIRS = {
-    ".git", "node_modules", ".venv", "venv", "dist", "build", "target",
-    "__pycache__", ".pytest_cache", ".mypy_cache", "out", ".idea", ".vscode",
+    ".git",
+    "node_modules",
+    ".venv",
+    "venv",
+    "dist",
+    "build",
+    "target",
+    "__pycache__",
+    ".pytest_cache",
+    ".mypy_cache",
+    "out",
+    ".idea",
+    ".vscode",
 }
 _SKIP_SIZE = 1_000_000  # 单文件超 1MB 不索引（避免误入大文件）
 
 # 行级正则：{语言: [(pattern, kind)]}——只匹配"顶层声明"风格的简单模式
 _LINE_PATTERNS: dict[str, list[tuple[str, str]]] = {
     "javascript": [
-        (r"\b(?:export\s+)?(?:async\s+)?function\s+\*?\s*([A-Za-z_$][\w$]*)\s*\(", "function"),
+        (
+            r"\b(?:export\s+)?(?:async\s+)?function\s+\*?\s*([A-Za-z_$][\w$]*)\s*\(",
+            "function",
+        ),
         (r"\b(?:export\s+)?class\s+([A-Za-z_$][\w$]*)", "class"),
-        (r"\b(?:export\s+)?const\s+([A-Za-z_$][\w$]*)\s*=\s*(?:async\s*)?(?:function|\()", "function"),
+        (
+            r"\b(?:export\s+)?const\s+([A-Za-z_$][\w$]*)\s*=\s*(?:async\s*)?(?:function|\()",
+            "function",
+        ),
         (r"\b(?:export\s+)?(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=", "variable"),
     ],
     "typescript": [
-        (r"\b(?:export\s+)?(?:async\s+)?function\s+\*?\s*([A-Za-z_$][\w$]*)\s*\(", "function"),
+        (
+            r"\b(?:export\s+)?(?:async\s+)?function\s+\*?\s*([A-Za-z_$][\w$]*)\s*\(",
+            "function",
+        ),
         (r"\b(?:export\s+)?class\s+([A-Za-z_$][\w$]*)", "class"),
         (r"\b(?:export\s+)?(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=", "variable"),
         (r"\b(?:export\s+)?interface\s+([A-Za-z_$][\w$]*)", "interface"),
@@ -51,7 +80,10 @@ _LINE_PATTERNS: dict[str, list[tuple[str, str]]] = {
         (r"\b(?:export\s+)?enum\s+([A-Za-z_$][\w$]*)", "enum"),
     ],
     "java": [
-        (r"\b(?:public|private|protected|static|final|abstract|synchronized|\s)*\s+([A-Za-z_][\w<>?,\s]*)\s+([A-Za-z_][\w]*)\s*\(", "function"),
+        (
+            r"\b(?:public|private|protected|static|final|abstract|synchronized|\s)*\s+([A-Za-z_][\w<>?,\s]*)\s+([A-Za-z_][\w]*)\s*\(",
+            "function",
+        ),
         (r"\b(?:public|abstract|final)?\s*class\s+([A-Za-z_][\w]*)", "class"),
         (r"\b(?:public|abstract|final)?\s*interface\s+([A-Za-z_][\w]*)", "interface"),
         (r"\b(?:public|abstract|final)?\s*enum\s+([A-Za-z_][\w]*)", "enum"),
@@ -70,11 +102,17 @@ _LINE_PATTERNS: dict[str, list[tuple[str, str]]] = {
         (r"\bimpl\s+([A-Za-z_][\w]*)", "impl"),
     ],
     "c": [
-        (r"\b(?:static\s+)?(?:inline\s+)?[\w\s\*]+?\b([A-Za-z_][\w]*)\s*\([^;]*\)\s*\{", "function"),
+        (
+            r"\b(?:static\s+)?(?:inline\s+)?[\w\s\*]+?\b([A-Za-z_][\w]*)\s*\([^;]*\)\s*\{",
+            "function",
+        ),
         (r"\b(?:typedef\s+)?(?:struct|union|enum)\s+([A-Za-z_][\w]*)", "type"),
     ],
     "cpp": [
-        (r"\b(?:static\s+)?(?:inline\s+)?(?:[\w:<>,\s\*&]+)\s+([A-Za-z_][\w]*)\s*\([^;]*\)\s*\{", "function"),
+        (
+            r"\b(?:static\s+)?(?:inline\s+)?(?:[\w:<>,\s\*&]+)\s+([A-Za-z_][\w]*)\s*\([^;]*\)\s*\{",
+            "function",
+        ),
         (r"\bclass\s+([A-Za-z_][\w]*)", "class"),
         (r"\b(?:typedef\s+)?(?:struct|union|enum)\s+([A-Za-z_][\w]*)", "type"),
     ],
@@ -86,7 +124,9 @@ def _workdir_key(workdir: str) -> str:
 
 
 def index_cache_path(workdir: str) -> Path:
-    return CONFIG_DIR / "codeindex" / f"{_workdir_key(workdir)}.json"
+    return (
+        config_dir() / "codeindex" / f"{_workdir_key(workdir)}.json"
+    )  # 动态：遵守 SPARK2_HOME
 
 
 def _py_symbols(text: str, rel_path: str) -> list[dict]:
@@ -105,12 +145,25 @@ def _py_symbols(text: str, rel_path: str) -> list[dict]:
             else:
                 kind = "function"
             args = [a.arg for a in node.args.args[:4]]
-            out.append({
-                "kind": kind, "name": node.name, "line": node.lineno,
-                "file": rel_path, "args": ", ".join(args) + ("…" if len(node.args.args) > 4 else ""),
-            })
+            out.append(
+                {
+                    "kind": kind,
+                    "name": node.name,
+                    "line": node.lineno,
+                    "file": rel_path,
+                    "args": ", ".join(args) + ("…" if len(node.args.args) > 4 else ""),
+                }
+            )
         elif isinstance(node, ast.ClassDef):
-            out.append({"kind": "class", "name": node.name, "line": node.lineno, "file": rel_path, "args": ""})
+            out.append(
+                {
+                    "kind": "class",
+                    "name": node.name,
+                    "line": node.lineno,
+                    "file": rel_path,
+                    "args": "",
+                }
+            )
     return out
 
 
@@ -131,7 +184,9 @@ def _regex_symbols(text: str, rel_path: str, lang: str) -> list[dict]:
             if not name:
                 continue
             line = text.count("\n", 0, m.start()) + 1
-            out.append({"kind": kind, "name": name, "line": line, "file": rel_path, "args": ""})
+            out.append(
+                {"kind": kind, "name": name, "line": line, "file": rel_path, "args": ""}
+            )
     # 去重（同名同行同 kind）
     seen: set[tuple] = set()
     uniq: list[dict] = []
@@ -175,13 +230,14 @@ def index_project(workdir: str, use_cache: bool = True) -> dict:
                     text = entry.read_text(encoding="utf-8", errors="replace")
                 except Exception:  # noqa: BLE001
                     continue
-                mtime = entry.stat().st_mtime
+                st = entry.stat()
+                mtime = st.st_mtime
                 if lang == "python":
                     syms = _py_symbols(text, rel)
                 else:
                     syms = _regex_symbols(text, rel, lang)
                 symbols.extend(syms)
-                files[rel] = {"mtime": mtime, "size": len(text.encode("utf-8")), "lang": lang}
+                files[rel] = {"mtime": mtime, "size": st.st_size, "lang": lang}
                 lang_count[lang] = lang_count.get(lang, 0) + 1
 
     if root.exists():
@@ -243,6 +299,7 @@ def lint_file(workdir: str, path: str) -> list[dict]:
     if ext == ".py":
         try:
             import py_compile
+
             py_compile.compile(str(p), doraise=True)
             return []
         except py_compile.PyCompileError as e:
@@ -253,8 +310,18 @@ def lint_file(workdir: str, path: str) -> list[dict]:
                 ["node", "--check", str(p)], capture_output=True, text=True, timeout=10
             )
         except (subprocess.TimeoutExpired, FileNotFoundError):
-            return [{"severity": "warning", "message": "无法运行 node --check（超时或未安装）"}]
+            return [
+                {
+                    "severity": "warning",
+                    "message": "无法运行 node --check（超时或未安装）",
+                }
+            ]
         if r.returncode != 0:
-            return [{"severity": "error", "message": (r.stderr or r.stdout).strip().split("\n", 1)[0]}]
+            return [
+                {
+                    "severity": "error",
+                    "message": (r.stderr or r.stdout).strip().split("\n", 1)[0],
+                }
+            ]
         return []
     return [{"severity": "warning", "message": "暂不支持该语言语法诊断"}]

@@ -3,26 +3,65 @@
 不做 deny-list 假沙箱——安全性由审批门 + 保护路径 + 进程组治理承担。
 取消（cancel）时对进程组发送 SIGKILL，不留孤儿进程。
 """
+
 from __future__ import annotations
 
 import asyncio
 import os
 import signal
+import subprocess
+import sys
 from typing import Any
 
 from spark2.tools.base import Tool, ToolContext
 
 MAX_OUT = 60_000
+_IS_WINDOWS = sys.platform == "win32"
 
 
 def _kill_group(proc: Any) -> None:
-    try:
-        os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
-    except (ProcessLookupError, PermissionError, OSError):
+    """跨平台终止整棵进程树，不留孤儿进程。
+
+    POSIX：向进程组发 SIGKILL；Windows：taskkill /T 递归杀子进程。
+    两条路径都以 proc.kill() 兜底，任一失败都吞掉（进程可能已退出）。
+    """
+    if _IS_WINDOWS:
         try:
-            proc.kill()
-        except ProcessLookupError:
+            subprocess.run(
+                ["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+                capture_output=True,
+                timeout=10,
+                creationflags=subprocess.CREATE_NO_WINDOW,
+            )
+        except (OSError, subprocess.SubprocessError):
             pass
+    else:
+        try:
+            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+        except (ProcessLookupError, PermissionError, OSError):
+            pass
+    try:
+        proc.kill()
+    except (ProcessLookupError, OSError):
+        pass
+
+
+async def _reap(proc: Any) -> None:
+    """等待已被杀的子进程退出并回收，关闭管道 transport，避免 ResourceWarning。"""
+    try:
+        await asyncio.wait_for(proc.wait(), timeout=5)
+    except (asyncio.TimeoutError, ProcessLookupError, OSError):
+        pass
+
+
+def _popen_group_kwargs() -> dict:
+    """把子进程放进独立进程组，便于整体终止。
+
+    start_new_session 仅 POSIX 有效；Windows 用 CREATE_NEW_PROCESS_GROUP。
+    """
+    if _IS_WINDOWS:
+        return {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
+    return {"start_new_session": True}
 
 
 async def run_shell(args: dict, ctx: ToolContext) -> str:
@@ -41,11 +80,10 @@ async def run_shell(args: dict, ctx: ToolContext) -> str:
         cwd=str(ctx.workdir),
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
-        start_new_session=True,  # 独立进程组，便于整体终止
         env=env,
+        **_popen_group_kwargs(),  # 独立进程组，便于整体终止
     )
     ctx.processes[proc.pid] = proc
-    partial = b""
     try:
         out, err = await asyncio.wait_for(proc.communicate(), timeout=timeout)
         text = out.decode("utf-8", "replace")
@@ -55,12 +93,10 @@ async def run_shell(args: dict, ctx: ToolContext) -> str:
     except asyncio.TimeoutError:
         _kill_group(proc)
         text = f"命令超过 {timeout}s，已强制终止（进程组）。"
-        try:
-            proc.kill()
-        except ProcessLookupError:
-            pass
+        await _reap(proc)
     except asyncio.CancelledError:
         _kill_group(proc)
+        await _reap(proc)
         raise
     finally:
         ctx.processes.pop(proc.pid, None)
@@ -82,7 +118,10 @@ def build_shell_tool() -> list[Tool]:
                 "type": "object",
                 "properties": {
                     "command": {"type": "string", "description": "要执行的命令"},
-                    "timeout": {"type": "integer", "description": "超时秒数，默认 120，最大 600"},
+                    "timeout": {
+                        "type": "integer",
+                        "description": "超时秒数，默认 120，最大 600",
+                    },
                 },
                 "required": ["command"],
             },

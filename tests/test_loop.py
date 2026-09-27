@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from spark2.approval import ApprovalGate
-from spark2.loop import AgentLoop
+from spark2.loop import AgentLoop, _looks_truncated, _strip_orphans
 
 TOOL_LIST = [
     {"type": "tool_calls", "calls": [{"id": "c1", "name": "list_dir", "arguments": {"path": "."}}]}
@@ -18,6 +18,21 @@ TOOL_WRITE = [
     }
 ]
 TEXT_DONE = [{"type": "text", "text": "完成。"}]
+TEXT_TRUNCATED = [{"type": "text", "text": "现在开始创建文件"}]
+TOOL_WRITE_TRUNCATED_ARGS = [
+    {
+        "type": "tool_calls",
+        "calls": [
+            {
+                "id": "c3",
+                "name": "write_file",
+                "arguments": {},
+                "invalid_arguments": True,
+                "arguments_tail": '{"path": "src/todoq/cli.py"',
+            }
+        ],
+    }
+]
 
 
 def _mk_cfg(*rounds: list) -> dict:
@@ -60,6 +75,26 @@ async def test_event_log_written(tmp_path: Path) -> None:
     first = __import__("json").loads(lines[0])
     assert first["type"] in {"usage", "tool_start", "tool_result", "done", "text", "reasoning"}
     assert "ts" in first
+
+
+async def test_approval_timeout_is_distinguished_from_denial(tmp_path: Path) -> None:
+    """审批超时（无人响应）要与「用户拒绝」区分开，模型才知道可以重试。"""
+    loop = AgentLoop(tmp_path, _mk_cfg(TOOL_WRITE, TEXT_DONE), ApprovalGate(mode="suggest"))
+    original = loop.gate.await_result
+
+    async def fast_timeout(request_id, fut, timeout=600.0):
+        return await original(request_id, fut, timeout=0.01)
+
+    loop.gate.await_result = fast_timeout  # type: ignore[method-assign]
+    messages = [{"role": "user", "content": "写文件"}]
+    evs = await _collect(loop, messages)
+
+    tr = next(e for e in evs if e["type"] == "tool_result")
+    assert tr["approved"] is False
+    assert "超时" in tr["output"] and "拒绝" not in tr["output"]
+    assert not (tmp_path / "a.txt").exists()
+    tool_msg = next(m for m in messages if m.get("role") == "tool")
+    assert "超时" in tool_msg["content"]
 
 
 async def test_deny_tool_call(tmp_path: Path) -> None:
@@ -156,6 +191,125 @@ async def test_context_compaction(tmp_path: Path) -> None:
     # 压缩后 messages 里应出现摘要 system 消息，且原始长文本不在末尾
     summary_msgs = [m for m in messages if m.get("role") == "system" and "早期对话摘要" in str(m.get("content", ""))]
     assert summary_msgs, "未生成摘要消息"
+
+
+def test_strip_orphans_keeps_only_complete_tool_pairs() -> None:
+    messages = [
+        {"role": "user", "content": "开始"},
+        {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [
+                {
+                    "id": "call-ok",
+                    "type": "function",
+                    "function": {"name": "list_dir", "arguments": "{}"},
+                }
+            ],
+        },
+        {"role": "tool", "tool_call_id": "call-ok", "content": "ok"},
+        {"role": "tool", "tool_call_id": "call-orphan", "content": "orphan"},
+        {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [
+                {
+                    "id": "call-no-reply",
+                    "type": "function",
+                    "function": {"name": "read_file", "arguments": "{}"},
+                }
+            ],
+        },
+        {"role": "user", "content": "继续"},
+    ]
+
+    _strip_orphans(messages)
+
+    tool_ids = [m.get("tool_call_id") for m in messages if m.get("role") == "tool"]
+    assert tool_ids == ["call-ok"]
+    paired = next(m for m in messages if m.get("tool_calls"))
+    assert paired["tool_calls"][0]["id"] == "call-ok"
+    assert any(
+        m.get("role") == "assistant"
+        and "tool_calls" not in m
+        and m.get("content") == ""
+        for m in messages
+    )
+
+
+def test_looks_truncated_detects_cut_off_output() -> None:
+    # 网关明确报 length：任何上下文都算截断
+    assert _looks_truncated("任意内容", "length") is True
+    assert _looks_truncated("", "length") is True
+    # 句尾启发式只在"本轮已动过手"时启用
+    assert _looks_truncated("现在开始创建文件", None, mid_task=True) is True
+    assert _looks_truncated("现在开始创建文件", None, mid_task=False) is False
+    assert _looks_truncated("完成。", None, mid_task=True) is False
+    assert _looks_truncated("All done.", None, mid_task=True) is False
+    assert _looks_truncated("", None, mid_task=True) is False
+
+
+async def test_truncated_tool_arguments_are_not_executed(tmp_path: Path) -> None:
+    """参数 JSON 被截断时不能按空参数执行（否则会写出空文件）。"""
+    loop = AgentLoop(
+        tmp_path, _mk_cfg(TOOL_WRITE_TRUNCATED_ARGS, TEXT_DONE), ApprovalGate(mode="full-auto")
+    )
+    messages = [{"role": "user", "content": "写文件"}]
+    evs = await _collect(loop, messages)
+
+    assert not (tmp_path / "a.txt").exists(), "截断参数不应执行写文件"
+    assert not any(e["type"] == "tool_start" for e in evs)
+    err = next(e for e in evs if e["type"] == "error")
+    assert "截断" in err["message"]
+    # 错误回给模型，让它能重试
+    tool_msg = next(m for m in messages if m.get("role") == "tool")
+    assert "截断" in tool_msg["content"]
+
+
+async def test_truncated_text_turn_is_retried_once(tmp_path: Path) -> None:
+    """模型动手后只说不做且回复被截断时，带提示重试一次并真正执行。"""
+    loop = AgentLoop(
+        tmp_path,
+        _mk_cfg(TOOL_LIST, TEXT_TRUNCATED, TOOL_WRITE),
+        ApprovalGate(mode="full-auto"),
+    )
+    messages = [{"role": "user", "content": "写文件"}]
+    evs = await _collect(loop, messages)
+
+    assert (tmp_path / "a.txt").read_text() == "hi"
+    statuses = [e for e in evs if e["type"] == "status" and "截断" in e["text"]]
+    assert len(statuses) == 1, "只应重试一次"
+    # 重试提示不写入历史，避免污染上下文
+    assert not any(
+        m.get("role") == "system" and "截断" in str(m.get("content", "")) for m in messages
+    )
+
+
+async def test_pure_qa_turn_without_punctuation_is_not_retried(tmp_path: Path) -> None:
+    """纯问答轮：回答没写句号不算截断，不该多问模型一次。"""
+    loop = AgentLoop(
+        tmp_path,
+        _mk_cfg([{"type": "text", "text": "共 3 个文件"}]),
+        ApprovalGate(mode="full-auto"),
+    )
+    evs = await _collect(loop, [{"role": "user", "content": "几个文件"}])
+
+    assert not [e for e in evs if e["type"] == "status" and "截断" in e["text"]]
+    assert evs[-1]["type"] == "done" and evs[-1]["reason"] == "done"
+
+
+async def test_truncated_turn_does_not_loop_forever(tmp_path: Path) -> None:
+    """重试后仍不调用工具就正常结束，不会无限重试。"""
+    loop = AgentLoop(
+        tmp_path,
+        _mk_cfg(TOOL_LIST, TEXT_TRUNCATED, [{"type": "text", "text": "我继续写"}]),
+        ApprovalGate(mode="full-auto"),
+    )
+    evs = await _collect(loop, [{"role": "user", "content": "写文件"}])
+
+    statuses = [e for e in evs if e["type"] == "status" and "截断" in e["text"]]
+    assert len(statuses) == 1
+    assert evs[-1]["type"] == "done" and evs[-1]["reason"] == "done"
 
 
 def test_route_model() -> None:

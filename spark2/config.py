@@ -6,14 +6,18 @@
 - 密钥落盘后 chmod 600。
 - 内置国产模型预设，开箱即用。
 """
+
 from __future__ import annotations
 
 import json
 import os
-import secrets
+import re
+import subprocess
+import sys
 from pathlib import Path
 
 import tomlkit
+
 
 def config_dir() -> Path:
     """配置目录：默认 ~/.spark2；可用环境变量 SPARK2_HOME 覆盖（测试隔离用）。"""
@@ -24,7 +28,8 @@ def config_file() -> Path:
     return config_dir() / "config.toml"
 
 
-# 兼容引用（动态读取，勿在模块导入时固化路径）
+# 兼容引用（注意：这两个常量在 import 时固化，不随 SPARK2_HOME 运行时变化；
+# 运行时代码一律用 config_dir() / config_file() 动态获取，常量仅供展示类旧引用）
 CONFIG_FILE = config_file()
 CONFIG_DIR = config_dir()
 
@@ -74,6 +79,12 @@ PRESETS: dict[str, dict] = {
         "model": "qwen3-coder",  # 需先在 Ollama 拉取：ollama pull qwen3-coder
         "api_key": "ollama",
     },
+    "custom": {
+        "label": "自定义（OpenAI 兼容）",
+        "base_url": "",
+        "model": "",
+        "api_key": "",
+    },
     "mock": {
         "label": "演示模式（无需密钥）",
         "base_url": "",
@@ -102,6 +113,16 @@ def _defaults() -> dict:
         "memory_embedding": "off",
         "memory_embed_model": "",
         "mcp_servers": [],
+        # ---- 高级可调项（全部可从 Web 设置控制） ----
+        "system_prompt": "",  # 自定义系统提示词；空 = 内置默认。支持 {workdir} {protected} 占位符
+        "protected_paths": [],  # 额外保护路径（list[str]）：这些路径下永远拒绝写入
+        "max_turns": 25,  # 单次对话最大工具轮次
+        "tool_timeout": 180,  # 单个工具执行超时（秒）
+        "temperature": "",  # 采样温度；空 = 不传给模型（用服务端默认）
+        "max_tokens": "",  # 单次回复最大 tokens；空 = 不传
+        "route_enabled": True,  # 多模型路由开关（model_fast 非空时才实际生效）
+        "route_keywords": "",  # 自定义"强任务"关键词（逗号/空格/换行分隔）；空 = 内置词表
+        "usage_pricing": {},  # 成本单价覆盖：{模型名: {"input": 元/M, "output": 元/M}}
     }
 
 
@@ -114,9 +135,12 @@ def load_config() -> dict:
             for k in cfg:
                 if k in data:
                     cfg[k] = data[k]
-            # tomlkit 的 Table/List 转成普通 dict/list（数组的表 → [[mcp_servers]]）
-            if isinstance(cfg.get("mcp_servers"), list):
-                cfg["mcp_servers"] = json.loads(json.dumps(cfg["mcp_servers"]))
+            # tomlkit 的 Table/List 转成普通 dict/list（数组的表 → [[mcp_servers]] 等）
+            for k in ("mcp_servers", "protected_paths"):
+                if isinstance(cfg.get(k), list):
+                    cfg[k] = json.loads(json.dumps(cfg[k]))
+            if isinstance(cfg.get("usage_pricing"), dict):
+                cfg["usage_pricing"] = json.loads(json.dumps(cfg["usage_pricing"]))
         except Exception:
             # 配置损坏时退回默认，并把坏文件改名留档，不覆盖用户数据。
             backup = f.with_suffix(".toml.bak")
@@ -124,14 +148,10 @@ def load_config() -> dict:
                 os.replace(f, backup)
             except OSError:
                 pass
-    _ensure_token(cfg)
+    # 访问令牌默认空 = 本机免登录（服务只绑 127.0.0.1）。
+    # 用户可在设置里显式开启；开启后所有请求必须携带。
+    cfg["token"] = str(cfg.get("token") or "").strip()
     return cfg
-
-
-def _ensure_token(cfg: dict) -> None:
-    if not cfg.get("token"):
-        cfg["token"] = secrets.token_hex(16)
-        save_config(cfg)
 
 
 def save_config(cfg: dict) -> None:
@@ -139,19 +159,86 @@ def save_config(cfg: dict) -> None:
     f.parent.mkdir(parents=True, exist_ok=True)
     doc = tomlkit.document()
     for k, v in cfg.items():
-        # 仅持久化 TOML 基础类型与 mcp_servers（数组的表）；运行时字段（如 mock_script）不写盘
-        if v is None or isinstance(v, dict):
+        # 仅持久化 TOML 基础类型与白名单容器（数组的表 / 表）；
+        # 运行时字段（如 mock_script）不写盘。
+        if v is None:
             continue
-        if isinstance(v, list) and k != "mcp_servers":
+        if isinstance(v, dict):
+            if k == "usage_pricing" and v:
+                doc[k] = v
             continue
-        if k == "mcp_servers" and not v:
+        if isinstance(v, list):
+            if k in ("mcp_servers", "protected_paths") and v:
+                doc[k] = v
             continue
         doc[k] = v
     f.write_text(tomlkit.dumps(doc), encoding="utf-8")
+    _harden_permissions(f)
+
+
+def _harden_permissions(f: Path) -> None:
+    """收紧配置文件权限（内含 API Key / 访问令牌）。
+
+    POSIX：chmod 600。Windows：chmod 只拨只读位、不限制其他账户读取，
+    必须用 icacls 移除继承并只保留当前用户 SID。全部失败安全。
+    """
+    if sys.platform == "win32":
+        sid = _win_user_sid()
+        if sid:
+            try:
+                subprocess.run(
+                    ["icacls", str(f), "/inheritance:r", "/grant:r", f"*{sid}:F"],
+                    capture_output=True,
+                    timeout=30,
+                    creationflags=subprocess.CREATE_NO_WINDOW,
+                )
+                return
+            except (OSError, subprocess.SubprocessError):
+                pass
     try:
         os.chmod(f, 0o600)
     except OSError:
         pass
+
+
+_WIN_SID: str | None = None
+
+
+def _win_user_sid() -> str | None:
+    """当前用户 SID（进程内缓存）；取不到返回 None（调用方回退 chmod）。"""
+    global _WIN_SID
+    if _WIN_SID is None:
+        try:
+            out = subprocess.run(
+                ["whoami", "/user", "/fo", "csv", "/nh"],
+                capture_output=True,
+                text=True,
+                timeout=30,
+                creationflags=subprocess.CREATE_NO_WINDOW,
+            )
+            m = re.search(r"S-1-\d[\d-]*\d", out.stdout or "")
+            _WIN_SID = m.group(0) if m else ""
+        except (OSError, subprocess.SubprocessError):
+            _WIN_SID = ""
+    return _WIN_SID or None
+
+
+def win_acl_restricted(f: Path) -> bool:
+    """Windows：文件 ACL 是否已收紧到只剩当前用户一条 ACE（供 doctor 展示）。"""
+    if sys.platform != "win32":
+        return False
+    try:
+        out = subprocess.run(
+            ["icacls", str(f)],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            creationflags=subprocess.CREATE_NO_WINDOW,
+        ).stdout
+    except (OSError, subprocess.SubprocessError):
+        return False
+    aces = [ln for ln in out.splitlines() if ":(" in ln]
+    return len(aces) == 1
 
 
 def mask_key(key: str) -> str:

@@ -3,6 +3,7 @@
 覆盖：多文件解析、增删交错应用、新文件创建、越界/受保护拒绝、
 上下文不匹配整体拒绝、畸形补丁报错、工具注册与 preview。
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -48,8 +49,9 @@ def test_apply_multi_file(tmp_path: Path):
     (tmp_path / "b.py").write_text("def old():\n    pass\n")
     result, changes = apply_patch(_multi_patch(), tmp_path, [])
     assert "2 个文件" in result and "+3/-2" in result
-    assert (tmp_path / "a.py").read_text() == "x = 1\nprint(x + 1)"
-    assert (tmp_path / "b.py").read_text() == "def old():\n    return 42\n    pass"
+    # 源文件以 \n 结尾 → 补丁后必须保留尾换行（unified diff 语义，见 test_platform_fixes）
+    assert (tmp_path / "a.py").read_text() == "x = 1\nprint(x + 1)\n"
+    assert (tmp_path / "b.py").read_text() == "def old():\n    return 42\n    pass\n"
     assert len(changes) == 2
 
 
@@ -69,7 +71,7 @@ def test_interleaved_add_remove(tmp_path: Path):
 """
     (tmp_path / "f.txt").write_text(src)
     apply_patch(patch, tmp_path, [])
-    assert (tmp_path / "f.txt").read_text() == "a\nb1\nc\nd1\ne"
+    assert (tmp_path / "f.txt").read_text() == "a\nb1\nc\nd1\ne\n"
 
 
 def test_create_new_file(tmp_path: Path):
@@ -81,7 +83,7 @@ def test_create_new_file(tmp_path: Path):
 +正文第二行
 """
     result, _ = apply_patch(patch, tmp_path, [])
-    assert (tmp_path / "notes.md").read_text() == "# 标题\n正文第一行\n正文第二行"
+    assert (tmp_path / "notes.md").read_text() == "# 标题\n正文第一行\n正文第二行\n"
     assert "1 个文件" in result
 
 
@@ -100,7 +102,7 @@ def test_multi_hunk_same_file(tmp_path: Path):
 """
     (tmp_path / "g.txt").write_text(src)
     apply_patch(patch, tmp_path, [])
-    assert (tmp_path / "g.txt").read_text() == "l1\nl2x\nl3\nl4\nl5x"
+    assert (tmp_path / "g.txt").read_text() == "l1\nl2x\nl3\nl4\nl5x\n"
 
 
 def test_reject_escape(tmp_path: Path):
@@ -136,6 +138,21 @@ def test_reject_context_mismatch(tmp_path: Path):
     assert (tmp_path / "a.py").read_text() == "x = 1\nprint(x)\n"  # 未改动
 
 
+def test_context_mismatch_error_helps_model_self_correct(tmp_path: Path):
+    """上下文对不上时，错误里要带文件真实邻域与行号，模型才能一次改对。"""
+    body = "\n".join(f"line{i}" for i in range(1, 11)) + "\n"
+    (tmp_path / "a.py").write_text(body, encoding="utf-8")
+    # hunk 声称第 5 行是 WRONG，实际第 5 行是 line5
+    patch = "--- a/a.py\n+++ b/a.py\n@@ -5,1 +5,1 @@\n-WRONG\n+NEW\n"
+    with pytest.raises(PatchError) as exc:
+        apply_patch(patch, tmp_path, [])
+    msg = str(exc.value)
+    assert "'line5'" in msg, msg           # 该位置真实内容
+    assert "文件共 10 行" in msg, msg      # 总行数
+    assert "line4" in msg and "line6" in msg, msg  # 邻域真实行
+    assert "重新生成 hunk" in msg, msg
+
+
 def test_reject_empty_and_malformed(tmp_path: Path):
     with pytest.raises(PatchError, match="补丁为空"):
         apply_patch("", tmp_path, [])
@@ -159,7 +176,10 @@ def test_registry_and_preview(tmp_path: Path):
     t = reg["apply_patch"]
     assert t.category == "write"
     (tmp_path / "a.py").write_text("x = 1\nprint(x)\n")
-    summary, diff = t.preview({"patch": _multi_patch()}, type("C", (), {"workdir": tmp_path, "protected": []})())
+    summary, diff = t.preview(
+        {"patch": _multi_patch()},
+        type("C", (), {"workdir": tmp_path, "protected": []})(),
+    )
     assert "2 个文件" in summary and "+3/-2" in summary
     assert "a/a.py" in diff
     # preview 不落盘

@@ -25,7 +25,7 @@ Spark 是一个**本地优先的 AI 编程助手**，从零重写：无 Electron
 ## 🚀 快速开始
 
 ```bash
-cd spark2
+cd spark
 pip install -e ".[dev]"
 spark2 web          # 打开打印出的地址（仅监听 127.0.0.1）
 ```

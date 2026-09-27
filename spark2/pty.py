@@ -1,4 +1,4 @@
-"""内置终端：持久 PTY（每 tab 一个 bash 子进程），供 Web 端实时读写。
+"""内置终端：持久 PTY（每 tab 一个 shell 子进程），供 Web 端实时读写。
 
 安全边界（设计意图，写清楚避免误解）：
 - 终端里的命令是**用户自己敲的**，不受审批门约束——审批门只管 Agent 的工具调用
@@ -6,27 +6,57 @@
 - 每个 PTY 的 cwd 固定为对应会话的工作目录，不额外做沙箱
   （信任用户本机操作，与 run_shell 一致）。
 
-实现：ptyprocess（纯 Python、轻量、无重依赖）。Reader 用后台线程读 PTY，
-通过 asyncio loop 的 call_soon_threadsafe 推入 queue，由 WebSocket 循环消费。
+实现：双后端——POSIX 用 ptyprocess（纯 Python、轻量），Windows 用 pywinpty
+（ConPTY，Jupyter 同款成熟后端，pexpect 兼容接口；read 返回 str 而非 bytes）。
+Reader 用后台线程读 PTY，通过 asyncio loop 的 call_soon_threadsafe 推入 queue，
+由 WebSocket 循环消费。
 """
+
 from __future__ import annotations
 
 import asyncio
 import os
+import re
+import sys
 import threading
 import uuid
 from pathlib import Path
 from typing import Callable
 
-from ptyprocess import PtyProcess
+_IS_WINDOWS = sys.platform == "win32"
+
+# PTY 后端按平台选择；都装不上时保持模块可导入，Web 服务正常启动，
+# 内置终端在连接时报明确错误（不拖垮整个应用）。
+PtyProcess = None
+PTY_AVAILABLE = False
+if _IS_WINDOWS:
+    try:
+        from winpty import PtyProcess  # type: ignore  # pywinpty（ConPTY 后端）
+
+        PTY_AVAILABLE = True
+    except ImportError:
+        pass
+else:
+    try:
+        from ptyprocess import PtyProcess  # type: ignore  # ptyprocess 依赖 Unix fcntl
+
+        PTY_AVAILABLE = True
+    except ImportError:
+        pass
 
 DEFAULT_COLS = 110
 DEFAULT_ROWS = 28
 READ_CHUNK = 4096
 
 
+def safe_tab_id(raw: str) -> str:
+    """终端 tab id 消毒：只留 [A-Za-z0-9_-]（防 "../" 穿越 rc 文件名），空则自动生成。"""
+    cleaned = re.sub(r"[^A-Za-z0-9_-]", "", raw or "")[:64]
+    return cleaned or uuid.uuid4().hex[:12]
+
+
 class PtySession:
-    """一个终端 tab：bash -i 子进程 + 输出 reader 线程。"""
+    """一个终端 tab：shell 子进程（POSIX bash / Windows cmd）+ 输出 reader 线程。"""
 
     def __init__(
         self,
@@ -35,29 +65,38 @@ class PtySession:
         cols: int = DEFAULT_COLS,
         rows: int = DEFAULT_ROWS,
     ) -> None:
+        if PtyProcess is None:
+            raise RuntimeError(
+                "内置终端不可用：缺少 PTY 后端（POSIX 需要 ptyprocess；Windows 需要 pip install pywinpty）"
+            )
         self.tab_id = tab_id
         self.cwd = cwd.resolve()
         self.cwd.mkdir(parents=True, exist_ok=True)
-        # 品牌化 bash 提示符（"spark 路径$"），避免裸露出沙箱主机名；
-        # rcfile 放系统临时目录，不污染工作目录（ls 里也看不到）
-        rc = Path(os.environ.get("TMPDIR", "/tmp")) / f"spark_pty_rc_{tab_id}.sh"
-        try:
-            rc.write_text(
-                "PS1='\\[\\e[32m\\]spark\\[\\e[0m\\] \\w\\$ '\n"
-                "unset PROMPT_COMMAND\n"
-                "clear\n",
-                encoding="utf-8",
-            )
-            shell_cmd = ["bash", "--rcfile", str(rc), "-i"]
-        except OSError:
-            shell_cmd = ["bash", "-i"]
+        self._rc: Path | None = None
+        if _IS_WINDOWS:
+            # ConPTY：用系统 shell（ComSpec → cmd.exe），无 bash rcfile 定制
+            shell_cmd = [os.environ.get("COMSPEC") or "cmd.exe"]
+        else:
+            # 品牌化 bash 提示符（"spark 路径$"），避免裸露出沙箱主机名；
+            # rcfile 放系统临时目录，不污染工作目录（ls 里也看不到）
+            rc = Path(os.environ.get("TMPDIR", "/tmp")) / f"spark_pty_rc_{tab_id}.sh"
+            try:
+                rc.write_text(
+                    "PS1='\\[\\e[32m\\]spark\\[\\e[0m\\] \\w\\$ '\n"
+                    "unset PROMPT_COMMAND\n"
+                    "clear\n",
+                    encoding="utf-8",
+                )
+                shell_cmd = ["bash", "--rcfile", str(rc), "-i"]
+            except OSError:
+                shell_cmd = ["bash", "-i"]
+            self._rc = rc
         self.proc = PtyProcess.spawn(
             shell_cmd,
             cwd=str(self.cwd),
             dimensions=(rows, cols),
             env=_shell_env(),
         )
-        self._rc = rc
         self._loop: asyncio.AbstractEventLoop | None = None
         self._queue: asyncio.Queue[str] | None = None
         self._thread: threading.Thread | None = None
@@ -74,8 +113,11 @@ class PtySession:
         if not self.alive:
             return
         try:
-            self.proc.write(data.encode("utf-8"))
-        except (OSError, ValueError):
+            if _IS_WINDOWS:
+                self.proc.write(data)  # pywinpty 收 str
+            else:
+                self.proc.write(data.encode("utf-8"))  # ptyprocess 收 bytes
+        except (OSError, ValueError, EOFError):
             pass
 
     def resize(self, cols: int, rows: int) -> None:
@@ -83,14 +125,18 @@ class PtySession:
             return
         try:
             self.proc.setwinsize(rows, cols)
-        except (OSError, ValueError):
+        except (OSError, ValueError, EOFError):
             pass
 
-    def start_reader(self, loop: asyncio.AbstractEventLoop, queue: asyncio.Queue[str]) -> None:
+    def start_reader(
+        self, loop: asyncio.AbstractEventLoop, queue: asyncio.Queue[str]
+    ) -> None:
         """启动后台 reader：读到的字节经 loop 推入 queue（线程安全）。"""
         self._loop = loop
         self._queue = queue
-        self._thread = threading.Thread(target=self._read_loop, name=f"pty-{self.tab_id}", daemon=True)
+        self._thread = threading.Thread(
+            target=self._read_loop, name=f"pty-{self.tab_id}", daemon=True
+        )
         self._thread.start()
 
     def _read_loop(self) -> None:
@@ -103,7 +149,8 @@ class PtySession:
                     if not self.alive:
                         break
                     continue
-                data = raw.decode("utf-8", errors="replace")
+                # pywinpty read 返回 str；ptyprocess 返回 bytes
+                data = raw if isinstance(raw, str) else raw.decode("utf-8", errors="replace")
             except (OSError, EOFError, ValueError):
                 break
             try:
@@ -123,10 +170,13 @@ class PtySession:
         self._closed = True
         try:
             self.proc.close(force=True)
-        except (OSError, ValueError):
+        except (OSError, ValueError, EOFError):
             try:
-                self.proc.kill()
-            except (OSError, ValueError):
+                if _IS_WINDOWS:
+                    self.proc.terminate()
+                else:
+                    self.proc.kill()
+            except (OSError, ValueError, EOFError):
                 pass
         rc = getattr(self, "_rc", None)
         if rc is not None:

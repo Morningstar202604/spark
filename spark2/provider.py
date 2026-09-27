@@ -4,28 +4,42 @@
 - 不引入任何额外依赖：HTTP 用 httpx，估算用启发式（安装 tiktoken 后自动用更准的近似）。
 - mock 提供脚本化事件流，用于测试与无密钥演示。
 """
+
 from __future__ import annotations
 
+import asyncio
 import json
 from typing import AsyncIterator
 
 import httpx
 
-try:
-    import tiktoken  # type: ignore
+# tiktoken 惰性初始化：get_encoding 首次调用需联网下载 BPE 词表，
+# 网络受限环境下既不能阻断 import，也不能阻断应用启动——失败一律回退启发式。
+_ENCODER: object | None = None
+_ENCODER_TRIED = False
 
-    _ENCODER = tiktoken.get_encoding("o200k_base")
 
-    def estimate_tokens(text: str) -> int:
+def _get_encoder():
+    global _ENCODER, _ENCODER_TRIED
+    if not _ENCODER_TRIED:
+        _ENCODER_TRIED = True
         try:
-            return len(_ENCODER.encode(text))
-        except Exception:
-            return _heuristic_tokens(text)
+            import tiktoken  # type: ignore
 
-except ImportError:  # pragma: no cover
+            _ENCODER = tiktoken.get_encoding("o200k_base")
+        except Exception:  # noqa: BLE001 —— 未安装 / 下载失败 / 缓存损坏都回退
+            _ENCODER = None
+    return _ENCODER
 
-    def estimate_tokens(text: str) -> int:
-        return _heuristic_tokens(text)
+
+def estimate_tokens(text: str) -> int:
+    enc = _get_encoder()
+    if enc is not None:
+        try:
+            return len(enc.encode(text))  # type: ignore[attr-defined]
+        except Exception:  # noqa: BLE001
+            pass
+    return _heuristic_tokens(text)
 
 
 def _heuristic_tokens(text: str) -> int:
@@ -37,7 +51,31 @@ def _heuristic_tokens(text: str) -> int:
 
 
 class ProviderError(Exception):
-    pass
+    def __init__(self, message: str, status: int | None = None) -> None:
+        super().__init__(message)
+        self.status = status
+
+
+_RETRYABLE_STATUS = (429, 500, 502, 503, 504)
+
+
+def _opt_float(v) -> float | None:
+    """配置里的可选数值（可能是空串/字符串数字）；无效 → None（不传该参数）。"""
+    try:
+        if v is None or str(v).strip() == "":
+            return None
+        return float(v)
+    except (TypeError, ValueError):
+        return None
+
+
+def _opt_int(v) -> int | None:
+    try:
+        if v is None or str(v).strip() == "":
+            return None
+        return int(v)
+    except (TypeError, ValueError):
+        return None
 
 
 def _heuristic_summary(messages: list[dict], max_chars: int = 1200) -> str:
@@ -96,7 +134,9 @@ async def summarize_messages(cfg: dict, messages: list[dict]) -> str:
             if resp.status_code >= 400:
                 return "（早期对话摘要）" + _heuristic_summary(messages)
             data = resp.json()
-            content = (data.get("choices") or [{}])[0].get("message", {}).get("content", "")
+            content = (
+                (data.get("choices") or [{}])[0].get("message", {}).get("content", "")
+            )
             if content and content.strip():
                 return "（早期对话摘要）" + content.strip()[:1500]
             return "（早期对话摘要）" + _heuristic_summary(messages)
@@ -111,7 +151,9 @@ async def test_connection(cfg: dict) -> tuple[bool, str]:
     if not cfg.get("api_key"):
         return False, "缺少 API Key"
     try:
-        async for _ in stream_chat(cfg, [{"role": "user", "content": "hi"}], max_delta=80):
+        async for _ in stream_chat(
+            cfg, [{"role": "user", "content": "hi"}], max_delta=80
+        ):
             pass
         return True, "连接成功"
     except ProviderError as e:
@@ -148,6 +190,13 @@ async def stream_chat(
         "messages": messages,
         "stream": True,
     }
+    # 可选采样参数：仅当设置里显式配置才发送（空 = 用模型服务端默认）
+    temp = _opt_float(cfg.get("temperature"))
+    if temp is not None:
+        payload["temperature"] = temp
+    mt = _opt_int(cfg.get("max_tokens"))
+    if mt is not None:
+        payload["max_tokens"] = mt
     if tools:
         payload["tools"] = tools
     headers = {"Authorization": f"Bearer {cfg.get('api_key', '')}"}
@@ -156,14 +205,22 @@ async def stream_chat(
     if tools:
         input_est += sum(estimate_tokens(str(t)) for t in tools)
 
-    try:
+    async def _once() -> AsyncIterator[dict]:
+        """单次请求：产出文本/推理/工具调用/用量事件，失败抛 ProviderError。"""
+        acc: dict[int, dict] = {}
+        out_tokens = 0
+        finish_reason: str | None = None
+        real_prompt = real_completion = None
         async with httpx.AsyncClient(timeout=httpx.Timeout(300, connect=30)) as client:
-            async with client.stream("POST", url, json=payload, headers=headers) as resp:
+            async with client.stream(
+                "POST", url, json=payload, headers=headers
+            ) as resp:
                 if resp.status_code >= 400:
                     body = (await resp.aread()).decode("utf-8", "replace")[:400]
-                    raise ProviderError(f"模型接口返回 {resp.status_code}: {body}")
-                acc: dict[int, dict] = {}
-                out_tokens = 0
+                    raise ProviderError(
+                        f"模型接口返回 {resp.status_code}: {body}",
+                        status=resp.status_code,
+                    )
                 async for line in resp.aiter_lines():
                     line = line.strip()
                     if not line or not line.startswith("data:"):
@@ -177,10 +234,17 @@ async def stream_chat(
                         continue
                     if "error" in chunk:
                         raise ProviderError(f"模型返回错误: {chunk['error']}")
+                    # 网关结尾若带回真实用量则优先采用（否则退回本地估算）
+                    u = chunk.get("usage")
+                    if isinstance(u, dict):
+                        real_prompt = int(u.get("prompt_tokens") or 0)
+                        real_completion = int(u.get("completion_tokens") or 0)
                     choices = chunk.get("choices") or []
                     if not choices:
                         continue
                     ch = choices[0]
+                    if ch.get("finish_reason"):
+                        finish_reason = ch["finish_reason"]
                     delta = ch.get("delta") or {}
                     if delta.get("content"):
                         text = delta["content"]
@@ -204,17 +268,52 @@ async def stream_chat(
                                 slot["name"] = fn["name"]
                             if fn.get("arguments"):
                                 slot["arguments"] += fn["arguments"]
-                calls = [v for _, v in sorted(acc.items())]
-                if calls:
-                    for c in calls:
-                        try:
-                            c["arguments"] = json.loads(c["arguments"] or "{}")
-                        except json.JSONDecodeError:
-                            c["arguments"] = {}
-                    yield {"type": "tool_calls", "calls": calls}
-                yield {"type": "usage", "estimated": input_est + out_tokens, "prompt_tokens": input_est, "completion_tokens": out_tokens, "model": cfg.get("model") or "unknown"}
-    except httpx.HTTPError as e:
-        raise ProviderError(f"请求模型失败: {e}") from e
+        calls = [v for _, v in sorted(acc.items())]
+        for c in calls:
+            raw = c["arguments"]
+            try:
+                c["arguments"] = json.loads(raw or "{}")
+            except json.JSONDecodeError:
+                # 输出被长度上限截断：arguments 不是完整 JSON。绝不能当成 {} 静默执行
+                # （会写出空文件/错误参数），标记出来交由上层回问模型重试。
+                c["arguments"] = {}
+                c["invalid_arguments"] = True
+                c["arguments_tail"] = raw[-200:]
+        if calls:
+            yield {"type": "tool_calls", "calls": calls}
+        yield {
+            "type": "usage",
+            "estimated": input_est + out_tokens,
+            "prompt_tokens": real_prompt if real_prompt is not None else input_est,
+            "completion_tokens": (
+                real_completion if real_completion is not None else out_tokens
+            ),
+            "model": cfg.get("model") or "unknown",
+            "finish_reason": finish_reason,
+        }
+
+    # 瞬态故障（429/5xx/上游错误）且尚未产出任何内容时重试，最多 3 次；
+    # 4xx 配置类错误与已产出部分内容后断流不重试（避免重复执行 / 掩盖配置问题）。
+    last_err: Exception | None = None
+    for attempt in range(3):
+        produced = False
+        try:
+            async for ev in _once():
+                produced = True
+                yield ev
+            return
+        except ProviderError as e:
+            retryable = e.status is None or e.status in _RETRYABLE_STATUS
+            if produced or not retryable:
+                raise
+            last_err = e
+        except httpx.HTTPError as e:
+            if produced:
+                raise
+            last_err = ProviderError(f"请求模型失败: {e}")
+        if attempt == 2:
+            raise last_err
+        await asyncio.sleep(1 + attempt * 2)
 
 
 async def _mock_chat(
@@ -230,7 +329,13 @@ async def _mock_chat(
             yield ev
         if not script:
             yield {"type": "text", "text": "（演示模式）任务已按脚本完成。"}
-        yield {"type": "usage", "estimated": 100, "prompt_tokens": 60, "completion_tokens": 40, "model": cfg.get("model") or "mock"}
+        yield {
+            "type": "usage",
+            "estimated": 100,
+            "prompt_tokens": 60,
+            "completion_tokens": 40,
+            "model": cfg.get("model") or "mock",
+        }
         return
     # 默认演示行为：回应一句，并尝试列出当前目录（展示工具卡与审批）。
     user_text = ""
@@ -249,7 +354,22 @@ async def _mock_chat(
                 }
             ],
         }
-        yield {"type": "usage", "estimated": 60, "prompt_tokens": 40, "completion_tokens": 20, "model": cfg.get("model") or "mock"}
+        yield {
+            "type": "usage",
+            "estimated": 60,
+            "prompt_tokens": 40,
+            "completion_tokens": 20,
+            "model": cfg.get("model") or "mock",
+        }
         return
-    yield {"type": "text", "text": "（演示模式）你好，我是 Spark 重建版。配置真实模型后即可使用。"}
-    yield {"type": "usage", "estimated": 40, "prompt_tokens": 25, "completion_tokens": 15, "model": cfg.get("model") or "mock"}
+    yield {
+        "type": "text",
+        "text": "（演示模式）你好，我是 Spark 重建版。配置真实模型后即可使用。",
+    }
+    yield {
+        "type": "usage",
+        "estimated": 40,
+        "prompt_tokens": 25,
+        "completion_tokens": 15,
+        "model": cfg.get("model") or "mock",
+    }

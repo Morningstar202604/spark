@@ -3,16 +3,29 @@
 与旧版 SQLite 相比：无迁移问题、文件即会话、可直接 grep 查看；
 规模小且是本机单用户场景，JSONL 足够且更简单。
 """
+
 from __future__ import annotations
 
 import json
+import re
 import uuid
 from pathlib import Path
+
+from spark2.config import config_dir
+
+_SID_RE = re.compile(r"[A-Za-z0-9_-]{1,64}")
+
+
+def _safe_sid(sid: str) -> bool:
+    """会话 id 白名单校验：拒绝 "../" 与绝对路径穿越（Path(root)/绝对路径会被接管）。"""
+    return bool(sid) and _SID_RE.fullmatch(sid) is not None
 
 
 class SessionStore:
     def __init__(self, root: Path | None = None) -> None:
-        self.root = root or (Path.home() / ".spark2" / "sessions")
+        self.root = root or (
+            config_dir() / "sessions"
+        )  # 动态取 SPARK2_HOME，见 config.py 契约
         self.root.mkdir(parents=True, exist_ok=True)
 
     def _dir(self, sid: str) -> Path:
@@ -47,16 +60,24 @@ class SessionStore:
         )
 
     def append(self, sid: str, msg: dict) -> None:
+        if not _safe_sid(sid):
+            return
         with self._msgs_path(sid).open("a", encoding="utf-8") as f:
             f.write(json.dumps(msg, ensure_ascii=False) + "\n")
         meta = self.meta(sid) or {}
         meta["messages"] = meta.get("messages", 0) + 1
         meta["updated"] = _now()
-        if meta.get("title") == "新会话" and msg.get("role") == "user" and msg.get("content"):
+        if (
+            meta.get("title") == "新会话"
+            and msg.get("role") == "user"
+            and msg.get("content")
+        ):
             meta["title"] = str(msg["content"]).strip().replace("\n", " ")[:24]
         self._write_meta(sid, meta)
 
     def messages(self, sid: str) -> list[dict]:
+        if not _safe_sid(sid):
+            return []
         p = self._msgs_path(sid)
         if not p.exists():
             return []
@@ -72,6 +93,8 @@ class SessionStore:
         return out
 
     def meta(self, sid: str) -> dict | None:
+        if not _safe_sid(sid):
+            return None
         p = self._meta_path(sid)
         if not p.exists():
             return None
@@ -81,10 +104,21 @@ class SessionStore:
             return None
 
     def list(self, limit: int = 50) -> list[dict]:
-        rows = []
-        for d in sorted(self.root.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True):
-            if not d.is_dir():
+        rows: list[dict] = []
+        try:
+            entries = list(self.root.iterdir())
+        except OSError:
+            return rows
+        stamped: list[tuple[float, Path]] = []
+        for d in entries:
+            # 目录可能在遍历间隙被删除（并发 delete）：跳过而不是把列表接口打挂
+            try:
+                if d.is_dir():
+                    stamped.append((d.stat().st_mtime, d))
+            except OSError:
                 continue
+        stamped.sort(key=lambda x: x[0], reverse=True)
+        for _, d in stamped:
             m = self.meta(d.name)
             if m:
                 rows.append(m)
@@ -96,6 +130,8 @@ class SessionStore:
         """删除会话（目录 + 文件），成功返回 True。"""
         import shutil
 
+        if not _safe_sid(sid):
+            return False
         d = self._dir(sid)
         if not d.exists():
             return False
@@ -104,6 +140,8 @@ class SessionStore:
 
     def rename(self, sid: str, title: str) -> bool:
         """重命名会话标题，成功返回 True（会话不存在返回 False）。"""
+        if not _safe_sid(sid):
+            return False
         meta = self.meta(sid)
         if not meta:
             return False
@@ -120,10 +158,14 @@ class SessionStore:
 
         返回新会话 meta；源会话不存在返回 None。
         """
+        if not _safe_sid(sid):
+            return None
         src = self.meta(sid)
         if not src:
             return None
-        new = self.create(workdir=str(src.get("workdir") or ""), model=str(src.get("model") or ""))
+        new = self.create(
+            workdir=str(src.get("workdir") or ""), model=str(src.get("model") or "")
+        )
         for m in self.messages(sid):
             self.append(new["id"], m)
         meta = self.meta(new["id"])

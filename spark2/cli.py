@@ -1,16 +1,25 @@
-"""CLI：spark2 web / run / doctor / config。"""
+"""CLI：spark2 web / run / tui / doctor / config / memory。"""
+
 from __future__ import annotations
 
 import asyncio
 import datetime
 import shutil
+import sys
 from pathlib import Path
 
 import typer
 
 from spark2 import __version__
 from spark2.approval import ApprovalGate
-from spark2.config import APPROVAL_MODES, CONFIG_FILE, PRESETS, apply_preset, load_config, mask_key
+from spark2.config import (
+    APPROVAL_MODES,
+    PRESETS,
+    apply_preset,
+    config_file,
+    load_config,
+    mask_key,
+)
 from spark2.loop import AgentLoop
 from spark2.provider import ProviderError, test_connection
 from spark2.store import SessionStore
@@ -22,9 +31,13 @@ app = typer.Typer(add_completion=False, help="Spark Agent 重构版 —— 本�
 
 @app.command()
 def web(
-    host: str = typer.Option("127.0.0.1", "--host", help="监听地址（默认只本机，请勿随意改成 0.0.0.0）"),
+    host: str = typer.Option(
+        "127.0.0.1", "--host", help="监听地址（默认只本机，请勿随意改成 0.0.0.0）"
+    ),
     port: int = typer.Option(8000, "--port", help="监听端口"),
-    workdir: str = typer.Option("", "--workdir", help="工作目录（可选，默认用配置里的）"),
+    workdir: str = typer.Option(
+        "", "--workdir", help="工作目录（可选，默认用配置里的）"
+    ),
 ) -> None:
     """启动 Web 界面。"""
     from spark2.web.server import app as fastapi_app
@@ -35,11 +48,14 @@ def web(
         from spark2.config import save_config
 
         save_config(cfg)
-    token = cfg.get("token", "")
-    url = f"http://{host}:{port}/?token={token}"
+    token = (cfg.get("token") or "").strip()
+    url = f"http://{host}:{port}/" + (f"?token={token}" if token else "")
     print(f"Spark {__version__} 已启动：")
     print(f"  地址：{url}")
-    print("  令牌已内嵌在地址中；换浏览器/设备时用它访问。")
+    if token:
+        print("  访问令牌已内嵌在地址中；换浏览器/设备时用它访问。")
+    else:
+        print("  未设置访问令牌：本机免登录（仅监听 127.0.0.1）；可在网页设置里开启。")
     print(f"  工作目录：{cfg.get('workdir')}")
     import uvicorn
 
@@ -55,7 +71,8 @@ class StdinGate(ApprovalGate):
         loop = asyncio.get_running_loop()
         label = self._request_tool or "操作"
         answer = await loop.run_in_executor(
-            None, lambda: _ask(f"[审批] {label}：允许(y) / 拒绝(n) / 本次始终允许(a)？ [n] ")
+            None,
+            lambda: _ask(f"[审批] {label}：允许(y) / 拒绝(n) / 本次始终允许(a)？ [n] "),
         )
         if answer == "a" and self._request_tool:
             self.always.add(self._request_tool)
@@ -74,7 +91,9 @@ def _ask(prompt: str) -> str:
 def run(
     prompt: str,
     workdir: str = typer.Option(".", "--workdir", help="工作目录"),
-    approval: str = typer.Option("suggest", "--approval", help=f"审批模式：{'/'.join(APPROVAL_MODES)}"),
+    approval: str = typer.Option(
+        "suggest", "--approval", help=f"审批模式：{'/'.join(APPROVAL_MODES)}"
+    ),
     model: str = typer.Option("", "--model", help="模型名（覆盖配置）"),
 ) -> None:
     """无头模式：在终端里跑一次对话（写入/命令需逐条确认）。"""
@@ -91,14 +110,21 @@ def run(
         "model": cfg.get("model", ""),
         "api_key": cfg.get("api_key", ""),
     }
-    loop = AgentLoop(wd, provider_cfg, gate, max_context_tokens=int(cfg.get("max_context_tokens", 32000)))
+    loop = AgentLoop(
+        wd,
+        provider_cfg,
+        gate,
+        max_context_tokens=int(cfg.get("max_context_tokens", 32000)),
+    )
     mcp: McpManager | None = None
     if cfg.get("mcp_servers"):
         mcp = McpManager(servers_from_cfg(cfg))
         loop.mcp = mcp
     from spark2.config import config_dir
 
-    loop.log_path = config_dir() / "logs" / (datetime.date.today().isoformat() + ".jsonl")
+    loop.log_path = (
+        config_dir() / "logs" / (datetime.date.today().isoformat() + ".jsonl")
+    )
     messages: list[dict] = [{"role": "user", "content": prompt}]
     print(f"[工作目录] {wd}")
     print(f"[模型] {cfg.get('model') or '(未配置)'}\n")
@@ -119,7 +145,15 @@ def run(
             elif t == "error":
                 print(f"\n[错误] {ev.get('message', '')}")
             elif t == "done":
-                print("\n" + {"done": "完成", "cancelled": "已取消", "max_turns": "达到最大轮次", "error": "出错"}.get(ev.get("reason", ""), ev.get("reason", "")))
+                print(
+                    "\n"
+                    + {
+                        "done": "完成",
+                        "cancelled": "已取消",
+                        "max_turns": "达到最大轮次",
+                        "error": "出错",
+                    }.get(ev.get("reason", ""), ev.get("reason", ""))
+                )
         return 0
 
     try:
@@ -129,6 +163,20 @@ def run(
     finally:
         if mcp is not None:
             mcp.close()
+
+
+@app.command()
+def tui() -> None:
+    """终端界面：键盘优先的全屏 UI（Ctrl+N 新建 / Ctrl+S 会话 / A 允许 / D 拒绝）。"""
+    try:
+        from spark2.tui import main as tui_main
+    except ImportError:
+        typer.secho(
+            'TUI 缺少依赖：pip install "spark-agent[dev]" 或 pip install "textual>=0.60"',
+            fg=typer.colors.RED,
+        )
+        raise typer.Exit(1)
+    tui_main(load_config())
 
 
 @app.command()
@@ -161,20 +209,32 @@ def doctor() -> None:
 
     cfg = load_config()
     print(f"Spark {__version__}\n")
-    print(f"配置文件：{CONFIG_FILE}" + ("（权限 600）" if _mode_ok() else ""))
-    print(f"  模型服务：{PRESETS.get(cfg.get('provider', ''), {}).get('label', cfg.get('provider', '（自定义）'))} · 模型 {cfg.get('model') or '（未设置）'}")
+    print(f"配置文件：{config_file()}" + _perm_note())
+    print(
+        f"  模型服务：{PRESETS.get(cfg.get('provider', ''), {}).get('label', cfg.get('provider', '（自定义）'))} · 模型 {cfg.get('model') or '（未设置）'}"
+    )
     print(f"  API Key：{mask_key(cfg.get('api_key', '')) or '（未设置）'}")
+    _tok = (cfg.get("token") or "").strip()
+    print(
+        f"  访问令牌：{'已设置（请求需携带）' if _tok else '未设置（本机免登录；在网页设置里可开启）'}"
+    )
     print(f"  工作目录：{cfg.get('workdir')}")
     print(f"  审批模式：{cfg.get('approval_mode')}")
     wd = Path(cfg.get("workdir", "")).expanduser()
     print(f"工作目录可访问：{'是' if wd.exists() else '否（不存在）'}")
-    print(f"ripgrep：{'已安装' if shutil.which('rg') else '未安装（搜索将降级为 Python 遍历）'}")
-    print(f"git（检查点）：{'已安装' if git_available() else '未安装（检查点功能不可用）'} · 工作目录{'是' if is_git_repo(wd) else '不是'} git 仓库")
+    print(
+        f"ripgrep：{'已安装' if shutil.which('rg') else '未安装（搜索将降级为 Python 遍历）'}"
+    )
+    print(
+        f"git（检查点）：{'已安装' if git_available() else '未安装（检查点功能不可用）'} · 工作目录{'是' if is_git_repo(wd) else '不是'} git 仓库"
+    )
     print(f"长期记忆：{MemoryStore().count(str(wd))} 条（{MemoryStore().path}）")
     print(f"事件日志：{config_dir() / 'logs'}（每次对话自动记录，JSONL 可复盘）")
     mcp_servers = cfg.get("mcp_servers") or []
     if mcp_servers:
-        print(f"MCP：已配置 {len(mcp_servers)} 个服务器：{'、'.join(s.get('name', '?') for s in mcp_servers)}（连接在首个对话时建立）")
+        print(
+            f"MCP：已配置 {len(mcp_servers)} 个服务器：{'、'.join(s.get('name', '?') for s in mcp_servers)}（连接在首个对话时建立）"
+        )
     elif McpManager([]).available:
         print("MCP：未配置（在 config.toml 加 mcp_servers 即可启用，见 README）")
     else:
@@ -188,17 +248,40 @@ def doctor() -> None:
 
 def _mode_ok() -> bool:
     try:
-        return (CONFIG_FILE.stat().st_mode & 0o777) == 0o600
+        return (config_file().stat().st_mode & 0o777) == 0o600
     except OSError:
         return False
+
+
+def _perm_ok() -> bool:
+    """配置文件权限是否达标：POSIX = 0600；Windows = ACL 收紧到仅当前用户。"""
+    f = config_file()  # 动态：遵守 SPARK2_HOME
+    if sys.platform == "win32":
+        from spark2.config import win_acl_restricted
+
+        return win_acl_restricted(f)
+    return _mode_ok()
+
+
+def _perm_note() -> str:
+    if not config_file().exists() or not _perm_ok():
+        return ""
+    return "（ACL 已收紧：仅当前用户）" if sys.platform == "win32" else "（权限 600）"
 
 
 @app.command()
 def config() -> None:
     """打印当前配置（密钥打码）。"""
     cfg = load_config()
-    print(f"配置文件：{CONFIG_FILE}")
-    for k in ("provider", "base_url", "model", "workdir", "approval_mode", "max_context_tokens"):
+    print(f"配置文件：{config_file()}")
+    for k in (
+        "provider",
+        "base_url",
+        "model",
+        "workdir",
+        "approval_mode",
+        "max_context_tokens",
+    ):
         v = cfg.get(k, "")
         print(f"  {k} = {v}")
     print(f"  api_key = {mask_key(cfg.get('api_key', ''))}")
@@ -206,7 +289,9 @@ def config() -> None:
     if mcp_servers:
         print("  mcp_servers =")
         for s in mcp_servers:
-            print(f"    - name={s.get('name')} command={s.get('command')} args={s.get('args')}")
+            print(
+                f"    - name={s.get('name')} command={s.get('command')} args={s.get('args')}"
+            )
 
 
 def main() -> None:

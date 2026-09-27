@@ -43,7 +43,7 @@ One file frontend. One process. One `pip install`. Everything lives under `~/.sp
 ## 🚀 Quick start
 
 ```bash
-cd spark2
+cd spark
 pip install -e ".[dev]"
 spark2 web          # opens the printed URL (loopback only)
 ```

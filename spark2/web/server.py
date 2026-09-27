@@ -5,6 +5,7 @@
 - 默认只绑 127.0.0.1，访问令牌校验，审批/取消走 asyncio 原生机制。
 - 静态页面（单文件 index.html）随包发布，无第二套前端。
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -20,12 +21,21 @@ from fastapi.staticfiles import StaticFiles
 
 from spark2 import __version__
 from spark2.approval import ApprovalGate
-from spark2.config import APPROVAL_MODES, PRESETS, apply_preset, load_config, mask_key, save_config
+from spark2.config import (
+    APPROVAL_MODES,
+    PRESETS,
+    apply_preset,
+    config_dir,
+    config_file,
+    load_config,
+    mask_key,
+    save_config,
+)
 from spark2.loop import AgentLoop
 from spark2.memory import MemoryStore, make_embedder
 from spark2.plugins import collect_plugin_tools, load_plugins, plugins_dir
 from spark2.provider import test_connection
-from spark2.pty import PtyManager
+from spark2.pty import PtyManager, safe_tab_id
 from spark2.store import SessionStore
 from spark2.tools import build_registry
 from spark2.tools.mcp import McpManager, servers_from_cfg
@@ -35,30 +45,40 @@ WEB_DIR = Path(__file__).parent
 
 
 class AppState:
-    def __init__(self, cfg: dict | None = None, store: SessionStore | None = None, memory: MemoryStore | None = None) -> None:
+    def __init__(
+        self,
+        cfg: dict | None = None,
+        store: SessionStore | None = None,
+        memory: MemoryStore | None = None,
+    ) -> None:
         self.cfg = cfg or load_config()
         self.store = store or SessionStore()
         self.memory = memory or MemoryStore(embedder=make_embedder(self.cfg))
         self.mcp = McpManager(servers_from_cfg(self.cfg))
         self.pty = PtyManager()
-        self.log_dir = Path(self.cfg.get("log_dir") or (Path.home() / ".spark2" / "logs"))
+        # 默认目录动态走 config_dir()：遵守 SPARK2_HOME 隔离契约（见 config.py）
+        self.log_dir = Path(self.cfg.get("log_dir") or (config_dir() / "logs"))
         self.log_dir.mkdir(parents=True, exist_ok=True)
         self.loops: dict[str, AgentLoop] = {}
         self.gates: dict[str, ApprovalGate] = {}
         self.running: set[str] = set()
         # P3：插件 + 用量
-        self.plugin_dir = Path(str(self.cfg.get("plugins_dir") or plugins_dir())).expanduser()
+        self.plugin_dir = Path(
+            str(self.cfg.get("plugins_dir") or plugins_dir())
+        ).expanduser()
         self.plugins = load_plugins(self.plugin_dir)
         self.plugin_tools = collect_plugin_tools(self.plugin_dir)
         pricing = self.cfg.get("usage_pricing") or None
         self.usage = UsageStore(
-            root=Path(str(self.cfg.get("usage_dir") or (Path.home() / ".spark2" / "usage"))),
+            root=Path(str(self.cfg.get("usage_dir") or (config_dir() / "usage"))),
             pricing=pricing,
         )
 
     def gate(self, sid: str) -> ApprovalGate:
         if sid not in self.gates:
-            self.gates[sid] = ApprovalGate(mode=self.cfg.get("approval_mode", "suggest"))
+            self.gates[sid] = ApprovalGate(
+                mode=self.cfg.get("approval_mode", "suggest")
+            )
         return self.gates[sid]
 
     def reload_mcp(self) -> None:
@@ -68,9 +88,105 @@ class AppState:
 
 
 def _check_token(request: Request, state: AppState) -> None:
+    expected = (state.cfg.get("token") or "").strip()
+    if not expected:
+        return  # 未设置令牌：本机免登录（服务只绑 127.0.0.1），可在设置里开启
     token = request.headers.get("x-spark-token") or request.query_params.get("token")
-    if token != state.cfg.get("token"):
+    if token != expected:
         raise HTTPException(status_code=401, detail="未授权：访问令牌不正确")
+
+
+def _clamp_int(v, lo: int, hi: int, default: int) -> int:
+    try:
+        return max(lo, min(hi, int(v)))
+    except (TypeError, ValueError):
+        return default
+
+
+def _session_workdir(state: AppState, sid: str) -> str:
+    """会话工作目录：优先会话元数据，兜底全局配置。"""
+    if sid:
+        meta = state.store.meta(sid)
+        if meta and meta.get("workdir"):
+            return str(meta["workdir"])
+    return str(state.cfg.get("workdir") or "")
+
+
+async def _json_body(request: Request) -> dict:
+    """解析 JSON 请求体；非法 JSON/非对象 → 400（不落 500）。"""
+    try:
+        body = await request.json()
+    except Exception:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail="请求体需是合法 JSON")
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="请求体需是 JSON 对象")
+    return body
+
+
+def _config_payload(state: AppState) -> dict:
+    """配置响应体（鉴权由调用方入口保证）。
+
+    get_config 与 set_config 共用；set_config 设置令牌后直接返回本 payload，
+    避免"从免登录状态设置令牌"时被新令牌二次校验打成 401。
+    """
+    return {
+        "presets": {
+            k: {"label": v["label"], "base_url": v["base_url"], "model": v["model"]}
+            for k, v in PRESETS.items()
+        },
+        "current": {
+            "provider": state.cfg.get("provider", ""),
+            "base_url": state.cfg.get("base_url", ""),
+            "model": state.cfg.get("model", ""),
+            "model_fast": state.cfg.get("model_fast", ""),
+            "api_key": mask_key(state.cfg.get("api_key", "")),
+            "workdir": state.cfg.get("workdir", ""),
+            "approval_mode": state.cfg.get("approval_mode", "suggest"),
+            "max_context_tokens": state.cfg.get("max_context_tokens", 32000),
+            "memory_embedding": state.cfg.get("memory_embedding", "off"),
+            "memory_embed_model": state.cfg.get("memory_embed_model", ""),
+            "token_set": bool((state.cfg.get("token") or "").strip()),
+            # 高级可调项（全部可在设置面板控制）
+            "system_prompt": state.cfg.get("system_prompt", ""),
+            "protected_paths": list(state.cfg.get("protected_paths") or []),
+            "max_turns": int(state.cfg.get("max_turns", 25)),
+            "tool_timeout": int(state.cfg.get("tool_timeout", 180)),
+            "temperature": state.cfg.get("temperature", ""),
+            "max_tokens": state.cfg.get("max_tokens", ""),
+            "route_enabled": bool(state.cfg.get("route_enabled", True)),
+            "route_keywords": state.cfg.get("route_keywords", ""),
+            "usage_pricing": dict(state.cfg.get("usage_pricing") or {}),
+        },
+        "approval_modes": [
+            {"value": m, "label": _mode_label(m)} for m in APPROVAL_MODES
+        ],
+        "mcp": {
+            "available": state.mcp.available,
+            "enabled": state.mcp.enabled,
+            "servers": [
+                {
+                    "name": s.name,
+                    "transport": s.transport,
+                    "command": s.command,
+                    "args": list(s.args),
+                    "url": s.url,
+                    "headers": dict(s.headers),
+                    "env": dict(s.env),
+                }
+                for s in state.mcp.servers
+            ],
+        },
+        "log_dir": str(state.log_dir),
+        "dirs": {
+            "config": str(config_file()),
+            "sessions": str(state.store.root),
+            "logs": str(state.log_dir),
+            "usage": str(state.usage.root),
+            "plugins": str(state.plugin_dir),
+            "memory_db": str(config_dir() / "memory.db"),
+        },
+        "version": __version__,
+    }
 
 
 def create_app(state: AppState | None = None) -> FastAPI:
@@ -86,40 +202,7 @@ def create_app(state: AppState | None = None) -> FastAPI:
     @app.get("/api/config")
     async def get_config(request: Request) -> dict:
         _check_token(request, state)
-        return {
-            "presets": {k: {"label": v["label"], "base_url": v["base_url"], "model": v["model"]} for k, v in PRESETS.items()},
-            "current": {
-                "provider": state.cfg.get("provider", ""),
-                "base_url": state.cfg.get("base_url", ""),
-                "model": state.cfg.get("model", ""),
-                "model_fast": state.cfg.get("model_fast", ""),
-                "api_key": mask_key(state.cfg.get("api_key", "")),
-                "workdir": state.cfg.get("workdir", ""),
-                "approval_mode": state.cfg.get("approval_mode", "suggest"),
-                "max_context_tokens": state.cfg.get("max_context_tokens", 32000),
-                "memory_embedding": state.cfg.get("memory_embedding", "off"),
-                "memory_embed_model": state.cfg.get("memory_embed_model", ""),
-            },
-            "approval_modes": [{"value": m, "label": _mode_label(m)} for m in APPROVAL_MODES],
-            "mcp": {
-                "available": state.mcp.available,
-                "enabled": state.mcp.enabled,
-                "servers": [
-                    {
-                        "name": s.name,
-                        "transport": s.transport,
-                        "command": s.command,
-                        "args": list(s.args),
-                        "url": s.url,
-                        "headers": dict(s.headers),
-                        "env": dict(s.env),
-                    }
-                    for s in state.mcp.servers
-                ],
-            },
-            "log_dir": str(state.log_dir),
-            "version": __version__,
-        }
+        return _config_payload(state)
 
     @app.get("/api/usage")
     async def get_usage(request: Request) -> dict:
@@ -144,18 +227,36 @@ def create_app(state: AppState | None = None) -> FastAPI:
         _check_token(request, state)
         out = []
         for name, info in state.plugins.items():
-            out.append({
-                "name": name,
-                "tools": [t.name for t in info.get("tools", [])],
-                "error": info.get("error"),
-            })
-        return {"dir": str(state.plugin_dir), "plugins": out, "tool_count": len(state.plugin_tools)}
+            out.append(
+                {
+                    "name": name,
+                    "tools": [t.name for t in info.get("tools", [])],
+                    "error": info.get("error"),
+                }
+            )
+        return {
+            "dir": str(state.plugin_dir),
+            "plugins": out,
+            "tool_count": len(state.plugin_tools),
+        }
 
     @app.post("/api/config")
     async def set_config(request: Request) -> dict:
         _check_token(request, state)
         body = await request.json()
-        for k in ("base_url", "model", "workdir", "approval_mode", "model_fast", "memory_embed_model"):
+        # provider 变化先应用预设（切换服务重置 base_url/model），
+        # 随后显式字段覆盖预设：同 provider 再保存时，用户手填的第三方端点不被回滚
+        new_provider = body.get("provider")
+        if new_provider in PRESETS and new_provider != state.cfg.get("provider"):
+            apply_preset(state.cfg, new_provider)
+        for k in (
+            "base_url",
+            "model",
+            "workdir",
+            "approval_mode",
+            "model_fast",
+            "memory_embed_model",
+        ):
             v = body.get(k)
             if isinstance(v, str) and v.strip():
                 state.cfg[k] = v.strip()
@@ -167,8 +268,12 @@ def create_app(state: AppState | None = None) -> FastAPI:
         key = body.get("api_key")
         if isinstance(key, str) and key and not set(key) <= {"*"}:
             state.cfg["api_key"] = key
-        if body.get("provider") in PRESETS:
-            apply_preset(state.cfg, body["provider"])
+        if new_provider == "mock":
+            # 演示模式不联网：清掉本轮可能写入的密钥，不留残留
+            state.cfg["api_key"] = ""
+        # 访问令牌：显式提供 token 键才改（空字符串 = 清除，恢复本机免登录）
+        if "token" in body and isinstance(body.get("token"), str):
+            state.cfg["token"] = body["token"].strip()
         # MCP 服务器列表（本地 stdio / 远程 Streamable HTTP）
         ms = body.get("mcp_servers")
         if isinstance(ms, list):
@@ -210,6 +315,66 @@ def create_app(state: AppState | None = None) -> FastAPI:
                 )
             state.cfg["mcp_servers"] = cleaned
             state.reload_mcp()
+        # ---- 高级可调项（类型/范围校验后才落盘） ----
+        if "system_prompt" in body and isinstance(body.get("system_prompt"), str):
+            state.cfg["system_prompt"] = body["system_prompt"][:20000]
+        if "protected_paths" in body and isinstance(body.get("protected_paths"), list):
+            cleaned_paths = []
+            for item in body["protected_paths"][:50]:
+                if isinstance(item, str) and item.strip():
+                    cleaned_paths.append(item.strip())
+            state.cfg["protected_paths"] = cleaned_paths
+        if "max_turns" in body:
+            try:
+                state.cfg["max_turns"] = max(1, min(200, int(body["max_turns"])))
+            except (TypeError, ValueError):
+                pass  # 无效值保留原配置
+        if "tool_timeout" in body:
+            try:
+                state.cfg["tool_timeout"] = max(
+                    10, min(3600, int(body["tool_timeout"]))
+                )
+            except (TypeError, ValueError):
+                pass
+        if "temperature" in body:
+            raw = body.get("temperature")
+            try:
+                if raw is None or str(raw).strip() == "":
+                    state.cfg["temperature"] = ""
+                else:
+                    state.cfg["temperature"] = max(0.0, min(2.0, float(raw)))
+            except (TypeError, ValueError):
+                pass  # 无效值保留原配置
+        if "max_tokens" in body:
+            raw = body.get("max_tokens")
+            try:
+                if raw is None or str(raw).strip() == "":
+                    state.cfg["max_tokens"] = ""
+                else:
+                    state.cfg["max_tokens"] = max(1, min(1_000_000, int(raw)))
+            except (TypeError, ValueError):
+                pass
+        if isinstance(body.get("route_enabled"), bool):
+            state.cfg["route_enabled"] = body["route_enabled"]
+        if "route_keywords" in body and isinstance(body.get("route_keywords"), str):
+            state.cfg["route_keywords"] = body["route_keywords"][:2000]
+        if "usage_pricing" in body and isinstance(body.get("usage_pricing"), dict):
+            pricing: dict[str, dict] = {}
+            for mk, mv in list(body["usage_pricing"].items())[:100]:
+                if not isinstance(mk, str) or not isinstance(mv, dict):
+                    continue
+                try:
+                    pricing[mk.strip()] = {
+                        "input": float(mv.get("input", 0)),
+                        "output": float(mv.get("output", 0)),
+                    }
+                except (TypeError, ValueError):
+                    continue
+            state.cfg["usage_pricing"] = pricing
+            # 单价立即生效（重建 usage 的价格表，不丢历史）
+            from spark2.usage import DEFAULT_PRICING
+
+            state.usage.pricing = {**DEFAULT_PRICING, **pricing}
         save_config(state.cfg)
         # 工作目录记入最近列表（切换项目不用每次手打路径）
         try:
@@ -224,7 +389,7 @@ def create_app(state: AppState | None = None) -> FastAPI:
             state.memory = MemoryStore(embedder=make_embedder(state.cfg))
         except Exception:  # noqa: BLE001
             pass
-        return await get_config(request)
+        return _config_payload(state)  # 入口已鉴权；不再经 get_config 二次校验
 
     @app.post("/api/test-connection")
     async def test(request: Request) -> dict:
@@ -271,8 +436,12 @@ def create_app(state: AppState | None = None) -> FastAPI:
         body = await request.json()
         workdir = str(body.get("workdir") or state.cfg.get("workdir") or "").strip()
         if not workdir:
-            raise HTTPException(status_code=400, detail="请先在工作目录设置里指定项目路径")
-        meta = state.store.create(workdir, str(body.get("model") or state.cfg.get("model") or ""))
+            raise HTTPException(
+                status_code=400, detail="请先在工作目录设置里指定项目路径"
+            )
+        meta = state.store.create(
+            workdir, str(body.get("model") or state.cfg.get("model") or "")
+        )
         return meta
 
     @app.delete("/api/sessions/{sid}")
@@ -306,16 +475,22 @@ def create_app(state: AppState | None = None) -> FastAPI:
         if not sid or not prompt:
             raise HTTPException(status_code=400, detail="缺少 session_id 或 prompt")
         if sid in state.running:
-            raise HTTPException(status_code=409, detail="该会话正在运行，请先取消或等待完成")
+            raise HTTPException(
+                status_code=409, detail="该会话正在运行，请先取消或等待完成"
+            )
         meta = state.store.meta(sid)
         if not meta:
             raise HTTPException(status_code=404, detail="会话不存在")
 
-        workdir = str(body.get("workdir") or meta.get("workdir") or state.cfg.get("workdir") or "").strip()
+        workdir = str(
+            body.get("workdir") or meta.get("workdir") or state.cfg.get("workdir") or ""
+        ).strip()
         if not workdir:
             raise HTTPException(status_code=400, detail="未设置工作目录")
         model = str(body.get("model") or state.cfg.get("model") or "").strip()
-        mode = str(body.get("approval_mode") or state.cfg.get("approval_mode") or "suggest")
+        mode = str(
+            body.get("approval_mode") or state.cfg.get("approval_mode") or "suggest"
+        )
 
         gate = state.gate(sid)
         gate.mode = mode if mode in APPROVAL_MODES else "suggest"
@@ -331,11 +506,23 @@ def create_app(state: AppState | None = None) -> FastAPI:
             provider_cfg["mock_script"] = state.cfg["mock_script"]
         if state.cfg.get("mock_subagent_script"):
             provider_cfg["mock_subagent_script"] = state.cfg["mock_subagent_script"]
+        # 高级可调项随 provider 传递（采样参数 + 模型路由定制）
+        provider_cfg["temperature"] = state.cfg.get("temperature", "")
+        provider_cfg["max_tokens"] = state.cfg.get("max_tokens", "")
+        provider_cfg["route_enabled"] = state.cfg.get("route_enabled", True)
+        provider_cfg["route_keywords"] = state.cfg.get("route_keywords", "")
+        custom_prompt = str(state.cfg.get("system_prompt") or "").strip()
         loop = AgentLoop(
             workdir=Path(workdir),
             provider_cfg=provider_cfg,
             gate=gate,
             max_context_tokens=int(state.cfg.get("max_context_tokens", 32000)),
+            max_turns=_clamp_int(state.cfg.get("max_turns"), 1, 200, 25),
+            tool_timeout=float(
+                _clamp_int(state.cfg.get("tool_timeout"), 10, 3600, 180)
+            ),
+            extra_protected=[str(p) for p in (state.cfg.get("protected_paths") or [])],
+            system_prompt_text=custom_prompt or None,
             memory=state.memory,
             mcp=state.mcp,
             log_path=state.log_dir / f"{date.today().isoformat()}.jsonl",
@@ -344,8 +531,10 @@ def create_app(state: AppState | None = None) -> FastAPI:
         state.loops[sid] = loop
         state.running.add(sid)
 
-        messages = state.store.messages(sid)
+        # 先落盘用户消息再取历史：发给模型的消息必须包含当前 prompt
+        # （此前先取后写，真实模型首轮收到空对话 → 400 No user query）
         state.store.append(sid, {"role": "user", "content": prompt})
+        messages = state.store.messages(sid)
 
         async def event_stream() -> AsyncIterator[str]:
             assistant_text = ""
@@ -368,7 +557,9 @@ def create_app(state: AppState | None = None) -> FastAPI:
                     yield _sse(ev)
                     if ev["type"] == "done":
                         if assistant_text:
-                            state.store.append(sid, {"role": "assistant", "content": assistant_text})
+                            state.store.append(
+                                sid, {"role": "assistant", "content": assistant_text}
+                            )
                         break
                 yield _sse({"type": "close"})
             except asyncio.CancelledError:
@@ -423,11 +614,14 @@ def create_app(state: AppState | None = None) -> FastAPI:
     async def ws_pty(websocket: WebSocket):
         await websocket.accept()
         # WS 无法自定义 header，令牌走 query 参数（与页面内嵌 token 一致）
-        if websocket.query_params.get("token") != state.cfg.get("token"):
-            await websocket.send_text(json.dumps({"type": "err", "message": "未授权：访问令牌不正确"}))
+        expected = (state.cfg.get("token") or "").strip()
+        if expected and websocket.query_params.get("token") != expected:
+            await websocket.send_text(
+                json.dumps({"type": "err", "message": "未授权：访问令牌不正确"})
+            )
             await websocket.close(code=4401)
             return
-        tab_id = websocket.query_params.get("tab") or ""
+        tab_id = safe_tab_id(websocket.query_params.get("tab") or "")
         sid = websocket.query_params.get("sid") or ""
         # 工作目录：优先取该会话的 workdir，其次全局配置
         cwd = state.cfg.get("workdir") or ""
@@ -436,10 +630,22 @@ def create_app(state: AppState | None = None) -> FastAPI:
             if meta and meta.get("workdir"):
                 cwd = meta["workdir"]
         if not cwd:
-            await websocket.send_text(json.dumps({"type": "err", "message": "未设置工作目录（先到设置里指定）"}))
+            await websocket.send_text(
+                json.dumps(
+                    {"type": "err", "message": "未设置工作目录（先到设置里指定）"}
+                )
+            )
             await websocket.close(code=4400)
             return
-        sess = state.pty.get_or_create(tab_id, Path(cwd))
+        try:
+            sess = state.pty.get_or_create(tab_id, Path(cwd))
+        except (
+            RuntimeError,
+            OSError,
+        ) as exc:  # 后端不可用/shell 缺失：报明确错误而非崩溃
+            await websocket.send_text(json.dumps({"type": "err", "message": str(exc)}))
+            await websocket.close(code=4400)
+            return
         queue: asyncio.Queue[str] = asyncio.Queue(maxsize=2048)
         sess.start_reader(asyncio.get_running_loop(), queue)
 
@@ -459,7 +665,9 @@ def create_app(state: AppState | None = None) -> FastAPI:
                 if t == "in":
                     state.pty.write(sess.tab_id, str(msg.get("data", "")))
                 elif t == "resize":
-                    state.pty.resize(sess.tab_id, int(msg.get("cols", 110)), int(msg.get("rows", 28)))
+                    state.pty.resize(
+                        sess.tab_id, int(msg.get("cols", 110)), int(msg.get("rows", 28))
+                    )
 
         try:
             await asyncio.gather(send_loop(), recv_loop())
@@ -475,7 +683,9 @@ def create_app(state: AppState | None = None) -> FastAPI:
     @app.get("/api/memory")
     async def list_memory(request: Request) -> dict:
         _check_token(request, state)
-        workdir = str(request.query_params.get("workdir") or state.cfg.get("workdir") or "")
+        workdir = str(
+            request.query_params.get("workdir") or state.cfg.get("workdir") or ""
+        )
         if not workdir:
             raise HTTPException(status_code=400, detail="未设置工作目录")
         return {
@@ -490,6 +700,137 @@ def create_app(state: AppState | None = None) -> FastAPI:
         if not state.memory.delete_by_id(memory_id):
             raise HTTPException(status_code=404, detail="记忆不存在")
         return {"ok": True}
+
+    @app.post("/api/memory")
+    async def add_memory(request: Request) -> dict:
+        """手动添加/更新一条长期记忆（Web 设置侧入口，与 remember 工具同语义）。"""
+        _check_token(request, state)
+        body = await _json_body(request)
+        workdir = str(body.get("workdir") or state.cfg.get("workdir") or "").strip()
+        key = str(body.get("key") or "").strip()
+        value = str(body.get("value") or "").strip()
+        if not workdir:
+            raise HTTPException(status_code=400, detail="未设置工作目录")
+        if not key or not value:
+            raise HTTPException(status_code=400, detail="key 与 value 均为必填")
+        if len(key) > 200 or len(value) > 5000:
+            raise HTTPException(
+                status_code=400, detail="key/value 超长（200/5000 字符）"
+            )
+        state.memory.remember(workdir, key, value)
+        return {"ok": True, "count": state.memory.count(workdir)}
+
+    # ---------- 文件浏览（@ 引用 / 工作目录导航，只读列表） ----------
+    @app.get("/api/fs")
+    async def fs_list(request: Request) -> dict:
+        _check_token(request, state)
+        sid = (request.query_params.get("sid") or "").strip()
+        rel = (request.query_params.get("path") or "").strip()
+        workdir = _session_workdir(state, sid)
+        if not workdir:
+            raise HTTPException(status_code=400, detail="未设置工作目录")
+        base = Path(workdir).resolve()
+        try:
+            target = (base / rel).resolve() if rel else base
+        except OSError as exc:
+            raise HTTPException(status_code=400, detail=f"路径无效：{exc}")
+        if target != base and base not in target.parents:
+            raise HTTPException(status_code=400, detail="工作目录之外的路径")
+        if not target.exists() or not target.is_dir():
+            raise HTTPException(status_code=404, detail="目录不存在")
+        skip = {"node_modules", "__pycache__", ".venv", "venv", "dist", "build"}
+        entries: list[dict] = []
+        try:
+            for e in sorted(
+                target.iterdir(), key=lambda p: (not p.is_dir(), p.name.lower())
+            ):
+                if e.name in skip:
+                    continue
+                if e.name.startswith(".") and rel == "":
+                    continue  # 顶层隐藏项（.git 等）不列，子目录允许
+                entries.append({"name": e.name, "dir": e.is_dir()})
+                if len(entries) >= 300:
+                    break
+        except OSError as exc:
+            raise HTTPException(status_code=500, detail=f"目录读取失败：{exc}")
+        rel_out = str(target.relative_to(base)) if target != base else ""
+        return {"workdir": str(base), "path": rel_out, "entries": entries}
+
+    # ---------- git 检查点（UI 入口：状态 / 手动存档 / 回滚） ----------
+    @app.get("/api/git")
+    async def git_info(request: Request) -> dict:
+        _check_token(request, state)
+        sid = (request.query_params.get("sid") or "").strip()
+        workdir = _session_workdir(state, sid)
+        if not workdir:
+            raise HTTPException(status_code=400, detail="未设置工作目录")
+        from spark2.tools.git import _run_git, git_available, is_git_repo
+
+        wd = Path(workdir)
+        if not git_available():
+            return {"repo": False, "reason": "git 未安装"}
+        if not is_git_repo(wd):
+            return {"repo": False, "reason": "工作目录不是 git 仓库"}
+        _, status = await _run_git(wd, "status", "--porcelain")
+        _, branch = await _run_git(wd, "rev-parse", "--abbrev-ref", "HEAD")
+        _, log = await _run_git(
+            wd,
+            "log",
+            "--pretty=format:%h|%ad|%s",
+            "--date=format:%Y-%m-%d %H:%M",
+            "-15",
+        )
+        checkpoints = []
+        for line in log.splitlines():
+            parts = line.split("|", 2)
+            if len(parts) == 3:
+                checkpoints.append(
+                    {"hash": parts[0], "time": parts[1], "message": parts[2]}
+                )
+        changes = [ln for ln in status.splitlines() if ln.strip()]
+        return {
+            "repo": True,
+            "branch": branch.strip(),
+            "changes": len(changes),
+            "checkpoints": checkpoints,
+        }
+
+    @app.post("/api/git/checkpoint")
+    async def git_checkpoint_ep(request: Request) -> dict:
+        _check_token(request, state)
+        body = await _json_body(request)
+        sid = str(body.get("sid") or "")
+        message = str(body.get("message") or "").strip()[:120]
+        message = message or "spark2 手动存档（Web）"
+        workdir = _session_workdir(state, sid)
+        if not workdir:
+            raise HTTPException(status_code=400, detail="未设置工作目录")
+        from spark2.tools.git import git_commit
+
+        ok, text = await git_commit(Path(workdir), message)
+        if not ok:
+            raise HTTPException(status_code=400, detail=text)
+        return {"ok": True, "message": text}
+
+    @app.post("/api/git/reset")
+    async def git_reset_ep(request: Request) -> dict:
+        """回滚到最近检查点（破坏性操作，必须 confirm=yes）。"""
+        _check_token(request, state)
+        body = await _json_body(request)
+        if str(body.get("confirm") or "") != "yes":
+            raise HTTPException(
+                status_code=400, detail="破坏性操作：需 confirm=yes 确认"
+            )
+        sid = str(body.get("sid") or "")
+        workdir = _session_workdir(state, sid)
+        if not workdir:
+            raise HTTPException(status_code=400, detail="未设置工作目录")
+        from spark2.tools.git import git_reset
+
+        ok, text = await git_reset(Path(workdir))
+        if not ok:
+            raise HTTPException(status_code=400, detail=text)
+        return {"ok": True, "message": text}
 
     # 静态资源（放在路由之后，作为兜底）
     app.mount("/", StaticFiles(directory=str(WEB_DIR), html=True), name="static")

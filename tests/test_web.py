@@ -162,6 +162,56 @@ def test_demo_stream_events(tmp_path: Path) -> None:
     assert any(m["role"] == "assistant" for m in msgs)
 
 
+def test_chat_stream_sends_current_prompt_to_model(tmp_path: Path, monkeypatch) -> None:
+    """真实模型必需：发给模型的消息必须包含当前用户输入（首轮与后续轮都如此）。
+
+    回归：先前先取历史再落盘 prompt，导致首轮请求无 user 消息（mock 不校验所以长期未暴露）。
+    """
+    captured: list[list[dict]] = []
+
+    async def fake_stream_chat(cfg, messages, tools=None, max_delta=None):
+        captured.append([dict(m) for m in messages])
+        yield {"type": "text", "text": "好的。"}
+        yield {
+            "type": "usage",
+            "estimated": 10,
+            "prompt_tokens": 5,
+            "completion_tokens": 5,
+            "model": cfg.get("model"),
+        }
+
+    monkeypatch.setattr("spark2.loop.stream_chat", fake_stream_chat)
+    client, state = _client(tmp_path)
+    sid = client.post("/api/sessions", headers={"X-Spark-Token": TOKEN}, json={"workdir": str(tmp_path)}).json()["id"]
+
+    with client.stream(
+        "POST", "/api/chat/stream",
+        headers={"X-Spark-Token": TOKEN},
+        json={"session_id": sid, "prompt": "你好，列出当前目录"},
+    ) as resp:
+        assert resp.status_code == 200
+        resp.read()
+
+    assert captured, "stream_chat 未被调用"
+    first = captured[0]
+    assert first, "发给模型的消息列表为空"
+    assert first[-1]["role"] == "user"
+    assert "列出当前目录" in first[-1]["content"]
+
+    # 第二轮：历史 + 本次 user 消息齐全（首轮 user/assistant + 本轮 user）
+    with client.stream(
+        "POST", "/api/chat/stream",
+        headers={"X-Spark-Token": TOKEN},
+        json={"session_id": sid, "prompt": "再查一下文件"},
+    ) as resp:
+        assert resp.status_code == 200
+        resp.read()
+    second = captured[-1]
+    assert second[0]["role"] == "system"  # 循环固定前置 system
+    assert [m["role"] for m in second[-3:]] == ["user", "assistant", "user"]
+    assert "再查一下文件" in second[-1]["content"]
+
+
 async def test_approval_endpoint_respond(tmp_path: Path) -> None:
     """审批接口：对已注册的审批请求做 allow/always；未知请求 404；非法 action 400。"""
     client, state = _client(tmp_path)

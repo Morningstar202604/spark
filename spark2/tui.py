@@ -253,8 +253,9 @@ class SparkTui(App[None]):
             memory=self.memory,
             mcp=mcp,
         )
-        messages = self.store.messages(sid)
+        # 先落盘用户消息再取历史：发给模型的消息必须包含当前 prompt
         self.store.append(sid, {"role": "user", "content": prompt})
+        messages = self.store.messages(sid)
         self._assistant_text = ""
         self.query_one("#input", Input).disabled = True
         try:

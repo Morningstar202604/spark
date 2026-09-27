@@ -9,6 +9,7 @@
 - 安全边界：插件是用户自己放在本地的代码，信任级与"内置终端/运行脚本"一致；
   插件注册的工具照常过审批门（category 决定审批与否），不绕过任何检查。
 """
+
 from __future__ import annotations
 
 import importlib.util
@@ -16,11 +17,11 @@ import traceback
 from pathlib import Path
 from typing import Any
 
-from spark2.config import CONFIG_DIR
+from spark2.config import config_dir
 
 
 def plugins_dir() -> Path:
-    return CONFIG_DIR / "plugins"
+    return config_dir() / "plugins"  # 动态：遵守 SPARK2_HOME
 
 
 def load_plugins(base_dir: Path | None = None) -> dict[str, dict[str, Any]]:
@@ -49,7 +50,11 @@ def load_plugins(base_dir: Path | None = None) -> dict[str, dict[str, Any]]:
                 tools = t() if callable(t) else list(t)
             result[name] = {"tools": tools, "error": None}
         except Exception as e:  # noqa: BLE001
-            result[name] = {"tools": [], "error": f"{type(e).__name__}: {e}", "trace": traceback.format_exc()}
+            result[name] = {
+                "tools": [],
+                "error": f"{type(e).__name__}: {e}",
+                "trace": traceback.format_exc(),
+            }
     return result
 
 

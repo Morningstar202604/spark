@@ -1,4 +1,5 @@
 """代码索引测试（P3 ⑤）：AST 符号 / 行级符号 / 搜索 / 语法诊断。"""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -20,9 +21,13 @@ def _make_proj(tmp_path: Path) -> Path:
         encoding="utf-8",
     )
     (tmp_path / "skip").mkdir()
-    (tmp_path / "skip" / "junk.py").write_text("x = 1\n", encoding="utf-8")  # skip 不在排除列表？在！
+    (tmp_path / "skip" / "junk.py").write_text(
+        "x = 1\n", encoding="utf-8"
+    )  # skip 不在排除列表？在！
     (tmp_path / "node_modules").mkdir()
-    (tmp_path / "node_modules" / "a.py").write_text("y = 2\n", encoding="utf-8")  # 应排除
+    (tmp_path / "node_modules" / "a.py").write_text(
+        "y = 2\n", encoding="utf-8"
+    )  # 应排除
     return tmp_path
 
 
@@ -36,7 +41,11 @@ def test_index_python_ast_symbols(tmp_path: Path) -> None:
     assert m["kind"] == "method"
     # 排除目录
     assert not any("node_modules" in s["file"] for s in idx["symbols"])
-    assert "lib.py" in idx["files"] and "app.js" in idx["files"] and "main.go" in idx["files"]
+    assert (
+        "lib.py" in idx["files"]
+        and "app.js" in idx["files"]
+        and "main.go" in idx["files"]
+    )
 
 
 def test_index_cache_fresh(tmp_path: Path) -> None:
