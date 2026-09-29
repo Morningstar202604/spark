@@ -49,7 +49,7 @@ def _collect(sess, loop, seconds=2.5):
 def test_pty_read_write_and_cwd():
     tmp = Path(tempfile.mkdtemp())
     m = PtyManager()
-    sess = m.get_or_create("tab_a", tmp)
+    sess = m.get_or_create("s1", "tab_a", tmp)
     try:
         assert sess.alive
         loop = asyncio.new_event_loop()
@@ -68,19 +68,36 @@ def test_pty_multi_tab_isolated():
     tmp1 = Path(tempfile.mkdtemp())
     tmp2 = Path(tempfile.mkdtemp())
     m = PtyManager()
-    s1 = m.get_or_create("t1", tmp1)
-    s2 = m.get_or_create("t2", tmp2)
+    s1 = m.get_or_create("s1", "t1", tmp1)
+    s2 = m.get_or_create("s1", "t2", tmp2)
     try:
         assert s1.tab_id == "t1" and s2.tab_id == "t2"
         assert s1.cwd == tmp1.resolve() and s2.cwd == tmp2.resolve()
-        # 同 id 复用
-        assert m.get_or_create("t1", tmp1) is s1
+        # 同 (sid, tab) 复用
+        assert m.get_or_create("s1", "t1", tmp1) is s1
+    finally:
+        m.close_all()
+
+
+def test_pty_session_isolated_by_sid():
+    """同一 tab_id 在不同会话下互不复用（切会话必须换 cwd，不能留在旧目录）。"""
+    tmp1 = Path(tempfile.mkdtemp())
+    tmp2 = Path(tempfile.mkdtemp())
+    m = PtyManager()
+    s1 = m.get_or_create("sA", "tab1", tmp1)
+    s2 = m.get_or_create("sB", "tab1", tmp2)
+    try:
+        assert s1 is not s2
+        assert s1.cwd == tmp1.resolve()
+        assert s2.cwd == tmp2.resolve()  # 新会话拿到自己的目录
+        # 切回 sA 仍是原来的 shell（持久）
+        assert m.get_or_create("sA", "tab1", tmp1) is s1
     finally:
         m.close_all()
 
 
 def test_pty_write_to_closed_is_noop():
     m = PtyManager()
-    sess = m.get_or_create("gone", Path(tempfile.mkdtemp()))
+    sess = m.get_or_create("sx", "gone", Path(tempfile.mkdtemp()))
     m.close_all()
-    assert m.write("gone", "ls\n") is False  # 已关闭 → no-op 而非抛错
+    assert m.write("sx", "gone", "ls\n") is False  # 已关闭 → no-op 而非抛错

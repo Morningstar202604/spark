@@ -197,38 +197,47 @@ _EXIT_MARKER = "\x00__SPARK_PTY_EXIT__\x00"
 
 
 class PtyManager:
-    """tab 级 PTY 管理：tab_id → PtySession。UI 折叠不杀进程（持久终端）。"""
+    """会话级 PTY 管理：(sid, tab_id) → PtySession。UI 折叠不杀进程（持久终端）。
+
+    键按会话隔离：同一会话内 tab_id 唯一；切到别的会话（sid 变化）时
+    即使 tab_id 相同也不会复用旧目录的 shell——终端永远跟随会话的工作目录。
+    """
 
     def __init__(self) -> None:
         self._sessions: dict[str, PtySession] = {}
         self._lock = threading.Lock()
 
-    def get_or_create(self, tab_id: str, cwd: Path) -> PtySession:
+    @staticmethod
+    def _key(sid: str, tab_id: str) -> str:
+        return f"{sid or ''}::{tab_id or ''}"
+
+    def get_or_create(self, sid: str, tab_id: str, cwd: Path) -> PtySession:
+        key = self._key(sid, tab_id)
         with self._lock:
-            sess = self._sessions.get(tab_id)
+            sess = self._sessions.get(key)
             if sess is not None and sess.alive:
                 return sess
             sess = PtySession(tab_id or uuid.uuid4().hex, cwd)
-            self._sessions[sess.tab_id] = sess
+            self._sessions[key] = sess
             return sess
 
-    def write(self, tab_id: str, data: str) -> bool:
+    def write(self, sid: str, tab_id: str, data: str) -> bool:
         with self._lock:
-            sess = self._sessions.get(tab_id)
+            sess = self._sessions.get(self._key(sid, tab_id))
         if sess is None or not sess.alive:
             return False
         sess.write(data)
         return True
 
-    def resize(self, tab_id: str, cols: int, rows: int) -> None:
+    def resize(self, sid: str, tab_id: str, cols: int, rows: int) -> None:
         with self._lock:
-            sess = self._sessions.get(tab_id)
+            sess = self._sessions.get(self._key(sid, tab_id))
         if sess is not None:
             sess.resize(cols, rows)
 
-    def close(self, tab_id: str) -> None:
+    def close(self, sid: str, tab_id: str) -> None:
         with self._lock:
-            sess = self._sessions.pop(tab_id, None)
+            sess = self._sessions.pop(self._key(sid, tab_id), None)
         if sess is not None:
             sess.close()
 

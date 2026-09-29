@@ -606,7 +606,10 @@ class AgentLoop:
             decision_result = await self.gate.await_result(
                 request_id, fut, timeout=600
             )
-            if not decision_result:
+            approved, allowed_files = decision_result, None
+            if isinstance(decision_result, tuple):
+                approved, allowed_files = decision_result
+            if not approved:
                 # 区分「用户拒绝」与「等待超时」：超时时告诉模型是没人响应，
                 # 让它知道可以稍后重试，而不是误以为用户否决了方案。
                 out = (
@@ -627,6 +630,9 @@ class AgentLoop:
                     {"role": "tool", "tool_call_id": tool_id, "content": out}
                 )
                 return
+            # 逐文件审批：只应用用户勾选的文件（apply_patch 专用，其余工具忽略）
+            if allowed_files and name == "apply_patch":
+                args["files"] = list(allowed_files)
 
         if self.cancel_event.is_set():
             messages.append(

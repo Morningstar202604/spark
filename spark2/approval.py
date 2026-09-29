@@ -71,8 +71,12 @@ class ApprovalGate:
 
     async def await_result(
         self, request_id: str, fut: asyncio.Future, timeout: float = 600.0
-    ) -> bool | None:
-        """等待审批结果：True=放行，False=拒绝，None=超时未响应。"""
+    ) -> bool | tuple[bool, list[str]] | None:
+        """等待审批结果：True=放行，False=拒绝，None=超时未响应。
+
+        逐文件审批时（respond 传了 files）返回 (approved, files) 元组：
+        approved=True 表示用户只允许列表中的文件，调用方据此过滤执行范围。
+        """
         try:
             return await asyncio.wait_for(fut, timeout)
         except asyncio.TimeoutError:
@@ -95,15 +99,25 @@ class ApprovalGate:
         except (RuntimeError, AttributeError):
             fut.set_result(value)
 
-    def respond(self, request_id: str, action: str, tool_name: str | None = None) -> bool:
+    def respond(
+        self,
+        request_id: str,
+        action: str,
+        tool_name: str | None = None,
+        files: list[str] | None = None,
+    ) -> bool:
+        """用户答复审批。files 非空 = 逐文件允许：只放行这些文件（如 apply_patch 按文件过滤）。
+
+        返回 False 表示 request_id 无效或 action 非法。
+        """
         fut = self.pending.get(request_id)
         if not fut:
             return False
         if action == "always" and tool_name:
             self.always.add(tool_name)
-            self._resolve(fut, True)
+            self._resolve(fut, (True, files) if files else True)
         elif action == "allow":
-            self._resolve(fut, True)
+            self._resolve(fut, (True, files) if files else True)
         elif action == "deny":
             self._resolve(fut, False)
         else:

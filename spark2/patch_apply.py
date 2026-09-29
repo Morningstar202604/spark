@@ -74,6 +74,17 @@ def _strip_prefix(path: str) -> str:
     return p
 
 
+def _norm_rel(f: FilePatch, workdir: Path) -> str:
+    """文件补丁的规范化相对路径（供逐文件审批 only 匹配用）。
+
+    优先用解析后的 target 相对工作目录；target 不可用时退回补丁原路径去前缀。
+    """
+    try:
+        return f.target.relative_to(workdir).as_posix()
+    except (ValueError, OSError):
+        return _strip_prefix(f.path).replace("\\", "/")
+
+
 def parse_patch(
     patch_text: str, workdir: Path, protected: list[Path]
 ) -> list[FilePatch]:
@@ -295,15 +306,26 @@ def preview_patch(
 
 
 def apply_patch(
-    patch_text: str, workdir: Path, protected: list[Path]
+    patch_text: str,
+    workdir: Path,
+    protected: list[Path],
+    only: list[str] | None = None,
 ) -> tuple[str, list[dict]]:
     """校验并应用补丁。成功返回 (结果说明, changes)；任何一步失败抛 PatchError，不写任何文件。
 
     changes: [{path, added, removed}] —— 供模型汇报与前端展示。
+    only: 逐文件审批时用户勾选的文件（相对路径），None = 全部应用；
+          only 为 [] 时跳过全部文件，返回"未应用"说明。
     落盘顺序：先全部解析/校验通过，再逐个写盘（每个文件原子写入）。
     """
     files = parse_patch(patch_text, workdir, protected)
     changes: list[dict] = []
+    if only is not None:
+        only_set = {str(p).replace("\\", "/") for p in only if p}
+        selected = [f for f in files if _norm_rel(f, workdir) in only_set]
+        if not selected:
+            return "未应用：用户没有勾选任何文件（其余文件已跳过）。", []
+        files = selected
     for f in files:
         old = _read_file_safe(f.target)
         nl = detect_newline(f.target)  # 覆盖写之前探测原文件行尾

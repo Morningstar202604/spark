@@ -55,6 +55,25 @@ def test_apply_multi_file(tmp_path: Path):
     assert len(changes) == 2
 
 
+def test_apply_patch_only_filters_files(tmp_path: Path):
+    """逐文件审批：only 只应用勾选的文件，其余跳过。"""
+    (tmp_path / "a.py").write_text("x = 1\nprint(x)\n")
+    (tmp_path / "b.py").write_text("def old():\n    pass\n")
+    result, changes = apply_patch(_multi_patch(), tmp_path, [], only=["a.py"])
+    assert (tmp_path / "a.py").read_text() == "x = 1\nprint(x + 1)\n"
+    assert (tmp_path / "b.py").read_text() == "def old():\n    pass\n"  # 未选中，不变
+    assert len(changes) == 1 and changes[0]["path"] == "a.py"
+
+
+def test_apply_patch_only_empty_skips_all(tmp_path: Path):
+    """逐文件审批：勾选列表为空 → 全部跳过，不落盘。"""
+    (tmp_path / "a.py").write_text("x = 1\nprint(x)\n")
+    result, changes = apply_patch(_multi_patch(), tmp_path, [], only=[])
+    assert "没有勾选任何文件" in result
+    assert (tmp_path / "a.py").read_text() == "x = 1\nprint(x)\n"
+    assert changes == []
+
+
 def test_interleaved_add_remove(tmp_path: Path):
     """同一 hunk 内多处增删要按位置交错，不能统一插到末尾。"""
     src = "a\nb\nc\nd\ne\n"

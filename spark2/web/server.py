@@ -587,11 +587,16 @@ def create_app(state: AppState | None = None) -> FastAPI:
         request_id = str(body.get("request_id") or "")
         action = str(body.get("action") or "")
         tool_name = body.get("tool") or None
+        files = body.get("files")  # 逐文件审批：只放行这些文件（apply_patch 按文件过滤）
+        if files is not None and (
+            not isinstance(files, list) or not all(isinstance(f, str) for f in files)
+        ):
+            raise HTTPException(status_code=400, detail="files 需为字符串列表")
         if action not in ("allow", "deny", "always"):
             raise HTTPException(status_code=400, detail="action 需为 allow/deny/always")
         ok = False
         for gate in state.gates.values():
-            if gate.respond(request_id, action, tool_name):
+            if gate.respond(request_id, action, tool_name, files):
                 ok = True
                 break
         if not ok:
@@ -638,7 +643,7 @@ def create_app(state: AppState | None = None) -> FastAPI:
             await websocket.close(code=4400)
             return
         try:
-            sess = state.pty.get_or_create(tab_id, Path(cwd))
+            sess = state.pty.get_or_create(sid, tab_id, Path(cwd))
         except (
             RuntimeError,
             OSError,
@@ -663,10 +668,13 @@ def create_app(state: AppState | None = None) -> FastAPI:
                 msg = json.loads(raw)
                 t = msg.get("type")
                 if t == "in":
-                    state.pty.write(sess.tab_id, str(msg.get("data", "")))
+                    state.pty.write(sid, sess.tab_id, str(msg.get("data", "")))
                 elif t == "resize":
                     state.pty.resize(
-                        sess.tab_id, int(msg.get("cols", 110)), int(msg.get("rows", 28))
+                        sid,
+                        sess.tab_id,
+                        int(msg.get("cols", 110)),
+                        int(msg.get("rows", 28)),
                     )
 
         try:
@@ -678,6 +686,16 @@ def create_app(state: AppState | None = None) -> FastAPI:
         finally:
             # 只断开推送，不杀进程：UI 折叠/刷新后重连，终端内容仍在（持久终端）
             pass
+
+    @app.post("/api/pty/close")
+    async def pty_close(request: Request) -> dict:
+        """关闭一个终端 tab（真正终止其 shell 子进程）。"""
+        _check_token(request, state)
+        body = await request.json()
+        sid = str(body.get("sid") or "")
+        tab_id = safe_tab_id(str(body.get("tab") or ""))
+        state.pty.close(sid, tab_id)
+        return {"ok": True}
 
     # ---------- 记忆 ----------
     @app.get("/api/memory")

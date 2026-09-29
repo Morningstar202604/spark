@@ -32,8 +32,9 @@ def _preview(args: dict, ctx: ToolContext) -> tuple[str, str]:
 
 async def _apply(args: dict, ctx: ToolContext) -> str:
     patch = str(args.get("patch", ""))
+    only = args.get("files")  # 逐文件审批：用户勾选的文件（相对路径），None = 全部
     try:
-        result, _changes = apply_patch(patch, ctx.workdir, ctx.protected)
+        result, _changes = apply_patch(patch, ctx.workdir, ctx.protected, only=only)
         return result
     except PatchError as e:
         return f"补丁应用失败：{e}"

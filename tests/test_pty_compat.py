@@ -51,7 +51,7 @@ def test_pty_session_raises_when_unavailable(tmp_path: Path, monkeypatch) -> Non
 def test_ws_pty_returns_err_when_unavailable(tmp_path: Path, monkeypatch) -> None:
     client, state = _client(tmp_path)
 
-    def _boom(tab_id: str, cwd: Path):
+    def _boom(sid: str, tab_id: str, cwd: Path):
         raise RuntimeError("内置终端在当前平台不可用")
 
     monkeypatch.setattr(state.pty, "get_or_create", _boom)
@@ -78,7 +78,7 @@ def test_windows_pty_echo_and_cwd(tmp_path: Path) -> None:
     if not PTY_AVAILABLE:
         pytest.skip("pywinpty 未安装")
     m = PtyManager()
-    sess = m.get_or_create("wt1", tmp_path)
+    sess = m.get_or_create("ws1", "wt1", tmp_path)
     chunks: list[str] = []
 
     async def main() -> None:
