@@ -140,7 +140,11 @@ async function selectSession(sid) {
 
 function renderHistory(m) {
   if (m.role === "user") { addUserMsg(m.content || ""); }
-  else if (m.role === "assistant") { const el = newAssistant(); el.querySelector(".text").textContent = m.content || ""; }
+  else if (m.role === "assistant") {
+    const el = newAssistant();
+    el.dataset.raw = m.content || "";
+    el.querySelector(".text").innerHTML = mdToHtml(m.content || "");
+  }
 }
 
 /* 新建会话：未配置模型/工作目录时直接引导到对应设置面板，而不是弹个空设置抽屉 */

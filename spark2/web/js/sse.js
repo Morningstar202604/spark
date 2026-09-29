@@ -39,7 +39,13 @@ async function send() {
 
 function handleEvent(ev) {
   switch (ev.type) {
-    case "text": getStreamSpan().textContent += ev.delta; autoScroll(); break;
+    case "text":
+      // Markdown 流式渲染：累积原文 → 全量重渲染（复制按钮取 textContent，不受影响）
+      getStreamSpan();
+      curAssistant.dataset.raw = (curAssistant.dataset.raw || "") + ev.delta;
+      curAssistant.querySelector(".text").innerHTML = mdToHtml(curAssistant.dataset.raw);
+      autoScroll();
+      break;
     case "reasoning": appendThinking(ev.delta); break;
     case "plan": planCard(ev.steps || []); break;
     case "tool_start": { const card = toolCard(ev); card.dataset.id = ev.id; break; }

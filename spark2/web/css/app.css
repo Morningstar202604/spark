@@ -71,6 +71,21 @@ main { flex:1; overflow-y:auto; padding:18px 14px 24px; }
 .msg.assistant .copy:hover { color:var(--teal); border-color:var(--teal); }
 .msg.error { align-self:stretch; background:var(--red-dim); border:1px solid var(--red-border); color:var(--red); border-radius:12px; padding:10px 14px; font-size:14px; }
 
+/* 助手消息 Markdown 渲染 */
+.msg.assistant .text pre.mdcode { background:var(--panel2); border:1px solid var(--line); border-radius:10px; padding:12px 14px; overflow-x:auto; font-family:var(--mono); font-size:12.5px; line-height:1.65; margin:8px 0; }
+.msg.assistant .text pre.mdcode .mdcodelang { display:block; color:var(--dim); font-size:10.5px; letter-spacing:.08em; margin-bottom:6px; text-transform:uppercase; }
+.msg.assistant .text code.mdinl { font-family:var(--mono); font-size:12.5px; background:var(--panel2); border:1px solid var(--line); border-radius:5px; padding:1px 6px; }
+.msg.assistant .text h1.mdh, .msg.assistant .text h2.mdh { font-size:17px; margin:12px 0 5px; }
+.msg.assistant .text h3.mdh { font-size:15px; margin:10px 0 4px; }
+.msg.assistant .text h4.mdh { font-size:14px; margin:9px 0 4px; }
+.msg.assistant .text .mdli { margin:2px 0 2px 18px; }
+.msg.assistant .text blockquote.mdq { border-left:3px solid var(--line2); color:var(--muted); padding:2px 12px; margin:6px 0; }
+.msg.assistant .text hr.mdhr { border:none; border-top:1px solid var(--line); margin:10px 0; }
+.msg.assistant .text table.mdtable { border-collapse:collapse; margin:8px 0; font-size:13px; width:100%; display:block; overflow-x:auto; }
+.msg.assistant .text table.mdtable th, .msg.assistant .text table.mdtable td { border:1px solid var(--line); padding:5px 10px; text-align:left; }
+.msg.assistant .text table.mdtable th { background:var(--panel2); }
+.msg.assistant .text a { color:var(--teal); }
+
 /* 思考块 */
 .think { border:1px solid var(--line); border-left:3px solid var(--dim); border-radius:10px; background:var(--panel2); margin:6px 0; }
 .think summary { cursor:pointer; color:var(--muted); font-size:12.5px; padding:7px 12px; list-style:none; }
