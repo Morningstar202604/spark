@@ -18,6 +18,7 @@ import asyncio
 import os
 import re
 import sys
+import tempfile
 import threading
 import uuid
 from pathlib import Path
@@ -78,15 +79,21 @@ class PtySession:
             shell_cmd = [os.environ.get("COMSPEC") or "cmd.exe"]
         else:
             # 品牌化 bash 提示符（"spark 路径$"），避免裸露出沙箱主机名；
-            # rcfile 放系统临时目录，不污染工作目录（ls 里也看不到）
-            rc = Path(os.environ.get("TMPDIR", "/tmp")) / f"spark_pty_rc_{tab_id}.sh"
+            # rcfile 用 mkstemp 生成随机路径（0600），防多用户机器上的预创建覆盖；
+            # 不污染工作目录（ls 里也看不到）
+            rc = None
             try:
-                rc.write_text(
-                    "PS1='\\[\\e[32m\\]spark\\[\\e[0m\\] \\w\\$ '\n"
-                    "unset PROMPT_COMMAND\n"
-                    "clear\n",
-                    encoding="utf-8",
+                tmp_dir = os.environ.get("TMPDIR") or "/tmp"
+                fd, rc_path = tempfile.mkstemp(
+                    prefix="spark_pty_", suffix=".sh", dir=tmp_dir
                 )
+                with os.fdopen(fd, "w", encoding="utf-8") as f:
+                    f.write(
+                        "PS1='\\[\\e[32m\\]spark\\[\\e[0m\\] \\w\\$ '\n"
+                        "unset PROMPT_COMMAND\n"
+                        "clear\n"
+                    )
+                rc = Path(rc_path)
                 shell_cmd = ["bash", "--rcfile", str(rc), "-i"]
             except OSError:
                 shell_cmd = ["bash", "-i"]

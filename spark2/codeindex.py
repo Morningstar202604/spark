@@ -129,6 +129,24 @@ def index_cache_path(workdir: str) -> Path:
     )  # 动态：遵守 SPARK2_HOME
 
 
+# 缓存治理：最多保留最近 N 个工作目录的索引；单缓存超过上限不落盘（超大仓库只做内存索引）
+MAX_CACHE_ENTRIES = 12
+MAX_CACHE_BYTES = 20 * 1024 * 1024
+
+
+def _prune_cache() -> None:
+    """超过条目配额时删除最旧缓存，避免索引目录无限累积。"""
+    try:
+        d = config_dir() / "codeindex"
+        if not d.exists():
+            return
+        entries = sorted(d.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
+        for p in entries[MAX_CACHE_ENTRIES:]:
+            p.unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
 def _py_symbols(text: str, rel_path: str) -> list[dict]:
     """用标准库 ast 精确提取 Python 符号。"""
     out: list[dict] = []
@@ -250,8 +268,11 @@ def index_project(workdir: str, use_cache: bool = True) -> dict:
         "generated_at": __import__("time").time(),
         "workdir": workdir,
     }
-    cache_p.parent.mkdir(parents=True, exist_ok=True)
-    cache_p.write_text(json.dumps(result, ensure_ascii=False), encoding="utf-8")
+    payload = json.dumps(result, ensure_ascii=False)
+    if len(payload) <= MAX_CACHE_BYTES:
+        cache_p.parent.mkdir(parents=True, exist_ok=True)
+        cache_p.write_text(payload, encoding="utf-8")
+        _prune_cache()
     return result
 
 
