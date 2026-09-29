@@ -114,10 +114,10 @@ async def test_loop_writes_memory_and_injects(tmp_path: Path) -> None:
 
     # 下一轮自动注入：问"端口"时，记忆块出现在发给模型的上下文中
     loop2 = AgentLoop(tmp_path, {"model": "mock", "mock_script": [[{"type": "text", "text": "好。"}]]}, ApprovalGate(mode="full-auto"), memory=store)
-    block = loop2._memory_block([{"role": "user", "content": "服务用哪个端口？"}])
+    block = await loop2._memory_block([{"role": "user", "content": "服务用哪个端口？"}])
     assert block and "8080" in block
     # 无关问题不注入
-    assert loop2._memory_block([{"role": "user", "content": "今天天气怎么样？"}]) is None
+    assert await loop2._memory_block([{"role": "user", "content": "今天天气怎么样？"}]) is None
 
 
 class _FakeEmbedder:

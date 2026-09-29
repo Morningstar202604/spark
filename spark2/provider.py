@@ -272,13 +272,18 @@ async def stream_chat(
         for c in calls:
             raw = c["arguments"]
             try:
-                c["arguments"] = json.loads(raw or "{}")
+                parsed = json.loads(raw or "{}")
             except json.JSONDecodeError:
                 # 输出被长度上限截断：arguments 不是完整 JSON。绝不能当成 {} 静默执行
                 # （会写出空文件/错误参数），标记出来交由上层回问模型重试。
+                parsed = None
+            if not isinstance(parsed, dict):
+                # 合法 JSON 但非对象（如 [] / "str" / null）：同样不可执行
                 c["arguments"] = {}
                 c["invalid_arguments"] = True
                 c["arguments_tail"] = raw[-200:]
+            else:
+                c["arguments"] = parsed
         if calls:
             yield {"type": "tool_calls", "calls": calls}
         yield {

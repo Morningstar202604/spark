@@ -1,12 +1,17 @@
-"""代码索引工具（P3 ⑤）：index_project / search_symbol / lint_file。"""
+"""代码索引工具（P3 ⑤）：index_project / search_symbol / lint_file。
+
+注意：索引构建 / lint 是同步重 IO（递归遍历、subprocess），
+在 async handler 里一律放入线程池，避免阻塞单事件循环。
+"""
 from __future__ import annotations
 
+import asyncio
 import json
 
 from spark2.tools.base import Tool, ToolContext, resolve_path
 
 
-def _get_index(ctx: ToolContext) -> dict:
+async def _get_index(ctx: ToolContext) -> dict:
     """惰性索引：ctx.index 是 {workdir: {"index": {...}, "loaded_at": ts}} 状态。"""
     if ctx.index is None:
         return {}
@@ -15,7 +20,7 @@ def _get_index(ctx: ToolContext) -> dict:
     entry = state.get(key)
     if entry is None:
         import spark2.codeindex as ci
-        idx = ci.index_project(str(ctx.workdir))
+        idx = await asyncio.to_thread(ci.index_project, str(ctx.workdir))
         state[key] = {"index": idx, "loaded_at": __import__("time").time()}
         entry = state[key]
     return entry["index"]
@@ -27,7 +32,7 @@ async def _index_project(args: dict, ctx: ToolContext) -> str:
         return "错误：工作目录不存在"
     import spark2.codeindex as ci
 
-    idx = ci.index_project(workdir)
+    idx = await asyncio.to_thread(ci.index_project, workdir)
     if ctx.index is not None:
         ctx.index[str(ctx.workdir)] = {"index": idx, "loaded_at": __import__("time").time()}
     symbols = idx.get("symbols", [])
@@ -52,12 +57,12 @@ async def _search_symbol(args: dict, ctx: ToolContext) -> str:
     if not query:
         return "错误：需要 query（符号名）"
     limit = int(args.get("limit") or 20)
-    idx = _get_index(ctx)
+    idx = await _get_index(ctx)
     if not idx:
         return "索引为空，先调用 index_project"
     import spark2.codeindex as ci
 
-    hits = ci.search_symbol(idx, query, limit=limit)
+    hits = await asyncio.to_thread(ci.search_symbol, idx, query, limit)
     if not hits:
         return f"未找到与「{query}」匹配的符号（可先 index_project 刷新索引）"
     lines = [f"「{query}」匹配 {len(hits)} 个符号："]
@@ -73,7 +78,7 @@ async def _lint_file(args: dict, ctx: ToolContext) -> str:
         return "错误：需要 path"
     import spark2.codeindex as ci
 
-    diags = ci.lint_file(str(ctx.workdir), path)
+    diags = await asyncio.to_thread(ci.lint_file, str(ctx.workdir), path)
     if not diags:
         return f"语法检查通过：{path}"
     lines = [f"发现 {len(diags)} 个问题（{path}）："]

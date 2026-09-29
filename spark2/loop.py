@@ -94,7 +94,9 @@ _TRUNCATION_NUDGE = (
     "请立刻调用工具继续执行任务：一次只处理一个文件，单个文件内容不要过长，"
     "长文件先写骨架再分次补充；不要用文字描述将要做什么。"
 )
-_SENTENCE_END = "。．.！？!?…」』】）)]\"'`"
+# 句尾收尾字符集：尽量覆盖代码/链接/JSON 等常见收尾（反引号、}、>、*、~、%、/、\、中文冒号），
+# 减少"动过手后正常回答被误判成截断"的多余重试。
+_SENTENCE_END = "。．.！？!?…」』】）)]\"'`：}*~%/>\\"
 
 
 def _looks_truncated(
@@ -250,8 +252,12 @@ class AgentLoop:
                 paths.append(p)
         return paths
 
-    def _memory_block(self, messages: list[dict]) -> str | None:
-        """对最后一条用户消息做本地检索，拼出可注入上下文块（无则不注入）。"""
+    async def _memory_block(self, messages: list[dict]) -> str | None:
+        """对最后一条用户消息做本地检索，拼出可注入上下文块（无则不注入）。
+
+        检索放入线程池：启用语义记忆时，embed 是同步 HTTP/本地模型调用，
+        直接执行会阻塞整个单事件循环（所有会话一起暂停）。
+        """
         user_text = ""
         for m in reversed(messages):
             if m.get("role") == "user" and m.get("content"):
@@ -260,7 +266,9 @@ class AgentLoop:
         if not user_text:
             return None
         try:
-            hits = self.memory.search(str(self.workdir), user_text, limit=5)
+            hits = await asyncio.to_thread(
+                self.memory.search, str(self.workdir), user_text, limit=5
+            )
         except Exception:  # noqa: BLE001 —— 记忆库异常不阻断对话
             return None
         if not hits:
@@ -278,14 +286,18 @@ class AgentLoop:
             return text
 
     async def cancel(self) -> None:
+        """取消：置 cancel_event + 进程组级强杀运行中的工具进程 + 使未决审批全部失效。
+
+        修复：此前只对主进程 proc.kill()，shell 派生的子进程可能残留；
+        现在复用 shell._kill_group 按进程组 SIGKILL（Windows 用 taskkill /T）。
+        """
         self.cancel_event.set()
+        from spark2.tools.shell import _kill_group
+
         for proc in list(self.ctx.processes.values()):
             try:
-                proc.kill()
-            except (
-                ProcessLookupError,
-                OSError,
-            ):  # Windows 上杀已退出进程可能抛 OSError
+                _kill_group(proc)
+            except (ProcessLookupError, OSError):
                 pass
         for fut in list(self.gate.pending.values()):
             if not fut.done():
@@ -356,7 +368,7 @@ class AgentLoop:
                 self.registry.setdefault(t.name, t)
 
         turns = 0
-        tools_done = 0  # 本次请求内已执行的工具数（判断"半途停下"用）
+        tools_done = 0  # 本次对话已执行的工具数（跨轮累计）：动过手后句尾不完整视为截断
         while True:
             if self.cancel_event.is_set():
                 yield {"type": "done", "reason": "cancelled"}
@@ -367,7 +379,7 @@ class AgentLoop:
                 return
 
             msgs = [{"role": "system", "content": self.system_prompt()}]
-            mem_block = self._memory_block(messages)
+            mem_block = await self._memory_block(messages)
             if mem_block:
                 msgs.append({"role": "system", "content": mem_block})
             msgs += await self._compact(messages)

@@ -2,8 +2,13 @@
 
 通过 ctx.memory（MemoryStore）读写。记忆按工作目录隔离，
 用户说"记住 XX 是 YY"或"忘了 XX"时模型才调用；不自动猜测写记忆。
+
+注意：MemoryStore 的写/检索内部可能触发同步语义嵌入（HTTP/本地模型），
+一律放入线程池执行，避免阻塞单事件循环。
 """
 from __future__ import annotations
+
+import asyncio
 
 from spark2.tools.base import Tool, ToolContext
 
@@ -15,7 +20,7 @@ async def remember(args: dict, ctx: ToolContext) -> str:
         return "错误：需要 key 和 value（如 remember(key='部署方式', value='用 systemd 服务')）"
     if ctx.memory is None:
         return "错误：记忆库未启用"
-    ctx.memory.remember(str(ctx.workdir), key, value)
+    await asyncio.to_thread(ctx.memory.remember, str(ctx.workdir), key, value)
     return f"已记住：{key}"
 
 
@@ -25,7 +30,7 @@ async def forget(args: dict, ctx: ToolContext) -> str:
         return "错误：需要 key（与 remember 时的 key 一致）"
     if ctx.memory is None:
         return "错误：记忆库未启用"
-    n = ctx.memory.forget(str(ctx.workdir), key)
+    n = await asyncio.to_thread(ctx.memory.forget, str(ctx.workdir), key)
     return f"已忘记：{key}（删除 {n} 条）" if n else f"没有找到记忆：{key}"
 
 
@@ -38,7 +43,9 @@ async def memory_search(args: dict, ctx: ToolContext) -> str:
     if ctx.memory is None:
         return "错误：记忆库未启用"
     try:
-        hits = ctx.memory.search(str(ctx.workdir), query, limit=limit)
+        hits = await asyncio.to_thread(
+            ctx.memory.search, str(ctx.workdir), query, limit=limit
+        )
     except Exception as e:  # noqa: BLE001 —— 检索失败不阻断
         return f"检索失败：{e}"
     if not hits:

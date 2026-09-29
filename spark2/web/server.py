@@ -717,7 +717,9 @@ def create_app(state: AppState | None = None) -> FastAPI:
             raise HTTPException(
                 status_code=400, detail="key/value 超长（200/5000 字符）"
             )
-        state.memory.remember(workdir, key, value)
+        # 写入走线程池：remember 内部可能触发同步语义嵌入（HTTP/本地模型），
+        # 直接执行会阻塞单事件循环。
+        await asyncio.to_thread(state.memory.remember, workdir, key, value)
         return {"ok": True, "count": state.memory.count(workdir)}
 
     # ---------- 文件浏览（@ 引用 / 工作目录导航，只读列表） ----------

@@ -84,23 +84,46 @@ async def run_shell(args: dict, ctx: ToolContext) -> str:
         **_popen_group_kwargs(),  # 独立进程组，便于整体终止
     )
     ctx.processes[proc.pid] = proc
+    # 同时等待：进程退出 / 用户停止(cancel_event) / 超时，任一先到即处理。
+    # 修复：此前只等 communicate，用户点"停止"无法及时终止正在运行的命令；
+    # 现在 cancel_event 触发即整组强杀，不留孤儿子进程。
+    wait_task = asyncio.create_task(proc.wait())
+    cancel_task = asyncio.create_task(ctx.cancel_event.wait())
+    code = -1
     try:
-        out, err = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-        text = out.decode("utf-8", "replace")
-        err_text = err.decode("utf-8", "replace")
-        if err_text.strip():
-            text += "\n[stderr]\n" + err_text
-    except asyncio.TimeoutError:
-        _kill_group(proc)
-        text = f"命令超过 {timeout}s，已强制终止（进程组）。"
-        await _reap(proc)
+        try:
+            await asyncio.wait_for(
+                asyncio.wait(
+                    {wait_task, cancel_task}, return_when=asyncio.FIRST_COMPLETED
+                ),
+                timeout=timeout,
+            )
+        except asyncio.TimeoutError:
+            _kill_group(proc)
+            text = f"命令超过 {timeout}s，已强制终止（进程组）。"
+            await _reap(proc)
+        else:
+            if ctx.cancel_event.is_set():
+                _kill_group(proc)
+                text = "命令已取消（用户停止）。"
+                await _reap(proc)
+            else:
+                # 进程已自然退出：读干净 stdout/stderr 缓冲
+                out, err = await proc.communicate()
+                text = out.decode("utf-8", "replace")
+                err_text = err.decode("utf-8", "replace")
+                if err_text.strip():
+                    text += "\n[stderr]\n" + err_text
+                code = proc.returncode if proc.returncode is not None else -1
     except asyncio.CancelledError:
         _kill_group(proc)
         await _reap(proc)
         raise
     finally:
+        for t in (wait_task, cancel_task):
+            if not t.done():
+                t.cancel()
         ctx.processes.pop(proc.pid, None)
-    code = proc.returncode if proc.returncode is not None else -1
     if code not in (0, None):
         text = f"[退出码 {code}]\n" + text
     if len(text) > MAX_OUT:

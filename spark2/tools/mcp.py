@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import re
 from dataclasses import dataclass, field
 from typing import Any
@@ -48,6 +49,15 @@ class McpServer:
 
 def _safe_name(s: str) -> str:
     return re.sub(r"[^A-Za-z0-9_]", "_", s or "")
+
+
+def _bounded_name(s: str, limit: int) -> str:
+    """工具名段限长：超长则截断并附短哈希后缀，避免冲突也避免撑爆 schema/API 限制。"""
+    s = _safe_name(s)
+    if len(s) <= limit:
+        return s
+    digest = hashlib.sha1(s.encode("utf-8")).hexdigest()[:8]
+    return s[: limit - 9] + digest
 
 
 def servers_from_cfg(cfg: dict | None) -> list[McpServer]:
@@ -180,7 +190,10 @@ class McpManager:
             self._tools.append(self._make_tool(server.name, t))
 
     def _make_tool(self, server_name: str, t: Any) -> Tool:
-        tool_name = f"mcp_{_safe_name(server_name)}_{_safe_name(t.name)}"
+        # 服务器名/工具名都限长（超长截断+哈希后缀），避免生成超长工具名撑爆 schema
+        tool_name = (
+            f"mcp_{_bounded_name(server_name, 24)}_{_bounded_name(t.name, 48)}"
+        )
         schema = getattr(t, "inputSchema", None) or {"type": "object", "properties": {}}
         # 2025-03-26 MCP 规范的 Tool Annotations：readOnlyHint=true 的工具只读、
         # 自动放行；其余默认视为"写"，进审批门（与主流 agent 的 writes 模式一致）。

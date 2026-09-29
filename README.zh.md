@@ -7,8 +7,8 @@
 跑在你本机 · 每一步都看得见 · 写入与命令都要你点头 · 零隐性 AI 调用
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-14b8a6.svg)](LICENSE)
-[![Python 3.10+](https://img.shields.io/badge/python-3.10+-0f766e.svg)]()
-[![Tests](https://img.shields.io/badge/tests-103%20passed-14b8a6.svg)]()
+[![Python 3.11+](https://img.shields.io/badge/python-3.11+-0f766e.svg)]()
+[![Tests](https://img.shields.io/badge/tests-181%20passed-14b8a6.svg)]()
 
 [English](README.md) · **中文**
 
@@ -78,7 +78,7 @@ flowchart TB
 ## ✅ 测试
 
 ```bash
-python3 -m pytest -q      # 103 个用例全绿
+python3 -m pytest -q      # 181 个用例通过（5 跳过）
 python3 tests/e2e_manual.py  # 真实 uvicorn 端到端（流内审批 / 409 / 落盘）
 ```
 
