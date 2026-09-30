@@ -6,16 +6,17 @@
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 
 import pytest
 
+from spark2.approval import ApprovalGate
 from spark2.patch_apply import (
     PatchError,
     apply_patch,
     apply_to_text,
     parse_patch,
-    preview_patch,
 )
 from spark2.tools import build_registry
 
@@ -182,7 +183,7 @@ def test_reject_empty_and_malformed(tmp_path: Path):
 
 
 def test_apply_to_text_errors():
-    h = type("H", (), {})  # placeholder, 直接用真实 Hunk
+    _h = type("H", (), {})  # placeholder, 直接用真实 Hunk
     from spark2.patch_apply import Hunk
 
     with pytest.raises(PatchError):
@@ -203,3 +204,85 @@ def test_registry_and_preview(tmp_path: Path):
     assert "a/a.py" in diff
     # preview 不落盘
     assert (tmp_path / "b.py").exists() is False
+
+
+def test_apply_patch_auto_verify_runs_pytest(tmp_path: Path) -> None:
+    """改完自动验证：apply_patch 成功后自动跑 pytest 并把结果回填进 tool_result。"""
+    from spark2.execution import ToolExecutor
+    from spark2.tools.base import ToolContext
+    from spark2.tools.patch import build_patch_tool
+
+    (tmp_path / "pytest.ini").write_text("[pytest]\n")
+    (tmp_path / "test_ok.py").write_text(
+        "def test_ok():\n    assert 1 + 1 == 2\n"
+    )
+    gate = ApprovalGate(mode="auto")
+    reg = {t.name: t for t in build_patch_tool()}
+    ctx = ToolContext(workdir=tmp_path, protected=[], cancel_event=asyncio.Event(), memory=None, index={})
+    ex = ToolExecutor(
+        gate=gate,
+        registry=reg,
+        ctx=ctx,
+        cancel_event=asyncio.Event(),
+        tool_timeout=60,
+        workdir=tmp_path,
+        memory=None,
+        log_path=None,
+        provider_cfg={"model": "mock"},
+        auto_verify=True,
+    )
+    call = {
+        "id": "ap1",
+        "name": "apply_patch",
+        "arguments": {
+            "patch": "--- a/new.txt\n+++ a/new.txt\n@@ -0,0 +1,1 @@\n+hello\n"
+        },
+    }
+    msgs: list[dict] = []
+    evs = []
+    async def run():
+        async for ev in ex.execute(msgs, call):
+            evs.append(ev)
+    asyncio.run(run())
+    results = [e for e in evs if e["type"] == "tool_result"]
+    assert results
+    out = results[0]["output"]
+    assert "已应用补丁" in out
+    assert "[自动验证]" in out and "1 passed" in out, out
+
+
+def test_apply_patch_auto_verify_skipped_without_pytest(tmp_path: Path) -> None:
+    """无 pytest 配置/无 tests 目录：跳过自动验证，不附加验证文本。"""
+    from spark2.execution import ToolExecutor
+    from spark2.tools.base import ToolContext
+    from spark2.tools.patch import build_patch_tool
+
+    (tmp_path / "plain.txt").write_text("x")
+    gate = ApprovalGate(mode="auto")
+    reg = {t.name: t for t in build_patch_tool()}
+    ctx = ToolContext(workdir=tmp_path, protected=[], cancel_event=asyncio.Event(), memory=None, index={})
+    ex = ToolExecutor(
+        gate=gate,
+        registry=reg,
+        ctx=ctx,
+        cancel_event=asyncio.Event(),
+        tool_timeout=60,
+        workdir=tmp_path,
+        memory=None,
+        log_path=None,
+        provider_cfg={"model": "mock"},
+        auto_verify=True,
+    )
+    call = {
+        "id": "ap2",
+        "name": "apply_patch",
+        "arguments": {"files": [{"path": "plain2.txt", "content": "y"}]},
+    }
+    msgs: list[dict] = []
+    evs = []
+    async def run():
+        async for ev in ex.execute(msgs, call):
+            evs.append(ev)
+    asyncio.run(run())
+    results = [e for e in evs if e["type"] == "tool_result"]
+    assert "[自动验证]" not in results[0]["output"]

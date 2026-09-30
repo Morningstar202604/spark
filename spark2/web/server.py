@@ -17,9 +17,9 @@ from __future__ import annotations
 
 import asyncio
 import json
+from collections.abc import AsyncIterator
 from datetime import date
 from pathlib import Path
-from typing import AsyncIterator
 
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, StreamingResponse
@@ -32,13 +32,13 @@ from spark2.tools import build_registry
 
 from .api_common import (
     AppState,
-    clamp_int,
     check_token,
+    clamp_int,
     sse,
 )
 from .api_config import router as router_config
-from .api_sessions import router as router_sessions
 from .api_data import router as router_data
+from .api_sessions import router as router_sessions
 
 WEB_DIR = Path(__file__).parent
 
@@ -120,6 +120,7 @@ def create_app(state: AppState | None = None) -> FastAPI:
                 clamp_int(state.cfg.get("tool_timeout"), 10, 3600, 180)
             ),
             extra_protected=[str(p) for p in (state.cfg.get("protected_paths") or [])],
+            auto_verify=bool(state.cfg.get("auto_verify", True)),
             system_prompt_text=custom_prompt or None,
             memory=state.memory,
             mcp=state.mcp,
@@ -131,7 +132,23 @@ def create_app(state: AppState | None = None) -> FastAPI:
 
         # 先落盘用户消息再取历史：发给模型的消息必须包含当前 prompt
         # （此前先取后写，真实模型首轮收到空对话 → 400 No user query）
-        state.store.append(sid, {"role": "user", "content": prompt})
+        # 多模态：body["images"] 为 [{data: base64, mime}]，≤3 张、单张 base64 ≤ 2.8MB（≈2MB 原图）
+        images = body.get("images") or []
+        user_content: str | list = prompt
+        if images:
+            if not isinstance(images, list) or len(images) > 3:
+                raise HTTPException(status_code=400, detail="图片最多 3 张")
+            parts: list = [{"type": "text", "text": prompt}]
+            for img in images[:3]:
+                data = str((img or {}).get("data") or "")
+                mime = str((img or {}).get("mime") or "image/png")
+                if not data or len(data) > 2_800_000:
+                    raise HTTPException(status_code=400, detail="单张图片超过 2MB 上限")
+                parts.append(
+                    {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{data}"}}
+                )
+            user_content = parts
+        state.store.append(sid, {"role": "user", "content": user_content})
         messages = state.store.messages(sid)
 
         async def event_stream() -> AsyncIterator[str]:

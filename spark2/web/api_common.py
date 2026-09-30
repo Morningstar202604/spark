@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import Depends, HTTPException, Request
+from fastapi import HTTPException, Request
 
 from spark2 import __version__
 from spark2.approval import ApprovalGate
@@ -109,8 +109,8 @@ async def json_body(request: Request) -> dict:
     """解析 JSON 请求体；非法 JSON/非对象 → 400（不落 500）。"""
     try:
         body = await request.json()
-    except Exception:  # noqa: BLE001
-        raise HTTPException(status_code=400, detail="请求体需是合法 JSON")
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail="请求体需是合法 JSON") from exc
     if not isinstance(body, dict):
         raise HTTPException(status_code=400, detail="请求体需是 JSON 对象")
     return body

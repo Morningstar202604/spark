@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from typing import AsyncIterator
+from collections.abc import AsyncIterator
 
 import httpx
 
@@ -30,6 +30,17 @@ def _get_encoder():
         except Exception:  # noqa: BLE001 —— 未安装 / 下载失败 / 缓存损坏都回退
             _ENCODER = None
     return _ENCODER
+
+
+def _msg_text(content) -> str:
+    """从 OpenAI 兼容 content（str 或 [{type:text|image_url}]）提取纯文本部分。"""
+    if isinstance(content, list):
+        return " ".join(
+            str(p.get("text") or "")
+            for p in content
+            if isinstance(p, dict) and p.get("type") == "text" and p.get("text")
+        ).strip()
+    return str(content or "")
 
 
 def estimate_tokens(text: str) -> int:
@@ -346,7 +357,7 @@ async def _mock_chat(
     user_text = ""
     for m in reversed(messages):
         if m.get("role") == "user" and m.get("content"):
-            user_text = m["content"]
+            user_text = _msg_text(m["content"]) if isinstance(m["content"], list) else str(m["content"])
             break
     if "列" in user_text and tools:
         yield {

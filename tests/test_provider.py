@@ -2,12 +2,15 @@
 from __future__ import annotations
 
 import json
-from typing import Any, AsyncIterator, Sequence
+from collections.abc import AsyncIterator, Sequence
+from typing import Any
 
 import httpx
 import pytest
 
 from spark2 import provider
+
+
 class FakeResponse:
     def __init__(self, status_code: int, sse_events: Sequence[dict[str, Any]]) -> None:
         self.status_code = status_code

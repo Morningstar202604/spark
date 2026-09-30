@@ -50,7 +50,7 @@ async def _reap(proc: Any) -> None:
     """等待已被杀的子进程退出并回收，关闭管道 transport，避免 ResourceWarning。"""
     try:
         await asyncio.wait_for(proc.wait(), timeout=5)
-    except (asyncio.TimeoutError, ProcessLookupError, OSError):
+    except (TimeoutError, ProcessLookupError, OSError):
         pass
 
 
@@ -98,7 +98,7 @@ async def run_shell(args: dict, ctx: ToolContext) -> str:
                 ),
                 timeout=timeout,
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             _kill_group(proc)
             text = f"命令超过 {timeout}s，已强制终止（进程组）。"
             await _reap(proc)

@@ -79,7 +79,7 @@ class ApprovalGate:
         """
         try:
             return await asyncio.wait_for(fut, timeout)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             return None
         finally:
             self.pending.pop(request_id, None)

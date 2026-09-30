@@ -65,8 +65,6 @@ def test_ws_pty_returns_err_when_unavailable(tmp_path: Path, monkeypatch) -> Non
 
 import sys  # noqa: E402
 
-import pytest  # noqa: E402
-
 
 @pytest.mark.skipif(sys.platform != "win32", reason="ConPTY 后端仅 Windows")
 def test_windows_pty_echo_and_cwd(tmp_path: Path) -> None:
@@ -94,7 +92,7 @@ def test_windows_pty_echo_and_cwd(tmp_path: Path) -> None:
             try:
                 d = await asyncio.wait_for(q.get(), timeout=1.0)
                 chunks.append(d)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 pass
             joined = "".join(chunks)
             if (

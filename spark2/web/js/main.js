@@ -17,6 +17,7 @@ import { loadGit, doCheckpoint, doGitReset } from "./settings-git.js";
 import { loadPlugins } from "./settings-plugins.js";
 import { loadUsage } from "./settings-usage.js";
 import { toggleTerm, addTermTab, initTermDrag } from "./terminal.js";
+import { initInputImg } from "./inputimg.js";
 
 /* ---------- @ 文件补全（GET /api/fs，工作目录内只读浏览） ---------- */
 const atState = { items: [], sel: 0, dirPart: "", start: 0 };
@@ -90,6 +91,7 @@ function closeMenu() { $("#tbMenu").classList.remove("open"); }
 /* ---------- 事件绑定 ---------- */
 function bind() {
   bindScrollStick();
+  initInputImg();
   $("#btnSend").onclick = send;
   $("#input").addEventListener("keydown", e => {
     // @ 补全弹层打开时优先消费方向键/回车/Esc
@@ -211,7 +213,7 @@ function bind() {
    模块已保证全部依赖就绪（无需脚本顺序自检）；仅保留关键组件注册检查，
    用于 import 被裁剪/文件缺失时给出明确报错而非白屏。 */
 function startupCheck() {
-  const want = ["SparkMsg", "SparkToolCard", "SparkPlanCard", "SparkThink", "SparkSessionCard", "SparkMcpRow", "SparkMemRow", "SparkGitRow"];
+  const want = ["spark-msg", "spark-tool-card", "spark-plan-card", "spark-think", "spark-session-card", "spark-mcp-row", "spark-mem-row", "spark-git-row"];
   const missing = want.filter(n => !customElements.get(n));
   if (missing.length) {
     console.error("[spark] 组件注册缺失：", missing.join(", "));

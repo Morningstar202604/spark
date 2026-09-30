@@ -3,8 +3,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 from spark2.approval import ApprovalGate
 from spark2.loop import AgentLoop
 from spark2.subagent import make_subagent
@@ -130,3 +128,80 @@ async def test_make_subagent_system_prompt_has_role(tmp_path: Path) -> None:
     assert "只读调查员" in sp
     sub2 = make_subagent("general", tmp_path, _mk_cfg(), gate, None, None, None)
     assert "通用执行器" in sub2.system_prompt()
+
+
+# ---------- explore_parallel（并行只读探索） ----------
+
+PARALLEL_SCRIPT = [
+    {
+        "type": "tool_calls",
+        "calls": [
+            {
+                "id": "ep1",
+                "name": "explore_parallel",
+                "arguments": {
+                    "topics": [
+                        {"path": "src/a", "task": "查 a 模块职责"},
+                        {"path": "src/b", "task": "查 b 模块职责"},
+                    ]
+                },
+            }
+        ],
+    }
+]
+SUB_READ_A = [
+    {"type": "tool_calls", "calls": [{"id": "sa", "name": "list_dir", "arguments": {"path": "src/a"}}]}
+]
+SUB_TEXT_A = [{"type": "text", "text": "a 模块是入口，负责路由。"}]
+SUB_READ_B = [
+    {"type": "tool_calls", "calls": [{"id": "sb", "name": "list_dir", "arguments": {"path": "src/b"}}]}
+]
+SUB_TEXT_B = [{"type": "text", "text": "b 模块是数据层，负责存取。"}]
+
+
+async def test_explore_parallel_merges_results(tmp_path: Path) -> None:
+    """explore_parallel：两个只读子 Agent 并行探索，结论按区域合并回传。"""
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "a").mkdir()
+    (tmp_path / "src" / "b").mkdir()
+    cfg = _mk_cfg(
+        PARALLEL_SCRIPT,
+        # 嵌套模式：[[子Agent0 轮次], [子Agent1 轮次]] → 按 index 分配各自脚本
+        mock_subagent_script=[[SUB_READ_A, SUB_TEXT_A], [SUB_READ_B, SUB_TEXT_B]],
+    )
+    loop = AgentLoop(
+        tmp_path,
+        cfg,
+        gate=ApprovalGate(mode="auto"),
+    )
+    evs = await _collect(loop, [{"role": "user", "content": "并行探索两个模块"}])
+    results = [e for e in evs if e["type"] == "tool_result" and e["name"] == "explore_parallel"]
+    assert results, "缺少 explore_parallel 的 tool_result"
+    out = results[0]["output"]
+    assert "src/a" in out and "src/b" in out
+    assert "路由" in out and "数据层" in out
+    # 两个子 Agent 各执行了工具步
+    steps = [e for e in evs if e["type"] == "tool_start" and e["name"] == "explore_parallel"]
+    assert steps and "并行探索" in steps[0]["args_summary"]
+
+
+async def test_explore_parallel_requires_two_topics(tmp_path: Path) -> None:
+    """explore_parallel：少于 2 个主题直接报错，不派任何子 Agent。"""
+    cfg = _mk_cfg(
+        [
+            {
+                "type": "tool_calls",
+                "calls": [
+                    {
+                        "id": "ep2",
+                        "name": "explore_parallel",
+                        "arguments": {"topics": [{"path": "src", "task": "只有一个"}]},
+                    }
+                ],
+            }
+        ]
+    )
+    loop = AgentLoop(tmp_path, cfg, gate=ApprovalGate(mode="auto"))
+    evs = await _collect(loop, [{"role": "user", "content": "并行探索"}])
+    results = [e for e in evs if e["type"] == "tool_result" and e["name"] == "explore_parallel"]
+    assert results and "至少 2 个" in results[0]["output"]

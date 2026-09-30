@@ -5,11 +5,17 @@
 import { $, state, esc, runtime } from "./core.js";
 import { showEmptyIfNeeded } from "./sessions.js"; // 消息区空状态（运行时调用）
 
-function addUserMsg(text) {
+function addUserMsg(text, note) {
   const el = document.createElement("spark-msg");
   el.setAttribute("type", "user");
   $("#msgList").appendChild(el);
   el.msgEl.textContent = text;
+  if (note) {
+    const tag = document.createElement("span");
+    tag.className = "img-note";
+    tag.textContent = note;
+    el.msgEl.append(" ", tag);
+  }
   showEmptyIfNeeded(); autoScroll();
 }
 

@@ -62,6 +62,7 @@ async function loadConfig() {
   $("#fProtPaths").value = (data.current.protected_paths || []).join("\n");
   $("#fMaxTurns").value = data.current.max_turns || 25;
   $("#fToolTimeout").value = data.current.tool_timeout || 180;
+  $("#fAutoVerify").checked = data.current.auto_verify !== false;
   const tv = data.current.temperature;
   $("#fTemp").value = (tv === "" || tv == null) ? "" : tv;
   const mv = data.current.max_tokens;
@@ -117,6 +118,7 @@ async function saveCfg() {
     protected_paths: $("#fProtPaths").value.split("\n").map(s => s.trim()).filter(Boolean),
     max_turns: parseInt($("#fMaxTurns").value, 10) || 25,
     tool_timeout: parseInt($("#fToolTimeout").value, 10) || 180,
+    auto_verify: $("#fAutoVerify").checked,
     temperature: $("#fTemp").value.trim(),
     max_tokens: $("#fMaxTokens").value.trim(),
     route_enabled: $("#fRouteOn").checked,

@@ -5,9 +5,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Request
-
-from fastapi import Depends
+from fastapi import APIRouter, Depends, HTTPException, Request
 
 from .api_common import AppState, check_token, get_app_state
 

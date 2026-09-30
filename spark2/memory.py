@@ -60,7 +60,7 @@ def _cosine(a: list[float], b: list[float]) -> float:
     """余弦相似度（两向量均为非空数值列表）。"""
     if not a or not b or len(a) != len(b):
         return 0.0
-    dot = sum(x * y for x, y in zip(a, b))
+    dot = sum(x * y for x, y in zip(a, b, strict=False))
     na = math.sqrt(sum(x * x for x in a))
     nb = math.sqrt(sum(y * y for y in b))
     if not na or not nb:
@@ -238,7 +238,7 @@ class MemoryStore:
                         if sim > 0.3:  # 阈值：低于此视为无关
                             scored.append((sim, {"id": r["id"], "key": r["key"], "value": r["value"], "created_at": r["created_at"]}))
                     scored.sort(key=lambda x: x[0], reverse=True)
-                    for sim, row in scored[:limit]:
+                    for _sim, row in scored[:limit]:
                         found[row["id"]] = row
                         sem_ids.add(row["id"])
 

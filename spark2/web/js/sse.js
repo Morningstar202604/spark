@@ -13,18 +13,25 @@ import { openDrawer } from "./settings.js";
 let mdRaf = 0; // 流式 Markdown 渲染帧节流（见 handleEvent text 分支）
 
 async function send() {
+  const images = runtime.pendingImages || [];
   const prompt = $("#input").value.trim();
-  if (!prompt) return;
+  if (!prompt && !images.length) return;
   if (!state.sid) { toast("请先新建或选择一个会话"); openDrawer("drawerSessions"); return; }
   if (isSidRunning(state.sid)) return;
+  const finalPrompt = prompt || "（图片）请分析这张图片。";
   state.runningSids[state.sid] = true; updateRunningUI();
-  addUserMsg(prompt); $("#input").value = ""; autoGrow();
+  addUserMsg(finalPrompt, images.length ? `（附 ${images.length} 张图片）` : "");
+  $("#input").value = ""; autoGrow();
   runtime.curAssistant = null;
+  // 清空图片预览与暂存（已随请求发送）
+  const imgPrev = $("#imgPreview");
+  if (imgPrev) { imgPrev.hidden = true; imgPrev.innerHTML = ""; }
+  runtime.pendingImages = [];
   try {
     const res = await fetch("/api/chat/stream", {
       method: "POST",
       headers: { "Content-Type": "application/json", "X-Spark-Token": state.token },
-      body: JSON.stringify({ session_id: state.sid, prompt, approval_mode: $("#fQuickAp").value || undefined }),
+      body: JSON.stringify({ session_id: state.sid, prompt: finalPrompt, images, approval_mode: $("#fQuickAp").value || undefined }),
     });
     if (res.status === 401) { openModal("tokenModal"); return; }
     if (!res.ok) { const e = await res.json().catch(() => ({})); errorMsg(e.detail || "请求失败（" + res.status + "）"); return; }

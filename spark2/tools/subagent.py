@@ -36,3 +36,44 @@ def build_subagent_tool() -> Tool:
         category="system",
         handler=_not_directly_callable,
     )
+
+
+def build_explore_parallel_tool() -> Tool:
+    """explore_parallel：一次并行派出多个只读子 Agent 探索不同区域并合并结论。
+
+    适用：大仓库需要同时摸清多个模块/目录时，用 2-4 个并行 explore 替代串行，
+    显著缩短探索时间。每个子 agent 都是只读调查员（read_file/list_dir/glob/search），
+    不写文件、不执行命令、不派生子 agent；结果按区域汇总返回。
+    """
+    return Tool(
+        name="explore_parallel",
+        description=(
+            "并行派出 2-4 个只读子 Agent，同时探索不同目录/模块/主题并汇总结论。"
+            "当任务需要同时了解多个区域（如：入口在哪、数据层怎么组织、测试怎么覆盖）时使用，"
+            "比逐个 spawn_subagent(explore) 更快。所有子 Agent 只读，不做任何修改。"
+            "topics 数组：每个元素 {path: 探索区域（相对工作目录或绝对路径）, task: 该区域要查清的问题}。"
+            "返回每个区域的调查结论汇总。"
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "topics": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "path": {"type": "string", "description": "探索区域（目录或文件，相对工作目录）"},
+                            "task": {"type": "string", "description": "该区域要查清的问题（聚焦、明确）"},
+                        },
+                        "required": ["path", "task"],
+                    },
+                    "description": "2-4 个并行探索主题，每个都是 {path, task}",
+                    "minItems": 2,
+                    "maxItems": 4,
+                }
+            },
+            "required": ["topics"],
+        },
+        category="system",
+        handler=_not_directly_callable,
+    )

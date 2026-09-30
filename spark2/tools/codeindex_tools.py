@@ -6,9 +6,8 @@
 from __future__ import annotations
 
 import asyncio
-import json
 
-from spark2.tools.base import Tool, ToolContext, resolve_path
+from spark2.tools.base import Tool, ToolContext
 
 
 async def _get_index(ctx: ToolContext) -> dict:

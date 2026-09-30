@@ -97,7 +97,7 @@ async def _run_git(workdir: Path, *args: str, timeout: float = 30.0) -> tuple[in
             stderr=asyncio.subprocess.PIPE,
         )
         out, err = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-    except (asyncio.TimeoutError, OSError) as e:
+    except (TimeoutError, OSError) as e:
         return -1, f"git 执行失败：{e}"
     text = (out + err).decode("utf-8", "replace").strip()
     return proc.returncode, text

@@ -118,6 +118,7 @@ def _defaults() -> dict:
         "protected_paths": [],  # 额外保护路径（list[str]）：这些路径下永远拒绝写入
         "max_turns": 25,  # 单次对话最大工具轮次
         "tool_timeout": 180,  # 单个工具执行超时（秒）
+        "auto_verify": True,  # apply_patch 成功后自动跑 pytest 验证（可关）
         "temperature": "",  # 采样温度；空 = 不传给模型（用服务端默认）
         "max_tokens": "",  # 单次回复最大 tokens；空 = 不传
         "route_enabled": True,  # 多模型路由开关（model_fast 非空时才实际生效）

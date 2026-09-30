@@ -29,7 +29,7 @@ def _collect(sess, loop, seconds=2.5):
         while True:
             try:
                 out.append(await asyncio.wait_for(q.get(), timeout=sec))
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 break
 
     async def main():
@@ -98,6 +98,6 @@ def test_pty_session_isolated_by_sid():
 
 def test_pty_write_to_closed_is_noop():
     m = PtyManager()
-    sess = m.get_or_create("sx", "gone", Path(tempfile.mkdtemp()))
+    _sess = m.get_or_create("sx", "gone", Path(tempfile.mkdtemp()))
     m.close_all()
     assert m.write("sx", "gone", "ls\n") is False  # 已关闭 → no-op 而非抛错

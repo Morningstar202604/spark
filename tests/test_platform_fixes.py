@@ -28,7 +28,6 @@ from spark2.store import SessionStore
 from spark2.tools.base import ToolContext
 from spark2.tools.fs import search, write_file
 
-
 # ---------- 1/2) apply_patch 尾换行与行尾保留 ----------
 
 

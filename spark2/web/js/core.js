@@ -26,7 +26,7 @@ const state = {
 
 /* 跨模块共享的可变运行态：import 绑定只读，可变状态统一放对象属性（可写）。
    当前仅一个成员；后续共享状态都加在这里，避免再出现跨文件顶层 let。 */
-const runtime = { curAssistant: null }; // 当前回合的助手消息元素
+const runtime = { curAssistant: null, pendingImages: [] }; // curAssistant: 当前回合助手消息元素；pendingImages: 输入栏待发送图片（多模态）
 
 let toastTimer;
 function toast(msg) {

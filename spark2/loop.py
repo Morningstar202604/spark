@@ -39,21 +39,23 @@ import uuid
 from pathlib import Path
 
 from spark2.approval import ApprovalGate
+from spark2.compaction import compact_messages, strip_orphans
 from spark2.config import config_dir
+from spark2.execution import ToolExecutor
 from spark2.memory import MemoryStore, make_embedder
+from spark2.prompt import MEMORY_CONTEXT_TEMPLATE, SYSTEM_PROMPT_TEMPLATE
 from spark2.provider import ProviderError, stream_chat
-from spark2.tools import build_registry, tool_schemas
-from spark2.tools.base import Tool, ToolContext
-from spark2.tools.mcp import McpManager
 
 # 兄弟模块（各自只做一件事，见模块 docstring）——同时作为兼容性再导出，
 # 拆分前这些符号就能从 spark2.loop 导入，测试与调用方（web/tui/cli/subagent）无感。
 from spark2.routing import route_model
-from spark2.truncation import _looks_truncated, _TRUNCATION_NUDGE
-from spark2.compaction import compact_messages, strip_orphans as _strip_orphans
-from spark2.prompt import SYSTEM_PROMPT_TEMPLATE, MEMORY_CONTEXT_TEMPLATE
-from spark2.execution import ToolExecutor
+from spark2.tools import build_registry, tool_schemas
+from spark2.tools.base import Tool, ToolContext
+from spark2.tools.mcp import McpManager
+from spark2.truncation import _TRUNCATION_NUDGE, _looks_truncated
 
+# 兼容性再导出：拆分前测试与调用方从 spark2.loop 导入该符号
+_strip_orphans = strip_orphans
 
 DEFAULT_TIMEOUT_S = 180.0
 
@@ -74,6 +76,7 @@ class AgentLoop:
         system_prompt_text: str | None = None,
         tool_timeout: float = DEFAULT_TIMEOUT_S,
         extra_protected: list[str] | None = None,
+        auto_verify: bool = True,
     ) -> None:
         self.workdir = workdir.resolve()
         self.provider_cfg = dict(provider_cfg)
@@ -84,6 +87,7 @@ class AgentLoop:
         self.tool_timeout = float(tool_timeout)
         self._extra_protected = list(extra_protected or [])
         self.cancel_event = cancel_event or asyncio.Event()
+        self.auto_verify = auto_verify
         self.system_prompt_text = system_prompt_text
         self.memory = memory or MemoryStore(embedder=make_embedder(self.provider_cfg))
         self.mcp = mcp
@@ -107,6 +111,7 @@ class AgentLoop:
             log_path=self.log_path,
             provider_cfg=self.provider_cfg,
             extra_protected=self._extra_protected,
+            auto_verify=self.auto_verify,
         )
 
     def _protected_paths(self) -> list[Path]:
@@ -135,6 +140,13 @@ class AgentLoop:
             if m.get("role") == "user" and m.get("content"):
                 user_text = m["content"]
                 break
+        # 多模态消息（content 为 list）只取文本部分做记忆检索
+        if isinstance(user_text, list):
+            user_text = " ".join(
+                str(p.get("text") or "")
+                for p in user_text
+                if isinstance(p, dict) and p.get("type") == "text" and p.get("text")
+            ).strip()
         if not user_text:
             return None
         try:

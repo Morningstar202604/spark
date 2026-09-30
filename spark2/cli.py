@@ -15,15 +15,12 @@ from spark2.approval import ApprovalGate
 from spark2.config import (
     APPROVAL_MODES,
     PRESETS,
-    apply_preset,
     config_file,
     load_config,
     mask_key,
 )
 from spark2.loop import AgentLoop
-from spark2.provider import ProviderError, test_connection
-from spark2.store import SessionStore
-from spark2.tools import build_registry, tool_schemas
+from spark2.provider import test_connection
 from spark2.tools.mcp import McpManager, servers_from_cfg
 
 app = typer.Typer(add_completion=False, help="Spark Agent 重构版 —— 本地 AI 编程助手")
@@ -103,7 +100,7 @@ def run(
     wd = Path(workdir).expanduser().resolve()
     if not wd.exists():
         typer.secho(f"工作目录不存在：{wd}", fg=typer.colors.RED)
-        raise typer.Exit(1)
+        raise typer.Exit(1) from None
     gate = StdinGate(mode=approval if approval in APPROVAL_MODES else "suggest")
     provider_cfg = {
         "base_url": cfg.get("base_url", ""),
@@ -175,7 +172,7 @@ def tui() -> None:
             'TUI 缺少依赖：pip install "spark-agent[dev]" 或 pip install "textual>=0.60"',
             fg=typer.colors.RED,
         )
-        raise typer.Exit(1)
+        raise typer.Exit(1) from None
     tui_main(load_config())
 
 

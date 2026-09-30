@@ -232,7 +232,7 @@ def apply_to_text(old_text: str, hunks: list[Hunk]) -> str:
                 if src[ptr] != text:
                     raise PatchError(
                         _mismatch_msg(
-                            f"上下文不匹配（要删除的行对不上）", src, ptr, text, h.old_start
+                            "上下文不匹配（要删除的行对不上）", src, ptr, text, h.old_start
                         )
                     )
                 ptr += 1
@@ -281,7 +281,7 @@ def _read_file_safe(p: Path) -> str:
     try:
         return p.read_text(encoding="utf-8", errors="replace")
     except OSError as e:
-        raise PatchError(f"读取文件失败 {p}：{e}")
+        raise PatchError(f"读取文件失败 {p}：{e}") from e
 
 
 def detect_newline(p: Path) -> str:
@@ -337,7 +337,7 @@ def apply_patch(
         except OSError as e:
             # 前面的文件已写盘——按"整体拒绝"原则应尽量原子，但文件系统无法事务；
             # 说明已应用的部分，避免静默。
-            raise PatchError(f"写入失败 {f.target}：{e}（此前文件已应用，可手动回滚）")
+            raise PatchError(f"写入失败 {f.target}：{e}（此前文件已应用，可手动回滚）") from e
         changes.append(
             {
                 "path": str(

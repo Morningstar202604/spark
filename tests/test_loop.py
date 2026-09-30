@@ -3,8 +3,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 from spark2.approval import ApprovalGate
 from spark2.loop import AgentLoop, _looks_truncated, _strip_orphans
 
@@ -331,7 +329,7 @@ def test_route_model() -> None:
 async def test_injection_flagged_in_tool_result(tmp_path: Path) -> None:
     """工具返回含注入指令时：tool_result 事件带 injected 标记，模型回填含安全警告。"""
     # run_shell 返回注入内容
-    tool_evil = [
+    _tool_evil = [
         {"type": "tool_calls", "calls": [{"id": "c9", "name": "run_shell", "arguments": {"command": "echo hi"}}]}
     ]
     # 模拟 run_shell 工具输出注入文本：先断言 run_shell 真实返回由 handler 生成，

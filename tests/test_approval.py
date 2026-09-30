@@ -5,8 +5,8 @@ import asyncio
 from pathlib import Path
 
 from spark2.approval import ApprovalGate
-from spark2.tools.base import Tool
 from spark2.tools import build_registry
+from spark2.tools.base import Tool
 
 
 def _tool(name: str, category: str) -> Tool:

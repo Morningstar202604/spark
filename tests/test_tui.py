@@ -58,7 +58,7 @@ async def _submit(app: SparkTui, text: str) -> None:
 async def test_tui_demo_message(tmp_path: Path) -> None:
     cfg = _cfg(tmp_path)
     app = SparkTui(cfg=cfg, store=SessionStore(root=tmp_path / "sessions"), memory=MemoryStore(path=tmp_path / "mem.db"))
-    async with app.run_test() as pilot:
+    async with app.run_test() as _pilot:
         assert app.sid is not None  # 自动建了会话
         await _submit(app, "你好，介绍一下")
         ok = await _wait_for(app, "演示模式")

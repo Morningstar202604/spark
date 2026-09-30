@@ -4,7 +4,6 @@ from __future__ import annotations
 from pathlib import Path
 
 from spark2.plugins import collect_plugin_tools, load_plugins
-from spark2.tools.base import Tool
 
 
 def _write_plugin(d: Path, name: str, code: str) -> Path:

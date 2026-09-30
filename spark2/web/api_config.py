@@ -5,20 +5,13 @@
 
 from __future__ import annotations
 
-import asyncio
-from pathlib import Path
-
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, Request
 
 from spark2.config import PRESETS, apply_preset, save_config
 from spark2.memory import MemoryStore, make_embedder
 from spark2.provider import test_connection
 
-from fastapi import Depends
-
-from fastapi import Depends
-
-from .api_common import AppState, check_token, get_app_state, config_payload, get_app_state
+from .api_common import AppState, check_token, config_payload, get_app_state
 
 router = APIRouter()
 

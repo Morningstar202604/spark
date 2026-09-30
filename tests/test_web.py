@@ -254,3 +254,82 @@ def test_connection_test_endpoint(tmp_path: Path) -> None:
                     json={"base_url": "", "model": "mock", "api_key": ""})
     assert r.status_code == 200
     assert r.json()["ok"] is True
+
+
+def test_chat_stream_with_images_multimodal(tmp_path: Path, monkeypatch) -> None:
+    """多模态识图：body 带 images（base64）时，落盘与发给模型的消息为 OpenAI 兼容 content list。"""
+    captured: list[list[dict]] = []
+
+    async def fake_stream_chat(cfg, messages, tools=None, max_delta=None):
+        captured.append([dict(m) for m in messages])
+        yield {"type": "text", "text": "这是 PNG 图片，内容是登录页设计稿。"}
+        yield {"type": "usage", "estimated": 10, "prompt_tokens": 8, "completion_tokens": 2, "model": "mock"}
+
+    monkeypatch.setattr("spark2.loop.stream_chat", fake_stream_chat)
+    client, state = _client(tmp_path)
+    r = client.post("/api/sessions", headers={"X-Spark-Token": TOKEN}, json={"workdir": str(tmp_path)})
+    sid = r.json()["id"]
+    b64 = "aGVsbG8="  # "hello" 的 base64，占位图片数据
+    with client.stream(
+        "POST",
+        "/api/chat/stream",
+        headers={"X-Spark-Token": TOKEN},
+        json={
+            "session_id": sid,
+            "prompt": "帮我看看这张设计稿",
+            "images": [{"data": b64, "mime": "image/png"}],
+        },
+    ) as resp:
+        assert resp.status_code == 200
+        for _ in resp.iter_lines():
+            pass
+    # 落盘消息为 content list（text + image_url）
+    msgs = state.store.messages(sid)
+    assert isinstance(msgs[0]["content"], list)
+    assert msgs[0]["content"][0] == {"type": "text", "text": "帮我看看这张设计稿"}
+    assert msgs[0]["content"][1]["type"] == "image_url"
+    assert msgs[0]["content"][1]["image_url"]["url"].startswith("data:image/png;base64,")
+    # 发给模型的 payload 同样包含 image_url
+    assert captured
+    user_msg = next(m for m in captured[0] if m["role"] == "user")
+    assert isinstance(user_msg["content"], list)
+    assert any(p.get("type") == "image_url" for p in user_msg["content"])
+
+
+def test_chat_stream_rejects_too_many_images(tmp_path: Path) -> None:
+    """图片上限：超过 3 张拒绝。"""
+    client, state = _client(tmp_path)
+    r = client.post("/api/sessions", headers={"X-Spark-Token": TOKEN}, json={"workdir": str(tmp_path)})
+    sid = r.json()["id"]
+    imgs = [{"data": "eA==", "mime": "image/png"}] * 4
+    r = client.post(
+        "/api/chat/stream",
+        headers={"X-Spark-Token": TOKEN},
+        json={"session_id": sid, "prompt": "x", "images": imgs},
+    )
+    assert r.status_code == 400
+
+
+def test_mock_chat_accepts_content_list(tmp_path: Path) -> None:
+    """mock provider 对 content list（多模态消息）不崩溃且正确取文本。"""
+    from spark2.provider import stream_chat
+
+    async def run():
+        cfg = {"model": "mock", "mock_script": None}
+        msgs = [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "帮我看看这张图"},
+                    {"type": "image_url", "image_url": {"url": "data:image/png;base64,eA=="}},
+                ],
+            }
+        ]
+        out = []
+        async for ev in stream_chat(cfg, msgs, tools=None):
+            out.append(ev)
+        return out
+
+    evs = asyncio.run(run())
+    texts = [e.get("text", "") for e in evs if e["type"] == "text"]
+    assert texts and "演示模式" in texts[0]

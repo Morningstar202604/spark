@@ -53,8 +53,8 @@ def _user_name() -> str:
 def test_doctor_perm_check_on_windows(tmp_path, monkeypatch) -> None:
     """doctor 的权限自检在 Windows 上应反映 ACL 状态（收紧后为 True）。"""
     monkeypatch.setenv("SPARK2_HOME", str(tmp_path))
-    from spark2.config import _defaults, save_config
     from spark2.cli import _perm_ok
+    from spark2.config import _defaults, save_config
 
     cfg = _defaults()
     save_config(cfg)

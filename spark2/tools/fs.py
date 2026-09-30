@@ -9,7 +9,6 @@ from __future__ import annotations
 import asyncio
 import difflib
 import shutil
-from pathlib import Path
 
 from spark2.patch_apply import detect_newline
 from spark2.tools.base import Tool, ToolContext, is_within, resolve_path
@@ -50,12 +49,12 @@ async def write_file(args: dict, ctx: ToolContext) -> str:
     p = resolve_path(raw, ctx.workdir)
     if p.is_dir():
         return f"错误：{p} 是目录，不能写入"
-    old = ""
+    # 目标文件已存在时先校验可读（不可读则拒绝，避免写坏后无法恢复）
     if p.exists():
         try:
-            old = p.read_text(encoding="utf-8", errors="replace")
+            p.read_text(encoding="utf-8", errors="replace")
         except OSError:
-            old = ""
+            return f"错误：无法读取已有文件 {p}"
     try:
         p.parent.mkdir(parents=True, exist_ok=True)
         # 行尾一致性：先把内容行尾统一为 \n，再按目标文件既有约定写出
@@ -136,7 +135,7 @@ async def search(args: dict, ctx: ToolContext) -> str:
                 stderr=asyncio.subprocess.PIPE,
             )
             out, err = await asyncio.wait_for(proc.communicate(), timeout=30)
-        except (asyncio.TimeoutError, OSError) as e:
+        except (TimeoutError, OSError) as e:
             return f"错误：搜索失败 {e}"
         text = out.decode("utf-8", "replace")
         if proc.returncode not in (0, 1):

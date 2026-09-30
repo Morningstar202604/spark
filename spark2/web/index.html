@@ -66,7 +66,8 @@
   <!-- 输入栏 -->
   <div class="inputbar">
     <div class="ibox">
-      <textarea id="input" placeholder="描述你想做的事，例如：帮我修一下登录接口的 bug…（输入 @ 引用工作目录文件）" rows="1"></textarea>
+      <textarea id="input" placeholder="描述你想做的事，例如：帮我修一下登录接口的 bug…（输入 @ 引用工作目录文件；可直接粘贴/拖入图片，最多 3 张）" rows="1"></textarea>
+      <div id="imgPreview" class="imgpreview" hidden></div>
       <div id="atPop" role="listbox"></div>
       <button class="sendbtn" id="btnSend">发送</button>
     </div>
@@ -130,6 +131,7 @@
         <div class="advgrid">
           <div class="field"><label>最大工具轮次</label><input id="fMaxTurns" type="number" min="1" max="200" /></div>
           <div class="field"><label>工具超时（秒）</label><input id="fToolTimeout" type="number" min="10" max="3600" /></div>
+          <div class="field"><label class="chk"><input type="checkbox" id="fAutoVerify" /> 改完自动验证 <span class="opt">apply_patch 成功后自动跑项目测试（pytest，120s 上限）</span></label></div>
         </div>
         <div class="field"><label>额外保护路径 <span class="opt">可选，一行一个</span></label>
           <textarea id="fProtPaths" placeholder="D:\重要资料&#10;/etc/nginx" class="sm"></textarea>

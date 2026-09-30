@@ -1,7 +1,6 @@
 """检查点测试：git 探测、自动提交、reset 回滚。"""
 from __future__ import annotations
 
-import asyncio
 import shutil
 import subprocess
 from pathlib import Path

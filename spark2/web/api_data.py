@@ -8,9 +8,7 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException, Request
-
-from fastapi import Depends
+from fastapi import APIRouter, Depends, HTTPException, Request
 
 from .api_common import AppState, check_token, get_app_state, json_body, session_workdir
 
@@ -76,7 +74,7 @@ async def fs_list(request: Request, state: AppState = Depends(get_app_state)) ->
     try:
         target = (base / rel).resolve() if rel else base
     except OSError as exc:
-        raise HTTPException(status_code=400, detail=f"路径无效：{exc}")
+        raise HTTPException(status_code=400, detail=f"路径无效：{exc}") from exc
     if target != base and base not in target.parents:
         raise HTTPException(status_code=400, detail="工作目录之外的路径")
     if not target.exists() or not target.is_dir():
@@ -95,7 +93,7 @@ async def fs_list(request: Request, state: AppState = Depends(get_app_state)) ->
             if len(entries) >= 300:
                 break
     except OSError as exc:
-        raise HTTPException(status_code=500, detail=f"目录读取失败：{exc}")
+        raise HTTPException(status_code=500, detail=f"目录读取失败：{exc}") from exc
     rel_out = str(target.relative_to(base)) if target != base else ""
     return {"workdir": str(base), "path": rel_out, "entries": entries}
 
