@@ -21,6 +21,10 @@ Spark is a **local-first AI coding agent** rebuilt from the ground up — no Ele
 
 One file frontend. One process. One `pip install`. Everything lives under `~/.spark2/`.
 
+> Keywords: AI coding assistant · agent · CLI · approval gate · prompt injection protection ·
+> local memory · MCP · Chinese LLMs (DeepSeek, Qwen, GLM, Kimi, Doubao, Unisound, Ollama) ·
+> SSE streaming · Web Components · zero-Electron
+
 > ✨ **Stand-out vs. other AI agents:** opencode, ZCode and Codex CLI all ship without built-in prompt-injection defense and cross-session semantic memory. Spark ships **both** — plus a lightweight plugin point, local code indexing and a cost dashboard.
 
 ---

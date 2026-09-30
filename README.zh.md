@@ -9,8 +9,9 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-14b8a6.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-0f766e.svg)]()
 [![Tests](https://img.shields.io/badge/tests-216%20passed-14b8a6.svg)]()
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
-[English](README.md) · **中文**
+[English](README.md) · **中文** · [日本語](README.ja.md) · [Español](README.es.md)
 
 </div>
 
