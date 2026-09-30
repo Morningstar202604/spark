@@ -197,6 +197,7 @@ function bind() {
    统一用 typeof eval(fn) 沿作用域链检查（fn 来自下方硬编码白名单，无注入面）。 */
 const __DEP_REQS = {
   "core": ["state", "api", "esc", "toast", "$", "$$", "applyTheme", "initTheme", "openModal", "updateRunningUI"],
+  "components": ["SparkMsg", "SparkToolCard", "SparkSessionCard", "SparkMcpRow", "SparkMemRow", "SparkGitRow"],
   "render": ["mdToHtml", "addUserMsg", "newAssistant", "errorMsg", "showEmptyIfNeeded", "autoScroll", "bindScrollStick"],
   "sessions": ["loadSessions", "selectSession", "renderHistory", "newSession", "showEmptyIfNeeded"],
   "sse": ["send", "handleEvent"],

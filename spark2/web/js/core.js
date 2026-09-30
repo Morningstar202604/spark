@@ -1,7 +1,10 @@
 /* core.js —— 全局状态、通用工具、主题、运行状态管理 */
 "use strict";
 
-const $ = s => document.querySelector(s);
+/* 元素缓存：只缓存「引用稳定」的静态容器（msgList/chat/input 等）；
+   动态重绘的列表内容不经过 $，由各渲染函数直接管理。 */
+const _domCache = {};
+const $ = s => _domCache[s] || (_domCache[s] = document.querySelector(s));
 const $$ = s => Array.from(document.querySelectorAll(s));
 
 // 令牌来源优先级：URL ?token=（spark2 web 打印的地址）> localStorage。

@@ -41,21 +41,26 @@ function renderSessions() {
 }
 
 function sessCard(s) {
-  const b = document.createElement("div"); b.className = "sess" + (s.id === state.sid ? " active" : "");
+  const card = document.createElement("spark-session-card");
   const run = isSidRunning(s.id);
-  const stopBtn = run
-    ? '<button class="mini stop" data-stop="' + esc(s.id) + '" title="停止该会话">■ 停止</button>'
-    : "";
-  b.innerHTML =
-    '<div class="t">' + esc(s.title) + (run ? ' <span class="rind" title="正在运行">● 运行中</span>' : "") + '</div>' +
-    '<div class="s">' + fmtTime(s.updated) + ' · ' + s.messages + " 条消息</div>" +
-    '<div class="w">' + esc(s.workdir || "") + '</div>' +
-    '<div class="srow">' + stopBtn +
-    '<button class="mini" data-act="rename">重命名</button><button class="mini" data-act="fork">分叉</button>' +
-    '<button class="mini" data-act="export">导出</button><button class="del" data-del="1">删除</button></div>';
-  b.querySelector(".t").onclick = () => selectSession(s.id);
-  b.querySelector("[data-stop]").onclick = e => { e.stopPropagation(); cancelSession(s.id); };
-  b.querySelector("[data-act=rename]").onclick = async () => {
+  card.setData({
+    title: s.title,
+    sub: fmtTime(s.updated) + " · " + s.messages + " 条消息",
+    workdir: s.workdir || "",
+    running: run,
+    active: s.id === state.sid,
+    actions: [
+      run ? { label: "■ 停止", kind: "stop", fn: () => cancelSession(s.id) } : null,
+      { label: "重命名", kind: "", fn: renameSession },
+      { label: "分叉", kind: "", fn: forkSession },
+      { label: "导出", kind: "", fn: exportSession },
+      { label: "删除", kind: "del", fn: deleteSession },
+    ].filter(Boolean),
+    onSelect: () => selectSession(s.id),
+  });
+  return card;
+
+  async function renameSession() {
     const title = prompt("会话新标题（留空取消）", s.title);
     if (!title) return;
     try {
@@ -65,8 +70,8 @@ function sessCard(s) {
       if (state.sid === s.id) $("#sessionLine").textContent = title.trim().slice(0, 60) + " · " + (s.workdir || "");
       await loadSessions(true);
     } catch (err) { toast("重命名失败"); }
-  };
-  b.querySelector("[data-act=export]").onclick = async () => {
+  }
+  async function exportSession() {
     try {
       const r = await api("/api/sessions/" + s.id);
       const d = await r.json();
@@ -83,8 +88,8 @@ function sessCard(s) {
       URL.revokeObjectURL(a.href);
       toast("已导出 Markdown");
     } catch (err) { toast("导出失败"); }
-  };
-  b.querySelector("[data-act=fork]").onclick = async () => {
+  }
+  async function forkSession() {
     try {
       const r = await api("/api/sessions/" + s.id + "/fork", { method: "POST" });
       if (!r.ok) { toast("分叉失败"); return; }
@@ -93,9 +98,8 @@ function sessCard(s) {
       await loadSessions(true);
       selectSession(meta.id);
     } catch (err) { toast("分叉失败"); }
-  };
-  b.querySelector(".del").onclick = async e => {
-    e.stopPropagation();
+  }
+  async function deleteSession() {
     if (!confirm("删除会话「" + s.title + "」？此操作不可恢复。")) return;
     try {
       const r = await api("/api/sessions/" + s.id, { method: "DELETE" });
@@ -104,8 +108,7 @@ function sessCard(s) {
       if (state.sid === s.id) { state.sid = null; $("#msgList").innerHTML = ""; curAssistant = null; showEmptyIfNeeded(); updateRunningUI(); }
       await loadSessions(true);
     } catch (err) { toast("删除失败"); }
-  };
-  return b;
+  }
 }
 
 async function cancelSession(sid) {

@@ -12,8 +12,8 @@ async function loadMemory() {
   if (!data.items.length) { box.innerHTML = '<div class="memempty">还没有记忆。对话里说「记住 XX 是 YY」，Agent 就会记在这里。</div>'; return; }
   box.innerHTML = "";
   for (const it of data.items) {
-    const d = document.createElement("div"); d.className = "mem";
-    d.innerHTML = '<span class="mk">' + esc(it.key) + '</span><span class="mv">' + esc(it.value) + '</span><span class="md">' + fmtTime(it.created_at) + '</span><button data-edit="' + it.id + '" title="修改内容">编辑</button><button data-id="' + it.id + '">删除</button>';
+    const d = document.createElement("spark-mem-row");
+    d.setData(it);
     box.appendChild(d);
   }
   box.querySelectorAll("button[data-id]").forEach(b => b.onclick = async () => {

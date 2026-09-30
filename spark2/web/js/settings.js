@@ -5,8 +5,9 @@
 "use strict";
 
 /* ---------- 抽屉通用 ---------- */
-function openDrawer(id) { $("#" + id).classList.add("open"); $("#ov" + id.replace("drawer", "")).style.display = "block"; }
-function closeDrawer(id) { $("#" + id).classList.remove("open"); $("#ov" + id.replace("drawer", "")).style.display = "none"; }
+function _overlay(id) { return document.querySelector('.overlay[data-for="' + id + '"]'); }
+function openDrawer(id) { $("#" + id).classList.add("open"); const ov = _overlay(id); if (ov) ov.style.display = "block"; }
+function closeDrawer(id) { $("#" + id).classList.remove("open"); const ov = _overlay(id); if (ov) ov.style.display = "none"; }
 
 /* 打开设置抽屉并激活指定面板（供首屏引导直达） */
 function openPane(paneId) {

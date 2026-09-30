@@ -82,7 +82,7 @@
 </div>
 
 <!-- 会话抽屉（搜索 + 按工作目录分组） -->
-<div class="overlay" id="ovSessions"></div>
+<div class="overlay" id="ovSessions" data-for="drawerSessions"></div>
 <div class="drawer" id="drawerSessions">
   <div class="dhead"><span>会话</span><span class="sp"></span><button class="iconbtn" data-close="drawerSessions">关闭</button></div>
   <div class="dbody">
@@ -93,7 +93,7 @@
 </div>
 
 <!-- 设置抽屉 -->
-<div class="overlay" id="ovSettings"></div>
+<div class="overlay" id="ovSettings" data-for="drawerSettings"></div>
 <div class="drawer wide" id="drawerSettings">
   <div class="dhead"><span>设置</span><span class="sp"></span><button class="iconbtn" data-close="drawerSettings">关闭</button></div>
   <div class="dbody setbody">
@@ -223,7 +223,7 @@
 </div>
 
 <!-- 用量统计抽屉 -->
-<div class="overlay" id="ovUsage"></div>
+<div class="overlay" id="ovUsage" data-for="drawerUsage"></div>
 <div class="drawer" id="drawerUsage">
   <div class="dhead"><span>用量统计</span><span class="sp"></span><button class="iconbtn" data-close="drawerUsage">关闭</button></div>
   <div class="dbody">
@@ -232,7 +232,7 @@
 </div>
 
 <!-- 检查点抽屉（git 状态 / 手动存档 / 回滚） -->
-<div class="overlay" id="ovGit"></div>
+<div class="overlay" id="ovGit" data-for="drawerGit"></div>
 <div class="drawer" id="drawerGit">
   <div class="dhead"><span>检查点（git）</span><span class="sp"></span><button class="iconbtn" data-close="drawerGit">关闭</button></div>
   <div class="dbody">
@@ -282,8 +282,23 @@
 
 <div id="toast"></div>
 
+<!-- ============ 组件模板（Web Components，light DOM）
+     结构集中于此；js/components.js 注册自定义元素并 clone 这些模板，
+     渲染层不再拼长 HTML 字符串。 ============ -->
+<template id="tpl-msg-user"><div class="msg user"></div></template>
+<template id="tpl-msg-assistant"><div class="msg assistant"><div class="text"></div><button class="copy" title="复制内容" aria-label="复制内容"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button></div></template>
+<template id="tpl-msg-error"><div class="msg error"></div></template>
+<template id="tpl-tool-card"><div class="tool"><div class="thead"><span class="status">⏳</span><span class="tname"></span><span class="tsum"></span><span class="tdur"></span></div><div class="tbody"><pre class="out"></pre></div></div></template>
+<template id="tpl-plan-card"><div class="plan"><div class="pt">计划</div><ol></ol></div></template>
+<template id="tpl-think"><details class="think"><summary>思考过程</summary><pre></pre></details></template>
+<template id="tpl-session-card"><div class="sess"><div class="t"></div><div class="s"></div><div class="w"></div><div class="srow"></div></div></template>
+<template id="tpl-mcp-row"><div class="mcprow"><div class="mcphead"><input data-k="name" placeholder="名称，如 filesystem"><select data-k="transport"><option value="stdio">本地进程</option><option value="http">远程 HTTP</option></select><button class="del" title="删除">✕</button></div><div class="mcplines" data-k="stdioLines"><input data-k="command" placeholder="命令，如 npx / python"><input data-k="args" placeholder="参数，空格分隔，如 -y @modelcontextprotocol/server-filesystem /path"></div><div class="mcplines" data-k="httpLines"><input data-k="url" placeholder="https://mcp.example.com/mcp"><input data-k="headers" placeholder='请求头 JSON，如 {"Authorization":"Bearer xxx"}'></div><div class="mcpdesc"></div></div></template>
+<template id="tpl-mem-row"><div class="mem"><span class="mk"></span><span class="mv"></span><span class="md"></span><button data-edit title="修改内容">编辑</button><button data-id title="删除">删除</button></div></template>
+<template id="tpl-git-row"><div class="gitrow"><span class="gh"></span><span class="gt"></span><span class="gm"></span><button class="del">回滚</button></div></template>
+
 <!-- 无构建、按依赖顺序加载的轻量模块 -->
 <script src="js/core.js"></script>
+<script src="js/components.js"></script>
 <script src="js/render.js"></script>
 <script src="js/sessions.js"></script>
 <script src="js/sse.js"></script>

@@ -19,12 +19,10 @@ async function loadGit() {
   if (!data.checkpoints.length) { list.innerHTML = '<div class="memempty">还没有检查点，点上面「存档当前」。</div>'; return; }
   list.innerHTML = "";
   data.checkpoints.forEach((c, i) => {
-    const d = document.createElement("div"); d.className = "gitrow";
-    d.innerHTML = '<span class="gh">' + esc(c.hash) + '</span><span class="gt">' + esc(c.time) + '</span><span class="gm">' + esc(c.message) + '</span>' +
-      (i === 0 ? '<button class="del" title="回滚到该存档">回滚</button>' : "");
+    const d = document.createElement("spark-git-row");
+    d.setData(c, i === 0 ? () => doGitReset() : null);
     list.appendChild(d);
   });
-  list.querySelectorAll("button.del").forEach(b => b.onclick = () => doGitReset());
 }
 async function doCheckpoint() {
   if (!state.sid) { toast("先新建或选择会话"); return; }
