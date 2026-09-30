@@ -29,7 +29,7 @@ build-backend = "setuptools.build_meta"
 include = ["spark2*"]
 
 [tool.setuptools.package-data]
-spark2 = ["web/index.html"]
+spark2 = ["web/**/*"]   # 含 css/js/vendor/NOTICE：缺了前端资源，pip 安装后页面会 404
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
