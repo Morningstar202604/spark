@@ -93,7 +93,18 @@ PRESETS: dict[str, dict] = {
     },
 }
 
-APPROVAL_MODES = ("suggest", "auto-edit", "full-auto")
+APPROVAL_MODES = ("suggest", "auto-edit", "full-auto", "plan")
+
+# 环境变量密钥映射：provider → 常见 <PROVIDER>_API_KEY（与主流 agent 生态一致）。
+_PROVIDER_ENV: dict[str, str] = {
+    "deepseek": "DEEPSEEK_API_KEY",
+    "deepseek-flash": "DEEPSEEK_API_KEY",
+    "qwen": "DASHSCOPE_API_KEY",
+    "glm": "ZHIPU_API_KEY",
+    "kimi": "MOONSHOT_API_KEY",
+    "doubao": "ARK_API_KEY",
+    "ollama": "OLLAMA_API_KEY",
+}
 
 
 def _defaults() -> dict:
@@ -124,6 +135,7 @@ def _defaults() -> dict:
         "route_enabled": True,  # 多模型路由开关（model_fast 非空时才实际生效）
         "route_keywords": "",  # 自定义"强任务"关键词（逗号/空格/换行分隔）；空 = 内置词表
         "usage_pricing": {},  # 成本单价覆盖：{模型名: {"input": 元/M, "output": 元/M}}
+        "proxy": "",  # HTTP(S) 代理，如 http://127.0.0.1:7890；空 = 不设代理（尊重环境变量）
     }
 
 
@@ -152,6 +164,16 @@ def load_config() -> dict:
     # 访问令牌默认空 = 本机免登录（服务只绑 127.0.0.1）。
     # 用户可在设置里显式开启；开启后所有请求必须携带。
     cfg["token"] = str(cfg.get("token") or "").strip()
+    # API Key 环境变量回退（对标主流 agent：CLAUDE_API_KEY / OPENAI_API_KEY 等）：
+    # 配置里没填密钥时，依次读 SPARK_API_KEY → <provider>_API_KEY。
+    # 来自环境变量的密钥打运行时标记，保存设置时不会被写盘固化。
+    if not str(cfg.get("api_key") or "").strip():
+        env_key = os.environ.get("SPARK_API_KEY") or ""
+        if not env_key:
+            env_key = os.environ.get(_PROVIDER_ENV.get(str(cfg.get("provider") or ""), "")) or ""
+        if env_key:
+            cfg["api_key"] = env_key.strip()
+            cfg["_env_api_key"] = True
     return cfg
 
 
@@ -161,7 +183,9 @@ def save_config(cfg: dict) -> None:
     doc = tomlkit.document()
     for k, v in cfg.items():
         # 仅持久化 TOML 基础类型与白名单容器（数组的表 / 表）；
-        # 运行时字段（如 mock_script）不写盘。
+        # 运行时字段（如 mock_script、_env_api_key 标记）不写盘。
+        if k.startswith("_"):
+            continue
         if v is None:
             continue
         if isinstance(v, dict):

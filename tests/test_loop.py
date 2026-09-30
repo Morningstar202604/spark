@@ -361,3 +361,32 @@ async def test_injection_flagged_in_tool_result(tmp_path: Path) -> None:
     # 模型回填消息也带警告
     tool_msg = next(m for m in messages if m["role"] == "tool")
     assert "安全警告" in tool_msg["content"]
+
+
+async def test_plan_mode_denies_write_without_approval(tmp_path: Path) -> None:
+    """plan 只读模式：write_file 被直接拒绝并告知模型，不触发审批弹窗。"""
+    script = [TOOL_WRITE, TEXT_DONE]
+    loop = AgentLoop(tmp_path, _mk_cfg(*script), ApprovalGate(mode="plan"))
+    evs = await _collect(loop, [{"role": "user", "content": "改一下"}] )
+    # 不弹审批
+    assert not any(e["type"] == "approval" for e in evs)
+    # 有工具结果事件，且内容包含只读拒绝理由
+    tres = [e for e in evs if e["type"] == "tool_result"]
+    assert tres
+    assert any("只读" in (e.get("output") or "") for e in tres)
+
+
+async def test_claude_md_injected_into_system_prompt(tmp_path: Path) -> None:
+    """项目级指令文件：工作目录存在 CLAUDE.md 时追加到系统提示词。"""
+    (tmp_path / "CLAUDE.md").write_text(
+        "本项目用 Vue3 + FastAPI。禁止使用 class 组件。", encoding="utf-8"
+    )
+    loop = AgentLoop(tmp_path, _mk_cfg(TEXT_DONE), ApprovalGate(mode="suggest"))
+    sp = loop.system_prompt()
+    assert "CLAUDE.md" in sp
+    assert "禁止使用 class 组件" in sp
+
+
+async def test_claude_md_absent_keeps_prompt_clean(tmp_path: Path) -> None:
+    loop = AgentLoop(tmp_path, _mk_cfg(TEXT_DONE), ApprovalGate(mode="suggest"))
+    assert "CLAUDE.md" not in loop.system_prompt()

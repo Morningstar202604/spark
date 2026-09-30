@@ -33,6 +33,7 @@ async def set_config(request: Request, state: AppState = Depends(get_app_state))
         apply_preset(state.cfg, new_provider)
     for k in (
         "base_url",
+        "proxy",
         "model",
         "workdir",
         "approval_mode",
@@ -179,7 +180,7 @@ async def test(request: Request, state: AppState = Depends(get_app_state)) -> di
     check_token(request, state)
     body = await request.json()
     probe = dict(state.cfg)
-    for k in ("base_url", "model"):
+    for k in ("base_url", "model", "proxy"):
         if body.get(k):
             probe[k] = body[k]
     key = body.get("api_key")

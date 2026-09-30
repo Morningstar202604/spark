@@ -39,6 +39,8 @@ class ApprovalGate:
         - 受保护路径 → 永远 deny；
         - 工作区之外写入 → 永远 ask（即使 always / full-auto 也逐次确认）。
         """
+        if self.mode == "plan" and tool.category in ("write", "shell"):
+            return "deny", "只读分析模式（Plan）：写文件与执行命令已禁用"
         if tool.category == "write":
             p = self._target_path(args, workdir)
             if p is not None:

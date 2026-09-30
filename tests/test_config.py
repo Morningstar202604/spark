@@ -34,6 +34,31 @@ def test_defaults_have_mcp_and_token(tmp_path) -> None:
     assert cfg["mcp_servers"] == []
     assert "token" in cfg
     assert cfg["approval_mode"] == "suggest"
+    assert cfg["proxy"] == ""
+    assert "plan" in __import__("spark2.config", fromlist=["APPROVAL_MODES"]).APPROVAL_MODES
+
+
+def test_api_key_env_fallback(tmp_path, monkeypatch) -> None:
+    """配置未填密钥时，依次回退 SPARK_API_KEY / <provider>_API_KEY。"""
+    monkeypatch.setenv("SPARK2_HOME", str(tmp_path))
+    monkeypatch.delenv("SPARK_API_KEY", raising=False)
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+    # 无任何 env：api_key 保持空
+    assert load_config()["api_key"] == ""
+    # SPARK_API_KEY 优先
+    monkeypatch.setenv("SPARK_API_KEY", "sk-spark-env")
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-ds-env")
+    cfg = load_config()
+    assert cfg["api_key"] == "sk-spark-env"
+    assert cfg.get("_env_api_key") is True
+    # 去掉 SPARK_ 后走 provider 专属变量（配置文件 provider=deepseek）
+    monkeypatch.delenv("SPARK_API_KEY")
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-ds-env")
+    cfg = _defaults()
+    cfg["provider"] = "deepseek"
+    save_config(cfg)
+    cfg2 = load_config()
+    assert cfg2["api_key"] == "sk-ds-env"
 
 
 def test_save_load_roundtrip_mcp_servers(tmp_path, monkeypatch) -> None:

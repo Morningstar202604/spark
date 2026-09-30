@@ -89,6 +89,12 @@ def _opt_int(v) -> int | None:
         return None
 
 
+def _client_proxy(cfg: dict) -> str | None:
+    """HTTP(S) 代理：优先配置 proxy 字段；未设时交给 httpx trust_env 尊重环境变量。"""
+    p = str(cfg.get("proxy") or "").strip()
+    return p or None
+
+
 def _heuristic_summary(messages: list[dict], max_chars: int = 1200) -> str:
     """无模型时的启发式摘要：拼接每条消息的角色与开头内容。"""
     parts = []
@@ -140,7 +146,7 @@ async def summarize_messages(cfg: dict, messages: list[dict]) -> str:
     }
     headers = {"Authorization": f"Bearer {cfg.get('api_key', '')}"}
     try:
-        async with httpx.AsyncClient(timeout=httpx.Timeout(60, connect=20)) as client:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(60, connect=20), proxy=_client_proxy(cfg)) as client:
             resp = await client.post(url, json=payload, headers=headers)
             if resp.status_code >= 400:
                 return "（早期对话摘要）" + _heuristic_summary(messages)
@@ -222,7 +228,7 @@ async def stream_chat(
         out_tokens = 0
         finish_reason: str | None = None
         real_prompt = real_completion = None
-        async with httpx.AsyncClient(timeout=httpx.Timeout(300, connect=30)) as client:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(300, connect=30), proxy=_client_proxy(cfg)) as client:
             async with client.stream(
                 "POST", url, json=payload, headers=headers
             ) as resp:

@@ -54,6 +54,20 @@ def test_decide_write_protected_denies(tmp_path: Path) -> None:
     assert "保护" in reason
 
 
+def test_decide_plan_denies_write_and_shell_even_always(tmp_path: Path) -> None:
+    """plan 只读模式：写/命令一律 deny，且优先于会话内始终允许与 full-auto。"""
+    reg = build_registry()
+    gate = ApprovalGate(mode="plan")
+    gate.always.add("write_file")  # 即使会话内"始终允许"也不能破 plan
+    d, reason = gate.decide(reg["write_file"], {"path": "a.txt", "content": "x"}, tmp_path, [])
+    assert d == "deny"
+    assert "只读" in reason
+    d, _ = gate.decide(reg["run_shell"], {"command": "ls"}, tmp_path, [])
+    assert d == "deny"
+    # 只读工具照常放行
+    assert gate.decide(reg["read_file"], {"path": "a.txt"}, tmp_path, [])[0] == "allow"
+
+
 def test_decide_shell_asks_unless_full_auto(tmp_path: Path) -> None:
     reg = build_registry()
     assert ApprovalGate(mode="suggest").decide(reg["run_shell"], {"command": "ls"}, tmp_path, [])[0] == "ask"

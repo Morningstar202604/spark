@@ -45,6 +45,7 @@ async function loadConfig() {
   const am = $("#fApproval"); am.innerHTML = "";
   for (const m of data.approval_modes) { const o = document.createElement("option"); o.value = m.value; o.textContent = m.label; if (m.value === data.current.approval_mode) o.selected = true; am.appendChild(o); }
   $("#fBaseUrl").value = data.current.base_url || "";
+  $("#fProxy").value = data.current.proxy || "";
   $("#fModel").value = data.current.model || "";
   $("#fFastModel").value = data.current.model_fast || "";
   $("#fKey").value = data.current.api_key || "";
@@ -99,6 +100,7 @@ async function saveCfg() {
   const body = {
     provider: $("#fProvider").value,
     base_url: $("#fBaseUrl").value.trim(),
+    proxy: $("#fProxy").value.trim(),
     model: $("#fModel").value.trim(),
     model_fast: $("#fFastModel").value.trim(),
     api_key: $("#fKey").value,
@@ -169,6 +171,7 @@ async function testConn() {
   $("#cfgStatus").className = "statusline"; $("#cfgStatus").textContent = "正在测试…";
   const body = {
     base_url: $("#fBaseUrl").value.trim(),
+    proxy: $("#fProxy").value.trim(),
     model: $("#fModel").value.trim(),
     api_key: $("#fKey").value,
   };

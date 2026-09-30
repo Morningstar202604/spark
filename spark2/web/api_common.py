@@ -130,6 +130,7 @@ def config_payload(state: AppState) -> dict:
         "current": {
             "provider": state.cfg.get("provider", ""),
             "base_url": state.cfg.get("base_url", ""),
+            "proxy": state.cfg.get("proxy", ""),
             "model": state.cfg.get("model", ""),
             "model_fast": state.cfg.get("model_fast", ""),
             "api_key": mask_key(state.cfg.get("api_key", "")),
@@ -187,6 +188,7 @@ def mode_label(mode: str) -> str:
         "suggest": "询问（写入与命令都要确认）",
         "auto-edit": "自动编辑（工作区内写入不询问，命令询问）",
         "full-auto": "全自动（都不询问，谨慎使用）",
+        "plan": "只读分析（Plan：禁用写入与命令）",
     }.get(mode, mode)
 
 

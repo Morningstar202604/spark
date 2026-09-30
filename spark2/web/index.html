@@ -110,6 +110,7 @@
       <div class="setpane on" id="paneModel">
         <div class="field"><label>模型服务</label><select id="fProvider"></select></div>
         <div class="field"><label>接口地址</label><input id="fBaseUrl" placeholder="https://api.deepseek.com/v1" /></div>
+        <div class="field"><label>HTTP 代理 <span class="opt">可选</span></label><input id="fProxy" placeholder="http://127.0.0.1:7890" autocomplete="off" /><div class="hint2">国内网络连境外模型服务走代理；留空 = 不用代理（仍尊重系统环境变量）</div></div>
         <div class="field"><label>模型名</label><input id="fModel" placeholder="deepseek-v4-pro" /></div>
         <div class="field"><label>快速模型 <span class="opt">可选</span></label><input id="fFastModel" placeholder="deepseek-flash" /><div class="hint2">多模型路由：简单问答自动走它，留空 = 不启用（动手任务始终走主模型）</div></div>
         <div class="field"><label>API Key</label><input id="fKey" type="password" placeholder="sk-…" /></div>
@@ -126,7 +127,9 @@
 
       <div class="setpane" id="paneWorkspace">
         <div class="field"><label>工作目录</label><input id="fWorkdir" placeholder="/home/me/projects" /><div class="hint2">Agent 只能在此内自由读写，之外写入需你确认</div><div id="recentDirs"></div></div>
-        <div class="field"><label>审批模式</label><select id="fApproval"></select></div>
+        <div class="field"><label>审批模式</label><select id="fApproval"></select>
+          <div class="hint2">「只读分析（Plan）」对标 Claude Code Plan Mode：Agent 只分析不动手，写文件/执行命令一律拒绝</div></div>
+        <div class="field"><label>项目指令文件 <span class="opt">可选</span></label><input id="fClaudeMd" placeholder="工作目录下的 CLAUDE.md（自动生效）" disabled /><div class="hint2">在工作目录放一个 <code>CLAUDE.md</code>，Agent 每次自动读取并优先遵守（对标 Claude Code / Cursor 的 .cursorrules），写清项目技术栈、代码规范、禁忌即可</div></div>
         <div class="sec-divider">运行与安全边界</div>
         <div class="advgrid">
           <div class="field"><label>最大工具轮次</label><input id="fMaxTurns" type="number" min="1" max="200" /></div>

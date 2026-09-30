@@ -164,10 +164,28 @@ class AgentLoop:
         prot = "、".join(str(p) for p in self.ctx.protected) or "（无）"
         text = self.system_prompt_text or SYSTEM_PROMPT_TEMPLATE
         try:
-            return text.format(workdir=self.workdir, protected=prot)
+            base = text.format(workdir=self.workdir, protected=prot)
         except (KeyError, IndexError, ValueError):
             # 自定义提示词里含裸 { }（如 JSON 示例）时不崩溃，按原文使用
-            return text
+            base = text
+        # 项目级指令文件（对标 CLAUDE.md / .cursorrules）：
+        # 工作目录存在 CLAUDE.md 时自动追加为项目规范，优先于全局系统提示词。
+        # 保持轻量：只读文件、大小受限（64KB），文件不存在零开销。
+        rule_file = self.workdir / "CLAUDE.md"
+        try:
+            if rule_file.is_file() and rule_file.stat().st_size <= 65536:
+                content = rule_file.read_text(
+                    encoding="utf-8", errors="replace"
+                ).strip()
+                if content:
+                    base = (
+                        base
+                        + "\n\n===== 项目指令（来自 CLAUDE.md，最高优先级）=====\n"
+                        + content
+                    )
+        except OSError:
+            pass
+        return base
 
     async def cancel(self) -> None:
         """取消：置 cancel_event + 进程组级强杀运行中的工具进程 + 使未决审批全部失效。
