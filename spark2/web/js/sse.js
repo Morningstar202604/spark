@@ -1,6 +1,8 @@
 /* sse.js —— 发送 / SSE 流 / 事件分发（运行状态按会话记录） */
 "use strict";
 
+let mdRaf = 0; // 流式 Markdown 渲染帧节流（见 handleEvent text 分支）
+
 async function send() {
   const prompt = $("#input").value.trim();
   if (!prompt) return;
@@ -15,7 +17,7 @@ async function send() {
       headers: { "Content-Type": "application/json", "X-Spark-Token": state.token },
       body: JSON.stringify({ session_id: state.sid, prompt, approval_mode: $("#fQuickAp").value || undefined }),
     });
-    if (res.status === 401) { $("#tokenModal").classList.add("open"); return; }
+    if (res.status === 401) { openModal("tokenModal"); return; }
     if (!res.ok) { const e = await res.json().catch(() => ({})); errorMsg(e.detail || "请求失败（" + res.status + "）"); return; }
     const reader = res.body.getReader(); const dec = new TextDecoder();
     let buf = "";
@@ -40,11 +42,17 @@ async function send() {
 function handleEvent(ev) {
   switch (ev.type) {
     case "text":
-      // Markdown 流式渲染：累积原文 → 全量重渲染（复制按钮取 textContent，不受影响）
+      // Markdown 流式渲染：累积原文，rAF 合并同帧多次 delta 再全量重渲染（长回复不卡）
       getStreamSpan();
       curAssistant.dataset.raw = (curAssistant.dataset.raw || "") + ev.delta;
-      curAssistant.querySelector(".text").innerHTML = mdToHtml(curAssistant.dataset.raw);
-      autoScroll();
+      if (!mdRaf) {
+        mdRaf = requestAnimationFrame(() => {
+          mdRaf = 0;
+          const el = curAssistant && curAssistant.querySelector(".text");
+          if (el) el.innerHTML = mdToHtml(curAssistant.dataset.raw || "");
+          autoScroll();
+        });
+      }
       break;
     case "reasoning": appendThinking(ev.delta); break;
     case "plan": planCard(ev.steps || []); break;

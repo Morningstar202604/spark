@@ -30,7 +30,7 @@ async function api(path, opts = {}) {
   opts.headers = Object.assign({ "Content-Type": "application/json" }, opts.headers || {});
   if (state.token) opts.headers["X-Spark-Token"] = state.token;
   const res = await fetch(path, opts);
-  if (res.status === 401) { $("#tokenModal").classList.add("open"); throw new Error("auth"); }
+  if (res.status === 401) { openModal("tokenModal"); throw new Error("auth"); }
   return res;
 }
 
@@ -44,14 +44,35 @@ function safeParseHeaders(s) {
   } catch (e) { toast("请求头需是 JSON 对象（如 {\"Authorization\":\"Bearer xxx\"}）"); return {}; }
 }
 
-/* ---------- 主题（浅色默认 / 深色可选，本地记忆） ---------- */
+/* ---------- 主题（默认跟随系统，可手动切换并记忆） ---------- */
 const THEME_SUN = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M4.9 4.9l1.4 1.4m11.4 11.4 1.4 1.4M2 12h2m16 0h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>';
 const THEME_MOON = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>';
+function systemTheme() {
+  return window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+}
+function initTheme() {
+  const saved = localStorage.getItem("spark2_theme");
+  applyTheme(saved === "light" || saved === "dark" ? saved : systemTheme());
+}
 function applyTheme(t) {
   document.documentElement.dataset.theme = t;
   localStorage.setItem("spark2_theme", t);
   const b = $("#btnTheme");
   if (b) { b.innerHTML = t === "dark" ? THEME_SUN : THEME_MOON; b.title = t === "dark" ? "切换到浅色" : "切换到深色"; }
+}
+
+/* ---------- 原生 dialog 开关（免费焦点圈闭 + Esc） ---------- */
+function openModal(id) {
+  const d = document.getElementById(id);
+  if (d && !d.open) d.showModal();
+}
+function closeModal(id) {
+  const d = document.getElementById(id);
+  if (d && d.open) d.close();
+}
+function isModalOpen(id) {
+  const d = document.getElementById(id);
+  return !!(d && d.open);
 }
 
 /* ---------- 运行状态（按会话）与顶栏徽标 ---------- */
@@ -68,7 +89,7 @@ function updateRunBadge() {
     b.innerHTML = '<span class="dot"></span>等待你确认审批';
     b.style.display = "";
     b.title = "Agent 正在等你审批，点此回到审批弹窗";
-    b.onclick = () => { const m = $("#approvalModal"); if (m) m.classList.add("open"); };
+    b.onclick = () => openModal("approvalModal");
     return;
   }
   if (n) {

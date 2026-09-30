@@ -72,6 +72,7 @@ function closeMenu() { $("#tbMenu").classList.remove("open"); }
 
 /* ---------- 事件绑定 ---------- */
 function bind() {
+  bindScrollStick();
   $("#btnSend").onclick = send;
   $("#input").addEventListener("keydown", e => {
     // @ 补全弹层打开时优先消费方向键/回车/Esc
@@ -160,13 +161,19 @@ function bind() {
   $("#btnTokenOk").onclick = () => {
     const t = $("#fToken").value.trim(); if (!t) return;
     state.token = t; localStorage.setItem("spark2_token", t);
-    $("#tokenModal").classList.remove("open");
+    closeModal("tokenModal");
     init(true);
   };
   $("#btnClearToken").onclick = clearToken;
 
   document.addEventListener("keydown", e => {
-    if ($("#approvalModal").classList.contains("open")) {
+    // Esc 关闭任何打开的抽屉/菜单（弹窗由原生 dialog 自处理，不干预）
+    if (e.key === "Escape" && !isModalOpen("approvalModal") && !isModalOpen("tokenModal")) {
+      $$(".drawer.open").forEach(d => closeDrawer(d.id));
+      closeMenu(); closeAt();
+      return;
+    }
+    if (isModalOpen("approvalModal")) {
       const k = e.key.toLowerCase();
       if (k === "a") { e.preventDefault(); answerApproval("allow"); }
       else if (k === "d") { e.preventDefault(); answerApproval("deny"); }
@@ -189,8 +196,8 @@ function bind() {
    注意：state/termState 等是顶层 const（不挂 window），函数才挂 window；
    统一用 typeof eval(fn) 沿作用域链检查（fn 来自下方硬编码白名单，无注入面）。 */
 const __DEP_REQS = {
-  "core": ["state", "api", "esc", "toast", "$", "$$", "applyTheme", "updateRunningUI"],
-  "render": ["mdToHtml", "addUserMsg", "newAssistant", "errorMsg", "showEmptyIfNeeded", "autoScroll"],
+  "core": ["state", "api", "esc", "toast", "$", "$$", "applyTheme", "initTheme", "openModal", "updateRunningUI"],
+  "render": ["mdToHtml", "addUserMsg", "newAssistant", "errorMsg", "showEmptyIfNeeded", "autoScroll", "bindScrollStick"],
   "sessions": ["loadSessions", "selectSession", "renderHistory", "newSession", "showEmptyIfNeeded"],
   "sse": ["send", "handleEvent"],
   "approval": ["openApproval", "selectedFiles", "updateAllowBtn"],
@@ -215,7 +222,7 @@ const __DEP_REQS = {
 })();
 
 async function init(force) {
-  applyTheme(localStorage.getItem("spark2_theme") || "light");
+  initTheme();
   try { await loadConfig(); } catch (e) { if (e.message === "auth") return; toast("配置加载失败"); }
   try { await loadSessions(); } catch {}
   if (state.sessions.length && !state.sid) selectSession(state.sessions[0].id).catch(() => {});

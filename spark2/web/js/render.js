@@ -165,7 +165,35 @@ function errorMsg(text) {
   $("#msgList").appendChild(el); autoScroll();
 }
 
-function autoScroll() { const m = $("#chat"); m.scrollTop = m.scrollHeight; }
+/* ---------- 智能滚动：用户上滚查历史时暂停跟随，回到底部附近自动恢复 ---------- */
+let userScrolled = false;   // 用户主动离开底部
+let scrollRaf = 0;          // rAF 合并高频调用
+const SCROLL_STICK_MARGIN = 80; // 距底 80px 内视为"在底部"
+
+function autoScroll() {
+  if (userScrolled) return; // 用户在翻历史：不抢滚动
+  if (scrollRaf) return;    // 已有待执行的帧，合并本次调用
+  scrollRaf = requestAnimationFrame(() => {
+    scrollRaf = 0;
+    const m = $("#chat");
+    if (m) m.scrollTop = m.scrollHeight;
+  });
+}
+
+function bindScrollStick() {
+  const m = $("#chat");
+  if (!m) return;
+  let last = m.scrollTop;
+  m.addEventListener("scroll", () => {
+    // 向上滚（scrollTop 减小）且离底部较远 → 暂停跟随
+    if (last - m.scrollTop > 4 && m.scrollHeight - m.scrollTop - m.clientHeight > SCROLL_STICK_MARGIN) {
+      userScrolled = true;
+    } else if (m.scrollHeight - m.scrollTop - m.clientHeight <= SCROLL_STICK_MARGIN) {
+      userScrolled = false; // 回到底部 → 恢复跟随
+    }
+    last = m.scrollTop;
+  }, { passive: true });
+}
 
 /* ---------- 上下文水位 ---------- */
 function updateMeter(est) {

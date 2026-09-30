@@ -10,7 +10,7 @@ function openApproval(ev) {
   const wd = state.cfg ? state.cfg.workdir : "";
   if (wd) diff = diff.split(wd).join(".");
   renderDiffPanel(diff, ev.tool);
-  $("#approvalModal").classList.add("open");
+  openModal("approvalModal");
   updateRunningUI();
 }
 
@@ -105,7 +105,7 @@ function updateAllowBtn() {
 
 async function answerApproval(action) {
   const ev = state.approval; if (!ev) return;
-  state.approval = null; $("#approvalModal").classList.remove("open");
+  state.approval = null; closeModal("approvalModal");
   let files = undefined;
   if (action === "allow") files = selectedFiles(); // null=全选；列表=勾选；[]=全跳过
   try {

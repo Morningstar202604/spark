@@ -250,10 +250,10 @@
   </div>
 </div>
 
-<!-- 审批弹窗（多文件可逐文件勾选） -->
-<div class="modalwrap" id="approvalModal">
-  <div class="modal">
-    <div class="mhead"><span class="mt">需要你确认</span><span class="sp"></span><button class="iconbtn" id="btnDenyX">拒绝</button></div>
+<!-- 审批弹窗（原生 dialog：免费焦点圈闭 + Esc；多文件可逐文件勾选） -->
+<dialog class="modalwrap" id="approvalModal" aria-labelledby="apTitle">
+  <div class="modal" role="document">
+    <div class="mhead"><span class="mt" id="apTitle">需要你确认</span><span class="sp"></span><button class="iconbtn" id="btnDenyX">拒绝</button></div>
     <div class="mbody">
       <div class="msum" id="apSummary"></div>
       <div class="mreason" id="apReason"></div>
@@ -266,19 +266,19 @@
       <button class="btn allow" id="btnAllow">允许全部 <span class="kbd">A</span></button>
     </div>
   </div>
-</div>
+</dialog>
 
 <!-- 令牌弹窗 -->
-<div class="modalwrap" id="tokenModal">
-  <div class="modal tokmodal">
-    <div class="mhead"><span class="mt">访问令牌</span></div>
+<dialog class="modalwrap tokmodal" id="tokenModal" aria-labelledby="tokTitle">
+  <div class="modal" role="document">
+    <div class="mhead"><span class="mt" id="tokTitle">访问令牌</span></div>
     <div class="mbody">
-      <p style="font-size:13.5px;color:var(--muted);margin-bottom:10px">该服务需要访问令牌。运行 <code style="font-family:var(--mono);background:var(--panel2);padding:1px 6px;border-radius:5px;border:1px solid var(--line)">spark2 web</code> 时会在终端打印带令牌的地址。</p>
+      <p style="font-size:13.5px;color:var(--text-2);margin-bottom:10px">该服务需要访问令牌。运行 <code style="font-family:var(--mono);background:var(--panel-2);padding:1px 6px;border-radius:5px;border:1px solid var(--line)">spark2 web</code> 时会在终端打印带令牌的地址。</p>
       <div class="field"><label>令牌</label><input id="fToken" style="font-size:16px" placeholder="粘贴终端里的 token=…" /></div>
     </div>
     <div class="mfoot"><button class="btn primary" id="btnTokenOk" style="width:100%">进入</button></div>
   </div>
-</div>
+</dialog>
 
 <div id="toast"></div>
 
