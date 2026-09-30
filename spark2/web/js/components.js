@@ -14,7 +14,7 @@
 
 "use strict";
 
-import { esc, toast, fmtTime, shortPath } from "./core.js";
+import { esc, toast, fmtTime, shortPath, api, state } from "./core.js";
 import { highlightDiff } from "./render.js";
 import { markDirty } from "./settings.js";
 
@@ -47,18 +47,40 @@ class SparkMsg extends HTMLElement {
       : this.getAttribute("type") === "error" ? "tpl-msg-error" : "tpl-msg-assistant");
     this.msgEl = this.firstElementChild;
     this.textEl = this.msgEl.querySelector(".text");
-    if (this.textEl) {
-      const cp = this.msgEl.querySelector(".copy");
-      if (cp) {
-        cp.onclick = () => {
-          navigator.clipboard.writeText(this.textEl.textContent)
-            .then(() => toast("已复制"), () => toast("复制失败"));
-        };
-      }
-      const del = this.msgEl.querySelector(".delmsg");
-      if (del) {
-        del.onclick = () => { this.remove(); this.dispatchEvent(new CustomEvent("spark:msg-removed", { bubbles: true })); };
-      }
+    // 取消息文本：assistant 用 .text，user 直接读 msgEl（其下只有文本节点与操作栏）
+    const textOf = () => this.textEl ? this.textEl.textContent : this.msgEl.textContent;
+    const cp = this.msgEl.querySelector(".copy");
+    if (cp) {
+      cp.onclick = () => {
+        navigator.clipboard.writeText(textOf())
+          .then(() => toast("已复制"), () => toast("复制失败"));
+      };
+    }
+    const del = this.msgEl.querySelector(".delmsg");
+    if (del) {
+      del.onclick = async () => {
+        // 持久删除（后端同步），刷新后不会复活
+        const mid = this.getAttribute("data-mid");
+        if (mid) {
+          try {
+            const sid = this.closest("[data-sid]")?.getAttribute("data-sid") || state.sid;
+            const r = await api(`/api/sessions/${sid}/messages/${mid}`, { method: "DELETE" });
+            if (!r.ok) { toast("删除失败"); return; }
+          } catch (err) { toast("删除失败"); return; }
+        }
+        this.remove();
+        this.dispatchEvent(new CustomEvent("spark:msg-removed", { bubbles: true }));
+      };
+    }
+    const edit = this.msgEl.querySelector(".editmsg");
+    if (edit) {
+      edit.onclick = () => {
+        const mid = this.getAttribute("data-mid");
+        if (!mid) { toast("该消息暂不支持编辑"); return; }
+        this.dispatchEvent(new CustomEvent("spark:msg-edit", {
+          bubbles: true, detail: { mid, text: textOf() },
+        }));
+      };
     }
     this.dispatchEvent(new CustomEvent("spark:msg-ready", { bubbles: true }));
     finishMount(this);

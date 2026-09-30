@@ -6,7 +6,7 @@
 import { $, api, state, esc, shortPath, toast, safeParseHeaders } from "./core.js";
 import { updateMeter } from "./render.js";
 import { loadSessions, updateSetupState } from "./sessions.js";
-import { renderMcp } from "./settings-mcp.js";
+import { renderMcp, renderMarket } from "./settings-mcp.js";
 import { loadMemory } from "./settings-memory.js";
 
 /* ---------- 抽屉通用 ---------- */
@@ -48,6 +48,7 @@ async function loadConfig() {
   $("#fProxy").value = data.current.proxy || "";
   $("#fModel").value = data.current.model || "";
   $("#fFastModel").value = data.current.model_fast || "";
+  $("#fFallbackModel").value = data.current.fallback_model || "";
   $("#fKey").value = data.current.api_key || "";
   $("#fWorkdir").value = data.current.workdir || "";
   $("#fMaxCtx").value = data.current.max_context_tokens || 32000;
@@ -84,6 +85,7 @@ async function loadConfig() {
   state.mcpServers = (data.mcp && data.mcp.servers) || [];
   state.mcpServers.forEach(s => { s.transport = s.transport || "stdio"; s.headersJson = (s.headers && Object.keys(s.headers).length) ? JSON.stringify(s.headers) : ""; });
   renderMcp();
+  renderMarket();
   updateMeter(0);
   markDirty(false);
 }
@@ -103,6 +105,7 @@ async function saveCfg() {
     proxy: $("#fProxy").value.trim(),
     model: $("#fModel").value.trim(),
     model_fast: $("#fFastModel").value.trim(),
+    fallback_model: $("#fFallbackModel").value.trim(),
     api_key: $("#fKey").value,
     workdir: $("#fWorkdir").value.trim(),
     approval_mode: $("#fApproval").value,
@@ -208,7 +211,7 @@ function helpStat(pane) {
   const sel = id => { const e = $(id); return e && e.selectedIndex >= 0 ? e.options[e.selectedIndex].textContent : "—"; };
   const val = id => ($(id).value || "").trim();
   let rows = [];
-  if (pane === "paneModel") rows = [["服务", sel("#fProvider")], ["模型", val("#fModel") || "—"], ["快速模型", val("#fFastModel") || "未启用"], ["路由", $("#fRouteOn").checked ? "已开启" : "关闭"]];
+  if (pane === "paneModel") rows = [["服务", sel("#fProvider")], ["模型", val("#fModel") || "—"], ["快速模型", val("#fFastModel") || "未启用"], ["备用模型", val("#fFallbackModel") || "未启用"], ["路由", $("#fRouteOn").checked ? "已开启" : "关闭"]];
   else if (pane === "paneWorkspace") rows = [["目录", val("#fWorkdir") || "—"], ["审批", sel("#fApproval")], ["轮次上限", val("#fMaxTurns") || "25"], ["工具超时", (val("#fToolTimeout") || "180") + "s"]];
   else if (pane === "paneMemory") rows = [["检索方式", sel("#fMemoryEmbed")], ["嵌入模型", val("#fMemModel") || "—"]];
   else if (pane === "paneIntegrations") rows = [["MCP 服务器", String(document.querySelectorAll("#mcpList .mcprow").length)], ["插件", String(document.querySelectorAll("#pluginList .mem").length)]];

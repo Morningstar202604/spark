@@ -8,7 +8,7 @@
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-14b8a6.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-0f766e.svg)]()
-[![Tests](https://img.shields.io/badge/tests-185%20passed-14b8a6.svg)]()
+[![Tests](https://img.shields.io/badge/tests-216%20passed-14b8a6.svg)]()
 
 [English](README.md) · **中文**
 
@@ -16,7 +16,7 @@
 
 ---
 
-Spark 是一个**本地优先的 AI 编程助手**，从零重写：无 Electron 臃肿、无云端依赖、无隐性模型调用。**审批门**保护你的项目（写文件、执行命令一律先征求同意），内置 **Prompt Injection 防护**，记忆**全部存本地**，国产模型（DeepSeek / 通义 / 智谱 / Kimi / 豆包 / Ollama）开箱即用。
+Spark 是一个**本地优先的 AI 编程助手**，从零重写：无 Electron 臃肿、无云端依赖、无隐性模型调用。**审批门**保护你的项目（写文件、执行命令一律先征求同意），内置 **Prompt Injection 防护**，记忆**全部存本地**，国产模型（DeepSeek / 通义 / 智谱 / Kimi / 豆包 / 云知声 / Ollama）开箱即用。
 
 单文件前端、单进程、一条 `pip install`，所有数据都在 `~/.spark2/`。
 
@@ -43,7 +43,7 @@ spark2 web          # 打开打印出的地址（仅监听 127.0.0.1）
 **终端界面**：`spark2 tui`（同一内核，Ctrl+N 新建 / Ctrl+S 会话 / A 允许 / D 拒绝 / S 始终允许）
 **体检**：`spark2 doctor`（环境 / 配置 / MCP / 记忆 / 日志一条龙）
 
-## 🧰 v0.8.0 功能一览
+## 🧰 v0.9.0 功能一览
 
 - 🛡️ **审批门** — 询问 / 自动编辑 / 全自动三档；保护路径永远拒绝；工作目录之外写入永远确认；会话内"始终允许"
 - 🧠 **Prompt Injection 防护** — 工具/文件输出一律视为不可信数据，中英文注入特征检测并内联警告；权限永远由审批门决定
@@ -56,6 +56,13 @@ spark2 web          # 打开打印出的地址（仅监听 127.0.0.1）
 - 💰 **成本面板** — 每次调用的 tokens/费用按会话落 JSONL；顶栏"用量"面板带会话排行；内置 2026-09 已核验官方价（DeepSeek 谷价 / 豆包方舟），可覆盖
 - 🧠 **本地记忆** — 说"记住 XX 是 YY"即可；每轮 FTS5 本地检索（中文双字感知），可选语义（豆包向量 / 本地 BGE-M3 离线）；按工作目录隔离
 - 🔌 **MCP** — 官方 SDK，stdio + Streamable HTTP（2026-07-28 规范）；只读放行、写入过审批
+- 🌐 **联网工具** — `web_search`（Bing 解析）+ `read_url`（HTML 转纯文本），只读免审批，Agent 可查最新文档/报错
+- 🔁 **模型容灾与路由** — `fallback_model` 主模型故障自动切换；`model_fast` 简单任务走快速模型（对标 Claude Code fallback）
+- ✏️ **消息编辑重发** — 编辑任意用户消息 → 载入原文、截断会话、修改重发；删除消息持久生效
+- 🔍 **会话全文搜索** — 标题/目录/消息正文全文命中，卡片显示匹配片段
+- 📊 **上下文水位** — 会话页进度条 + 数字（已用/上限），超窗自动压缩
+- 🎙️ **语音输入** — Web Speech 中文听写（不支持自动隐藏）
+- 🛒 **MCP 市场** — 8 个官方 server 一键安装，进列表即生效
 - 💾 **全本地** — 会话 / 记忆 / 用量 / 索引都在 `~/.spark2/`，JSONL 人可读、可审计、可删除
 
 ## 🏗️ 架构
@@ -81,9 +88,17 @@ flowchart TB
 ## ✅ 测试
 
 ```bash
-python3 -m pytest -q      # 185 个用例通过（5 跳过）
+python3 -m pytest -q      # 216 个用例通过（5 跳过）
 python3 tests/e2e_manual.py  # 真实 uvicorn 端到端（流内审批 / 409 / 落盘）
 ```
+
+## 📚 文档
+
+- `docs/CONFIG.md` — 配置文件全字段说明（config.toml）
+- `docs/API.md` — HTTP API 参考（SSE 事件 / 会话 / 配置 / 记忆）
+- `docs/ARCHITECTURE.md` — 架构与数据流 / 安全模型
+- `examples/config.toml.example` — 配置示例
+- `examples/plugins/` — 插件示例
 
 ## 📄 许可证
 

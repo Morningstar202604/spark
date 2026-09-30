@@ -8,7 +8,7 @@ Runs on your machine · Sees every step · Approves every write & command · Zer
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-14b8a6.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-0f766e.svg)]()
-[![Tests](https://img.shields.io/badge/tests-185%20passed-14b8a6.svg)]()
+[![Tests](https://img.shields.io/badge/tests-216%20passed-14b8a6.svg)]()
 [![Local-first](https://img.shields.io/badge/local--first-100%25%20offline-0f766e.svg)]()
 
 **English** · [中文](README.zh.md)
@@ -117,7 +117,7 @@ tests/           pytest — approval / tools / loop / config / memory / checkpoi
 ## ✅ Tests
 
 ```bash
-python3 -m pytest -q      # 185 passed / 5 skipped — approval rules, tools, loop, memory, injection,
+python3 -m pytest -q      # 216 passed / 5 skipped — approval rules, tools, loop, memory, injection,
                           # checkpoints, web API, MCP (stdio + HTTP), TUI
 python3 tests/e2e_manual.py  # real-uvicorn E2E (in-stream approval / 409 / disk writes)
 ```

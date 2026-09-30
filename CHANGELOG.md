@@ -29,6 +29,34 @@
 - 底部快捷键提示改为 kbd 键帽样式，文案精简。
 - 「去设置」按钮加箭头与 hover 底纹，精致化。
 
+### 对标补齐 7 项差距（web 工具 / fallback / 消息编辑重发 / 全文搜索 / 上下文水位）
+- **联网工具**：`web_search` + `read_url`（只读、免审批），Agent 可获取最新文档/报错/API 变更。
+- **备用模型故障切换**：主模型不可用（限流/故障/配置错误）自动切 `fallback_model`（设置·模型面板可配），对标 Claude Code fallback model。
+- **消息编辑并重发**：用户消息操作栏加「编辑」→ 载入原文、截断会话、修改重发；删除消息改为持久生效（刷新不复活）。
+- **会话全文搜索**：搜索框支持标题/目录/消息正文全文命中，卡片显示匹配片段（防抖 300ms）。
+- **上下文水位**：会话页显示已用/上限进度条 + 数字（`GET /api/sessions/{sid}/context`），超窗预警。
+- 修复：mock 演示模式下 `demo_mode` 缺失导致空态引导无法新建会话；`truncate` 截断到首条误判"消息不存在"。
+
+### 语音输入 + MCP 市场（7 项差距最后 2 项）
+- **语音输入**：输入栏麦克风按钮（Web Speech API，中文听写，追加进输入框；不支持浏览器自动隐藏、录音中红色脉冲动画）。
+- **官方 MCP 市场**：集成面板加 8 个官方 server 一键安装（filesystem/fetch/memory/sequential-thinking/git/time/brave-search/everything），安装即进 MCP 列表、按钮变「已安装」，保存生效。
+- 修复：`tests/test_fallback.py` 三个测试 fixture 漏传（monkeypatch）——全量 213 passed / ruff 全过。
+
+### 云知声 u2-flash 真模型全功能实测（36 项全通过）
+- 新增 **unisound 预设**（https://maas-api.unisound.com/v1 · u2-flash · UNISOUND_API_KEY 环境变量）。
+- 实测覆盖：流式对话/多轮上下文、代码工具链（write_file/read_file/list_dir 落盘验证）、
+  只读自动放行（suggest）、web_search/read_url 联网、会话 CRUD/重命名/分叉/truncate/
+  持久删除/全文搜索/上下文水位、记忆读写、用量统计、插件列表、代码索引（index_project+
+  search_symbol）、fallback 故障切换。
+- **修复 3 处真 bug（fallback 链路三连断）**：`set_config` 保存字段漏 fallback_model
+  （前端填了保存即丢）→ 已补保存 + 回显；`server.py` 构造 provider_cfg 漏传
+  fallback_model（HTTP 层永不切换）→ 已补；fallback_model 空串被通用字段逻辑跳过
+  （无法取消）→ 已单独支持显式清空。
+- **修复密钥打码写回 bug**：`mask_key` 输出含前缀/后缀（sk-6*********22g），旧判定只
+  拦全星号，前端全量保存会把脱敏值当真 key 写回损坏 → 新增 `is_masked_key`（8 连星
+  或全星号即拦）。
+- 新增回归测试：test_api_config（fallback 保存/清空 + masked key 不覆盖）、test_config。
+
 ### 修复
 - 首屏引导「去设置」死按钮：补绑事件（打开设置抽屉 + 定位对应面板）。
 - 集成面板 MCP 长命令横向溢出：toolrow 改 flex-wrap + code overflow-wrap。

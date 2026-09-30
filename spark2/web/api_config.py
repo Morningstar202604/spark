@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Request
 
-from spark2.config import PRESETS, apply_preset, save_config
+from spark2.config import PRESETS, apply_preset, is_masked_key, save_config
 from spark2.memory import MemoryStore, make_embedder
 from spark2.provider import test_connection
 
@@ -43,13 +43,16 @@ async def set_config(request: Request, state: AppState = Depends(get_app_state))
         v = body.get(k)
         if isinstance(v, str) and v.strip():
             state.cfg[k] = v.strip()
+    # fallback_model 允许显式清空（区别于上面"空串跳过"的通用字段）
+    if "fallback_model" in body and isinstance(body.get("fallback_model"), str):
+        state.cfg["fallback_model"] = body["fallback_model"].strip()
     v = body.get("max_context_tokens")
     if isinstance(v, int) and v > 0:
         state.cfg["max_context_tokens"] = v
     if body.get("memory_embedding") in ("off", "api", "local"):
         state.cfg["memory_embedding"] = body["memory_embedding"]
     key = body.get("api_key")
-    if isinstance(key, str) and key and not set(key) <= {"*"}:
+    if isinstance(key, str) and key and not is_masked_key(key):
         state.cfg["api_key"] = key
     if new_provider == "mock":
         # 演示模式不联网：清掉本轮可能写入的密钥，不留残留

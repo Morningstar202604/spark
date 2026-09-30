@@ -75,3 +75,14 @@ def test_save_load_roundtrip_mcp_servers(tmp_path, monkeypatch) -> None:
     save_config(cfg)
     loaded = load_config()
     assert loaded["mcp_servers"] == cfg["mcp_servers"]
+
+
+def test_is_masked_key():
+    from spark2.config import is_masked_key, mask_key
+
+    raw = "sk-1234567890abcdef"
+    masked = mask_key(raw)
+    assert is_masked_key(masked) is True          # 回显值禁止写回
+    assert is_masked_key(raw) is False            # 真值可写
+    assert is_masked_key("******") is True        # 短 key 全星号
+    assert is_masked_key("sk-abcdef") is False    # 无 8 连星

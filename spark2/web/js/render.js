@@ -5,11 +5,13 @@
 import { $, state, esc, runtime, toast } from "./core.js";
 import { showEmptyIfNeeded } from "./sessions.js"; // 消息区空状态（运行时调用）
 
-function addUserMsg(text, note) {
+function addUserMsg(text, note, mid) {
   const el = document.createElement("spark-msg");
   el.setAttribute("type", "user");
+  if (mid) el.setAttribute("data-mid", mid);
   $("#msgList").appendChild(el);
-  el.msgEl.textContent = text;
+  // append 文本节点而不是 textContent：保留模板里的操作栏（mops），且不产生注入面
+  el.msgEl.append(document.createTextNode(text));
   if (note) {
     const tag = document.createElement("span");
     tag.className = "img-note";
@@ -196,12 +198,16 @@ function bindScrollStick() {
 }
 
 /* ---------- 上下文水位 ---------- */
-function updateMeter(est) {
+function updateMeter(est, maxTokens) {
   if (est) state.lastUsage = est;
-  const max = state.cfg ? (state.cfg.max_context_tokens || 32000) : 32000;
-  const pct = Math.min(100, Math.round(state.lastUsage / max * 100));
+  if (maxTokens) state.lastCtxMax = maxTokens;
+  const max = state.lastCtxMax || (state.cfg ? (state.cfg.max_context_tokens || 32000) : 32000);
+  const used = state.lastUsage || 0;
+  const pct = Math.min(100, Math.round(used / max * 100));
   const m = $("#meter"); m.style.width = pct + "%"; m.classList.toggle("warn", pct > 80);
-  m.title = "上下文约 " + state.lastUsage + " / " + max + " tokens（" + pct + "%）";
+  m.title = "上下文约 " + used + " / " + max + " tokens（" + pct + "%）";
+  const w = $("#meterwrap"); if (w) w.hidden = used <= 0;
+  const t = $("#ctxText"); if (t) t.textContent = used ? (pct + "% · " + used + " / " + max) : "";
 }
 
 /* ---------- Markdown 代码块「复制代码」按钮（事件委托，流式渲染后也生效） ---------- */

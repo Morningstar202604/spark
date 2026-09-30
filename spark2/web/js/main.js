@@ -18,6 +18,7 @@ import { loadPlugins } from "./settings-plugins.js";
 import { loadUsage } from "./settings-usage.js";
 import { toggleTerm, addTermTab, initTermDrag } from "./terminal.js";
 import { initInputImg } from "./inputimg.js";
+import { initMic } from "./mic.js";
 import { initCmdPalette } from "./cmd.js";
 import { initMdActions } from "./render.js";
 
@@ -94,11 +95,34 @@ function closeMenu() { $("#tbMenu").classList.remove("open"); }
 function bind() {
   bindScrollStick();
   initInputImg();
+  initMic();
   initCmdPalette();
   initMdActions();
   $("#btnSend").onclick = () => { if (isSidRunning(state.sid)) cancelSession(state.sid); else send(); };
   // 消息被手动移除后刷新空态
   $("#msgList").addEventListener("spark:msg-removed", showEmptyIfNeeded);
+  // 编辑并重发：截断会话（删除该消息及之后）→ 原文载入输入框 → 修改后发送
+  $("#msgList").addEventListener("spark:msg-edit", async (e) => {
+    const { mid, text } = e.detail || {};
+    if (!mid || !state.sid) return;
+    try {
+      const r = await api(`/api/sessions/${state.sid}/truncate`, {
+        method: "POST", body: JSON.stringify({ message_id: mid }),
+      });
+      if (!r.ok) { const d = await r.json().catch(() => ({})); toast(d.detail || "编辑失败"); return; }
+      const ta = $("#input");
+      ta.value = text || "";
+      autoGrow();
+      ta.focus();
+      // 本地移除该消息及之后的所有消息卡（data-mid 在 spark-msg 元素上）
+      let hit = false;
+      for (const el of [...$$("#msgList spark-msg")]) {
+        if (hit || el.getAttribute("data-mid") === mid) { hit = true; el.remove(); }
+      }
+      showEmptyIfNeeded();
+      toast("已载入，可修改后重新发送");
+    } catch (err) { toast("编辑失败"); }
+  });
   // 空态建议问题 chips：点击直接填充并发送
   $$(".chip").forEach(c => {
     c.addEventListener("click", () => {
@@ -121,7 +145,12 @@ function bind() {
 
   /* 会话抽屉 */
   $("#btnSessions").onclick = () => { openDrawer("drawerSessions"); loadSessions(true).catch(() => {}); };
-  $("#sessSearch").addEventListener("input", renderSessions);
+  // 会话搜索：防抖 300ms 后走后端全文搜索（标题/目录/消息正文）
+  let searchTimer = 0;
+  $("#sessSearch").addEventListener("input", () => {
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(() => { loadSessions(true).catch(() => {}); }, 300);
+  });
 
   /* 引导区「去设置」：打开设置抽屉并定位到对应面板（此前为死按钮） */
   $$(".golink").forEach(b => b.addEventListener("click", () => {

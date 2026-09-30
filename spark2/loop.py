@@ -356,10 +356,33 @@ class AgentLoop:
                     yield ev
 
     async def _stream_model(self, msgs: list[dict], provider_cfg: dict, sink: dict):
-        """请求模型一轮：透传事件到事件流，并把本轮结果写进 sink。
+        """请求模型一轮（带备用模型故障切换）：透传事件到事件流，并把本轮结果写进 sink。
 
         sink: {"text": str, "calls": list[dict], "finish_reason": str|None}
+        主模型不可用（配置/网络/上游错误）时，若配置了 fallback_model 且不是当前模型，
+        自动用备用模型重试一轮（对标 Claude Code fallback model / Cursor 备用模型）。
         """
+        try:
+            async for ev in self._stream_model_once(msgs, provider_cfg, sink):
+                yield ev
+        except ProviderError as e:
+            fb = str(provider_cfg.get("fallback_model") or "").strip()
+            cur = provider_cfg.get("model")
+            if fb and fb != cur:
+                yield {
+                    "type": "status",
+                    "text": f"主模型不可用（{e}），已自动切换备用模型 {fb}",
+                }
+                sink.clear()
+                fb_cfg = dict(provider_cfg)
+                fb_cfg["model"] = fb
+                async for ev in self._stream_model_once(msgs, fb_cfg, sink):
+                    yield ev
+            else:
+                raise
+
+    async def _stream_model_once(self, msgs: list[dict], provider_cfg: dict, sink: dict):
+        """单次请求模型一轮（无 fallback）：透传事件到事件流，并把本轮结果写进 sink。"""
         sink.setdefault("text", "")
         async for ev in stream_chat(provider_cfg, msgs, tool_schemas(self.registry)):
             if ev["type"] == "text":

@@ -129,10 +129,12 @@ def config_payload(state: AppState) -> dict:
         },
         "current": {
             "provider": state.cfg.get("provider", ""),
+            "demo_mode": state.cfg.get("provider", "") == "mock",
             "base_url": state.cfg.get("base_url", ""),
             "proxy": state.cfg.get("proxy", ""),
             "model": state.cfg.get("model", ""),
             "model_fast": state.cfg.get("model_fast", ""),
+            "fallback_model": state.cfg.get("fallback_model", ""),
             "api_key": mask_key(state.cfg.get("api_key", "")),
             "workdir": state.cfg.get("workdir", ""),
             "approval_mode": state.cfg.get("approval_mode", "suggest"),

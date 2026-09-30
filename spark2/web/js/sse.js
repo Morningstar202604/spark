@@ -6,7 +6,7 @@ import {
   addUserMsg, errorMsg, getStreamSpan, mdToHtml, autoScroll, appendThinking,
   planCard, toolCard, updateToolResult, updateMeter, markPlanDone, autoGrow,
 } from "./render.js";
-import { loadSessions } from "./sessions.js";
+import { loadSessions, refreshCtx } from "./sessions.js";
 import { openApproval } from "./approval.js";
 import { openDrawer } from "./settings.js";
 
@@ -53,9 +53,16 @@ async function send() {
   delete state.runningSids[state.sid];
   updateRunningUI(); markPlanDone();
   loadSessions(true);
+  refreshCtx();
 }
 
 function handleEvent(ev) {
+  if (ev.type === "hello" && ev.user_msg_id) {
+    // data-mid 统一设在 spark-msg 元素上（编辑/删除/截断都从组件读）
+    const users = document.querySelectorAll("#msgList spark-msg[type=user]");
+    const lastUser = users.length ? users[users.length - 1] : null;
+    if (lastUser) lastUser.setAttribute("data-mid", ev.user_msg_id);
+  }
   switch (ev.type) {
     case "text":
       // Markdown 流式渲染：累积原文，rAF 合并同帧多次 delta 再全量重渲染（长回复不卡）
@@ -77,7 +84,10 @@ function handleEvent(ev) {
     case "approval": openApproval(ev); break;
     case "error": errorMsg(ev.message || "出错了"); break;
     case "usage": updateMeter(ev.estimated); break;
-    case "done": if (ev.reason === "max_turns") errorMsg("已达到最大轮次，请分步提问。"); break;
+    case "done":
+      if (ev.assistant_msg_id && runtime.curAssistant) runtime.curAssistant.setAttribute("data-mid", ev.assistant_msg_id);
+      if (ev.reason === "max_turns") errorMsg("已达到最大轮次，请分步提问。");
+      break;
   }
 }
 

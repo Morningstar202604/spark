@@ -2,13 +2,15 @@
 "use strict";
 
 import { api, state, $, esc, shortPath, fmtTime, toast, isSidRunning, updateRunningUI, runtime } from "./core.js";
-import { addUserMsg, newAssistant, autoScroll, mdToHtml } from "./render.js";
+import { addUserMsg, newAssistant, autoScroll, mdToHtml, updateMeter } from "./render.js";
 import { closeDrawer, openPane } from "./settings.js";
 import { termState, renderTermTabs } from "./terminal.js";
 
 async function loadSessions(silent) {
+  const q = ($("#sessSearch").value || "").trim();
   try {
-    const res = await api("/api/sessions"); state.sessions = await res.json();
+    const res = await api("/api/sessions" + (q ? "?q=" + encodeURIComponent(q) : ""));
+    state.sessions = await res.json();
   } catch (e) { if (!silent) throw e; return; }
   renderSessions();
 }
@@ -21,9 +23,11 @@ function renderSessions() {
     box.innerHTML = '<div style="color:var(--dim);font-size:13px;text-align:center;padding:20px 0">还没有会话，点上面新建</div>';
     return;
   }
-  // 过滤
+  // 过滤：有后端全文结果（match）时直接用；否则本地按标题/目录
   let list = state.sessions;
-  if (q) list = list.filter(s => (s.title || "").toLowerCase().includes(q) || (s.workdir || "").toLowerCase().includes(q));
+  if (q && !state.sessions.some(s => s.match)) {
+    list = list.filter(s => (s.title || "").toLowerCase().includes(q) || (s.workdir || "").toLowerCase().includes(q));
+  }
   if (!list.length) {
     box.innerHTML = '<div style="color:var(--dim);font-size:13px;text-align:center;padding:20px 0">没有匹配「' + esc(q) + '」的会话</div>';
     return;
@@ -48,9 +52,12 @@ function renderSessions() {
 function sessCard(s) {
   const card = document.createElement("spark-session-card");
   const run = isSidRunning(s.id);
+  const match = s.match;
   card.setData({
     title: s.title,
-    sub: fmtTime(s.updated) + " · " + s.messages + " 条消息",
+    sub: (match && match.kind === "content"
+      ? "匹配：" + (match.role === "user" ? "你" : "Spark") + " · " + esc(match.snippet || "")
+      : fmtTime(s.updated) + " · " + s.messages + " 条消息"),
     workdir: s.workdir || "",
     running: run,
     active: s.id === state.sid,
@@ -144,12 +151,24 @@ async function selectSession(sid) {
   updateRunningUI();
   // 终端 tab 跟随会话：切换到当前会话的终端组（模块化后直接引用，不再走 window）
   if (termState.groups) renderTermTabs();
+  refreshCtx();
+}
+
+/* 上下文水位：进入会话/发送完成后拉全量估算（对标主流 agent 的上下文进度条） */
+async function refreshCtx() {
+  if (!state.sid) return;
+  try {
+    const res = await api("/api/sessions/" + state.sid + "/context");
+    const d = await res.json();
+    updateMeter(d.used, d.max);
+  } catch (e) { /* 静默：估算失败不影响使用 */ }
 }
 
 function renderHistory(m) {
-  if (m.role === "user") { addUserMsg(m.content || ""); }
+  if (m.role === "user") { addUserMsg(m.content || "", "", m.id); }
   else if (m.role === "assistant") {
     const el = newAssistant();
+    if (m.id) el.setAttribute("data-mid", m.id);
     el.dataset.raw = m.content || "";
     el.querySelector(".text").innerHTML = mdToHtml(m.content || "");
   }
@@ -201,5 +220,5 @@ function ensureStart() {
 
 export {
   loadSessions, renderSessions, selectSession, cancelSession, showEmptyIfNeeded,
-  newSession, ensureStart, renderHistory, updateSetupState,
+  newSession, ensureStart, renderHistory, updateSetupState, refreshCtx,
 };

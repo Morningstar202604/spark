@@ -62,6 +62,9 @@ class SessionStore:
     def append(self, sid: str, msg: dict) -> None:
         if not _safe_sid(sid):
             return
+        # 消息 id：删除/编辑重发等操作依赖稳定 id；无 id 的旧消息按顺序补 legacy 位次
+        if not msg.get("id"):
+            msg["id"] = uuid.uuid4().hex[:12]
         with self._msgs_path(sid).open("a", encoding="utf-8") as f:
             f.write(json.dumps(msg, ensure_ascii=False) + "\n")
         meta = self.meta(sid) or {}
@@ -82,15 +85,52 @@ class SessionStore:
         if not p.exists():
             return []
         out = []
-        for line in p.read_text(encoding="utf-8").splitlines():
+        for i, line in enumerate(p.read_text(encoding="utf-8").splitlines()):
             line = line.strip()
             if not line:
                 continue
             try:
-                out.append(json.loads(line))
+                msg = json.loads(line)
             except json.JSONDecodeError:
                 continue
+            if not msg.get("id"):
+                # 旧版本消息没有 id：按位次生成稳定 legacy id（删除/编辑仍可定位）
+                msg["id"] = f"legacy_{i:04d}"
+            out.append(msg)
         return out
+
+    def _rewrite_messages(self, sid: str, msgs: list[dict]) -> None:
+        """整段重写消息文件（截断/删除后），并刷新元信息计数。"""
+        with self._msgs_path(sid).open("w", encoding="utf-8") as f:
+            for m in msgs:
+                f.write(json.dumps(m, ensure_ascii=False) + "\n")
+        meta = self.meta(sid) or {}
+        meta["messages"] = len(msgs)
+        meta["updated"] = _now()
+        self._write_meta(sid, meta)
+
+    def truncate(self, sid: str, message_id: str) -> list[dict] | None:
+        """编辑重发：删除 message_id 及之后所有消息，返回保留的消息列表。
+
+        None = 消息不存在；[] = 截断成功且无保留消息（截断到首条）。"""
+        msgs = self.messages(sid)
+        idx = next((i for i, m in enumerate(msgs) if m.get("id") == message_id), None)
+        if idx is None:
+            return None
+        keep = msgs[:idx]
+        self._rewrite_messages(sid, keep)
+        return keep
+
+    def delete_message(self, sid: str, message_id: str) -> list[dict] | None:
+        """删除单条消息（其余保持原顺序），返回剩余消息列表。
+
+        None = 消息不存在；[] = 删除成功且会话已空。"""
+        msgs = self.messages(sid)
+        rest = [m for m in msgs if m.get("id") != message_id]
+        if len(rest) == len(msgs):
+            return None
+        self._rewrite_messages(sid, rest)
+        return rest
 
     def meta(self, sid: str) -> dict | None:
         if not _safe_sid(sid):
@@ -125,6 +165,46 @@ class SessionStore:
             if len(rows) >= limit:
                 break
         return rows
+
+    def search(self, q: str, limit: int = 20) -> list[dict]:
+        """会话全文搜索：标题/目录命中优先，其次消息正文命中。
+
+        命中的 meta 附带 match 字段（kind: title|content；content 带 role + 片段），
+        供前端展示匹配位置；标题/目录命中按最近优先。
+        """
+        ql = q.lower()
+        out: list[dict] = []
+        for m in self.list(limit=200):
+            title = str(m.get("title") or "")
+            wd = str(m.get("workdir") or "")
+            if ql in title.lower() or ql in wd.lower():
+                m2 = dict(m)
+                m2["match"] = {"kind": "title"}
+                out.append(m2)
+                if len(out) >= limit:
+                    break
+                continue
+            for msg in self.messages(m.get("id", "")):
+                txt = msg.get("content") or ""
+                if isinstance(txt, list):  # 多模态 parts：取 text 段
+                    txt = " ".join(
+                        str(p.get("text") or "")
+                        for p in txt
+                        if isinstance(p, dict) and p.get("text")
+                    )
+                txt = str(txt)
+                pos = txt.lower().find(ql)
+                if pos < 0:
+                    continue
+                start = max(0, pos - 24)
+                snippet = ("…" if start else "") + txt[start : start + 84] + ("…" if start + 84 < len(txt) else "")
+                m2 = dict(m)
+                m2["match"] = {"kind": "content", "role": str(msg.get("role") or ""), "snippet": snippet}
+                out.append(m2)
+                break
+            if len(out) >= limit:
+                break
+        return out
 
     def delete(self, sid: str) -> bool:
         """删除会话（目录 + 文件），成功返回 True。"""

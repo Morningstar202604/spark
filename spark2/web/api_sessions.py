@@ -15,7 +15,8 @@ router = APIRouter()
 @router.get("/api/sessions")
 async def list_sessions(request: Request, state: AppState = Depends(get_app_state)) -> list[dict]:
     check_token(request, state)
-    rows = state.store.list()
+    q = (request.query_params.get("q") or "").strip()
+    rows = state.store.search(q) if q else state.store.list()
     for r in rows:
         r["running"] = r.get("id") in state.running
     return rows
@@ -28,6 +29,19 @@ async def fork_session(sid: str, request: Request, state: AppState = Depends(get
     if not meta:
         raise HTTPException(status_code=404, detail="会话不存在")
     return meta
+
+
+@router.get("/api/sessions/{sid}/context")
+async def session_context(sid: str, request: Request, state: AppState = Depends(get_app_state)) -> dict:
+    """会话上下文占用：估算全部消息 tokens + 上限 + 是否需压缩（对标主流 agent 的上下文水位）。"""
+    check_token(request, state)
+    from spark2.compaction import json_dumps
+    from spark2.provider import estimate_tokens
+
+    msgs = state.store.messages(sid)
+    used = sum(estimate_tokens(json_dumps(m)) for m in msgs) if msgs else 0
+    max_t = int(state.cfg.get("max_context_tokens") or 32000)
+    return {"used": used, "max": max_t, "compact": used > max_t}
 
 
 @router.get("/api/sessions/{sid}")
@@ -75,3 +89,29 @@ async def rename_session(sid: str, request: Request, state: AppState = Depends(g
     if not state.store.rename(sid, title):
         raise HTTPException(status_code=404, detail="会话不存在")
     return {"ok": True, "title": title}
+
+
+@router.post("/api/sessions/{sid}/truncate")
+async def truncate_session(sid: str, request: Request, state: AppState = Depends(get_app_state)) -> dict:
+    """编辑重发：截断到 message_id 之前（删除该消息及之后），返回保留消息。"""
+    check_token(request, state)
+    body = await request.json()
+    mid = str(body.get("message_id") or "")
+    if not mid:
+        raise HTTPException(status_code=400, detail="缺少 message_id")
+    if sid in state.running:
+        raise HTTPException(status_code=409, detail="该会话正在运行，先停止再编辑")
+    keep = state.store.truncate(sid, mid)
+    if keep is None:
+        raise HTTPException(status_code=404, detail="消息不存在")
+    return {"ok": True, "messages": keep}
+
+
+@router.delete("/api/sessions/{sid}/messages/{message_id}")
+async def delete_message(sid: str, message_id: str, request: Request, state: AppState = Depends(get_app_state)) -> dict:
+    """删除单条消息（其余保持顺序）。"""
+    check_token(request, state)
+    rest = state.store.delete_message(sid, message_id)
+    if rest is None:
+        raise HTTPException(status_code=404, detail="消息不存在")
+    return {"ok": True, "messages": rest}

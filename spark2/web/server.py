@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import uuid
 from collections.abc import AsyncIterator
 from datetime import date
 from pathlib import Path
@@ -98,6 +99,7 @@ def create_app(state: AppState | None = None) -> FastAPI:
             "model": model or state.cfg.get("model", ""),
             "api_key": state.cfg.get("api_key", ""),
             "model_fast": state.cfg.get("model_fast", ""),
+            "fallback_model": state.cfg.get("fallback_model", ""),
         }
         # 演示/测试脚本随 provider 传递（不进配置文件）
         if state.cfg.get("mock_script"):
@@ -148,13 +150,14 @@ def create_app(state: AppState | None = None) -> FastAPI:
                     {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{data}"}}
                 )
             user_content = parts
-        state.store.append(sid, {"role": "user", "content": user_content})
+        user_msg_id = uuid.uuid4().hex[:12]
+        state.store.append(sid, {"role": "user", "content": user_content, "id": user_msg_id})
         messages = state.store.messages(sid)
 
         async def event_stream() -> AsyncIterator[str]:
             assistant_text = ""
             try:
-                yield sse({"type": "hello", "session_id": sid})
+                yield sse({"type": "hello", "session_id": sid, "user_msg_id": user_msg_id})
                 async for ev in loop.stream(messages):
                     if ev["type"] == "text":
                         assistant_text += ev.get("delta", "")
@@ -172,9 +175,11 @@ def create_app(state: AppState | None = None) -> FastAPI:
                     yield sse(ev)
                     if ev["type"] == "done":
                         if assistant_text:
+                            aid = uuid.uuid4().hex[:12]
                             state.store.append(
-                                sid, {"role": "assistant", "content": assistant_text}
+                                sid, {"role": "assistant", "content": assistant_text, "id": aid}
                             )
+                            yield sse({**ev, "assistant_msg_id": aid})
                         break
                 yield sse({"type": "close"})
             except asyncio.CancelledError:

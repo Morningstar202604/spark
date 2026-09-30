@@ -44,7 +44,7 @@
       </div>
     </div>
   </div>
-  <div class="meterwrap"><div class="meter" id="meter" title="上下文占用"></div></div>
+  <div class="meterwrap" id="meterwrap" hidden><div class="meter" id="meter" title="上下文占用"></div><span class="metertext" id="ctxText"></span></div>
 
   <!-- 消息区 -->
   <main id="chat">
@@ -75,6 +75,7 @@
   <div class="inputbar">
     <div class="ibox">
       <button class="attachbtn" id="btnAttach" title="添加图片（也可直接粘贴 / 拖入，最多 3 张）"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg></button>
+      <button class="attachbtn" id="btnMic" title="语音输入（说中文直接变文字）"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="22"/></svg></button>
       <textarea id="input" placeholder="描述你想做的事，例如：帮我修一下登录接口的 bug…（输入 @ 引用工作目录文件；可直接粘贴/拖入图片，最多 3 张）" rows="1"></textarea>
       <div id="imgPreview" class="imgpreview" hidden></div>
       <div id="atPop" role="listbox"></div>
@@ -122,6 +123,7 @@
         <div class="field"><label>HTTP 代理 <span class="opt">可选</span></label><input id="fProxy" placeholder="http://127.0.0.1:7890" autocomplete="off" /><div class="hint2">国内网络连境外模型服务走代理；留空 = 不用代理（仍尊重系统环境变量）</div></div>
         <div class="field"><label>模型名</label><input id="fModel" placeholder="deepseek-v4-pro" /></div>
         <div class="field"><label>快速模型 <span class="opt">可选</span></label><input id="fFastModel" placeholder="deepseek-flash" /><div class="hint2">多模型路由：简单问答自动走它，留空 = 不启用（动手任务始终走主模型）</div></div>
+        <div class="field"><label>备用模型 <span class="opt">可选</span></label><input id="fFallbackModel" placeholder="deepseek-v4-pro" /><div class="hint2">主模型不可用（限流/故障/配置错误）时自动切换，留空 = 不启用故障切换</div></div>
         <div class="field"><label>API Key</label><input id="fKey" type="password" placeholder="sk-…" /></div>
         <div class="row2"><button class="btn" id="btnTest">测试连接</button></div>
         <div class="sec-divider">上下文与采样</div>
@@ -170,6 +172,8 @@
         <div class="sec-divider">MCP 服务器<span class="secnote">官方 MCP SDK，工具自动并入 Agent</span></div>
         <div id="mcpList"></div>
         <button class="mcpadd" id="btnAddMcp">＋ 添加 MCP 服务器</button>
+        <div class="sec-divider sub">官方 MCP 市场<span class="secnote">一键安装常用 server（npx 运行，保存并重启会话后生效）</span></div>
+        <div id="mcpMarket" class="mcpmarket"></div>
         <div class="field hint2">只读工具（readOnlyHint）自动放行；写类工具进审批门。常用示例：</div>
         <div class="toolrow"><code>npx -y @modelcontextprotocol/server-filesystem /path</code></div>
         <div class="sec-divider">插件<span class="secnote">本地 ~/.spark2/plugins/ 的 .py，重启生效</span></div>
@@ -299,8 +303,8 @@
 <!-- ============ 组件模板（Web Components，light DOM）
      结构集中于此；js/components.js 注册自定义元素并 clone 这些模板，
      渲染层不再拼长 HTML 字符串。 ============ -->
-<template id="tpl-msg-user"><div class="msg user"></div></template>
-<template id="tpl-msg-assistant"><div class="msg assistant"><div class="mhead"><span class="mrole">Spark</span><span class="mtools"></span></div><div class="text"></div><div class="mops"><button class="copy" title="复制内容" aria-label="复制内容"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button><button class="delmsg danger" title="移除本条（仅本地视图）" aria-label="移除本条"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/></svg></button></div></div></template>
+<template id="tpl-msg-user"><div class="msg user"><div class="mops"><button class="copy" title="复制内容" aria-label="复制内容"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button><button class="editmsg" title="编辑并重新生成" aria-label="编辑并重新生成"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.83 2.83 0 0 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg></button><button class="delmsg danger" title="删除本条（持久生效）" aria-label="删除本条"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/></svg></button></div></div></template>
+<template id="tpl-msg-assistant"><div class="msg assistant"><div class="mhead"><span class="mrole">Spark</span><span class="mtools"></span></div><div class="text"></div><div class="mops"><button class="copy" title="复制内容" aria-label="复制内容"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button><button class="delmsg danger" title="删除本条（持久生效）" aria-label="移除本条"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/></svg></button></div></div></template>
 <template id="tpl-msg-error"><div class="msg error"></div></template>
 <template id="tpl-tool-card"><div class="tool"><div class="thead"><span class="status">⏳</span><span class="tname"></span><span class="tsum"></span><span class="tdur"></span></div><div class="tbody"><pre class="out"></pre></div></div></template>
 <template id="tpl-plan-card"><div class="plan"><div class="pt">计划</div><ol></ol></div></template>

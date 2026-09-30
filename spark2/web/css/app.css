@@ -198,7 +198,9 @@
   .menu button.danger { color: var(--red); }
 
   /* 上下文水位 */
-  .meterwrap { height: 3px; background: var(--bg-2); flex: none; }
+  .meterwrap { height: 3px; background: var(--bg-2); flex: none; display: flex; align-items: center; gap: 8px; }
+  .meterwrap .meter { flex: none; min-width: 0; }
+  .meterwrap .metertext { font-size: 10px; color: var(--text-3); white-space: nowrap; padding-right: 4px; }
   .meter { height: 100%; width: 0%; background: var(--accent); transition: width .4s var(--ease); }
   .meter.warn { background: var(--amber); }
 
@@ -344,6 +346,9 @@
     transition: color var(--tr-fast), background-color var(--tr-fast);
   }
   .attachbtn:hover { color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); }
+  .attachbtn.on { color: var(--red); background: color-mix(in srgb, var(--red) 12%, transparent); }
+  .attachbtn.on svg { animation: micpulse 1.2s var(--ease) infinite; }
+  @keyframes micpulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.15); } }
   textarea:focus { outline: none; }
   textarea::placeholder { color: var(--text-3); }
   .imgpreview {
@@ -577,6 +582,11 @@
   .mcprow .mcpdesc { font-size: var(--fs-xs); color: var(--text-3); margin-top: 6px; }
   .mcpadd { display: block; width: 100%; background: var(--panel-2); border: 1px dashed var(--line-2); color: var(--text-2); border-radius: var(--r-sm); padding: 9px; font-size: var(--fs-sm); }
   .mcpadd:hover { color: var(--accent); border-color: var(--accent); }
+  .mcpmarket { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; margin: 12px 0; }
+  .mcpcard { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid var(--line-2); border-radius: var(--r-sm); background: var(--panel-2); }
+  .mcpcard-info { flex: 1; min-width: 0; }
+  .mcpcard-name { font-weight: 600; font-size: var(--fs-sm); color: var(--text); }
+  .mcpcard-desc { font-size: var(--fs-xs); color: var(--text-3); margin-top: 3px; line-height: 1.5; }
 
   /* 长期记忆 / 用量 */
   .sec-divider { margin: 22px 0 12px; font-size: var(--fs-sm); font-weight: 700; color: var(--text); letter-spacing: .02em; }
@@ -785,16 +795,16 @@
 }
 .msg.assistant .mhead .mrole { font-weight: 700; color: var(--text-2); letter-spacing: .02em; }
 .msg.assistant .mhead .mtools { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 60%; color: var(--text-3); }
-.msg.assistant .mops { position: absolute; top: 0; right: 0; display: inline-flex; gap: 2px; opacity: 0; transition: opacity var(--tr-fast); }
-.msg.assistant:hover .mops, .msg.assistant .mops:focus-within { opacity: 1; }
-.msg.assistant .mops button {
+.msg .mops { position: absolute; top: 0; right: 0; display: inline-flex; gap: 2px; opacity: 0; transition: opacity var(--tr-fast); }
+.msg:hover .mops, .msg .mops:focus-within { opacity: 1; }
+.msg .mops button {
   width: 26px; height: 24px; display: inline-flex; align-items: center; justify-content: center;
   background: var(--panel); border: 1px solid var(--line); color: var(--text-2);
   border-radius: var(--r-sm); box-shadow: var(--sh-1);
   transition: color var(--tr-fast), border-color var(--tr-fast);
 }
-.msg.assistant .mops button:hover { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
-.msg.assistant .mops button.danger:hover { color: var(--red); border-color: color-mix(in srgb, var(--red) 45%, transparent); }
+.msg .mops button:hover { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+.msg .mops button.danger:hover { color: var(--red); border-color: color-mix(in srgb, var(--red) 45%, transparent); }
 
 /* ---------------- 代码块头部：语言 + 复制 ---------------- */
 .msg.assistant .text pre.mdcode { position: relative; }
@@ -822,7 +832,7 @@
 .msg.user { box-shadow: var(--sh-1); }
 .msg { position: relative; }
 @media (hover: none) {
-  .msg.assistant .mops { opacity: 1; }
+  .msg .mops { opacity: 1; }
   .msg.assistant .text pre.mdcode .mdcopy { opacity: 1; }
 }
 

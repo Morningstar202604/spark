@@ -67,6 +67,12 @@ PRESETS: dict[str, dict] = {
         "model": "kimi-k3",  # 现役旗舰，1M 上下文，原生推理
         "api_key": "",
     },
+    "unisound": {
+        "label": "云知声 Unisound",
+        "base_url": "https://maas-api.unisound.com/v1",
+        "model": "u2-flash",  # 实测型号：u2-flash（快），同系 u2-pro 更稳
+        "api_key": "",
+    },
     "doubao": {
         "label": "豆包（火山方舟）",
         "base_url": "https://ark.cn-beijing.volces.com/api/v3",
@@ -102,6 +108,7 @@ _PROVIDER_ENV: dict[str, str] = {
     "qwen": "DASHSCOPE_API_KEY",
     "glm": "ZHIPU_API_KEY",
     "kimi": "MOONSHOT_API_KEY",
+    "unisound": "UNISOUND_API_KEY",
     "doubao": "ARK_API_KEY",
     "ollama": "OLLAMA_API_KEY",
 }
@@ -120,6 +127,8 @@ def _defaults() -> dict:
         # 多模型路由：model_fast 填写快速模型名（如 deepseek-flash），
         # 简单任务自动走它、复杂任务走主模型；留空 = 不启用路由。
         "model_fast": "",
+        # 备用模型（故障切换）：主模型不可用时自动切换；留空 = 不启用 fallback。
+        "fallback_model": "",
         # 语义记忆：off=仅关键词检索（默认，零依赖）/ api=火山方舟 doubao-embedding / local=本地模型
         "memory_embedding": "off",
         "memory_embed_model": "",
@@ -273,6 +282,11 @@ def mask_key(key: str) -> str:
     if len(key) <= 8:
         return "*" * 6
     return key[:4] + "*" * 8 + key[-4:]
+
+
+def is_masked_key(key: str) -> bool:
+    """判定是否为打码后的密钥（前端回显值）：8 连星或全星号即视为打码，禁止写回真值。"""
+    return "*" * 8 in key or set(key) <= {"*"}
 
 
 def apply_preset(cfg: dict, preset: str) -> dict:
