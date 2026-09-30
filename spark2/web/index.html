@@ -64,6 +64,8 @@
         <button class="chip" data-q="看看代码里有没有明显的 bug 或安全隐患">排查明显 bug 与安全隐患</button>
         <button class="chip" data-q="给这个项目补一个 README 和启动说明">补 README 与启动说明</button>
         <button class="chip" data-q="按最佳实践重构项目的前端代码">按最佳实践重构前端</button>
+        <button class="chip" data-q="帮我解释一下项目里最复杂的这段代码">解释最复杂的代码</button>
+        <button class="chip" data-q="给项目写一个 Dockerfile 和部署脚本">补 Dockerfile 与部署</button>
       </div>
       <div style="margin-top:16px"><button class="cta" id="btnStart">＋ 新建会话，开始使用</button></div>
     </div>
@@ -78,7 +80,7 @@
       <div id="atPop" role="listbox"></div>
       <button class="sendbtn" id="btnSend" title="发送"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg></button>
     </div>
-    <div class="hint"><span class="quickap">审批 <select id="fQuickAp" title="本轮对话的审批模式（快捷切换，不影响设置里的默认值）"></select></span> · Enter 发送 · Shift+Enter 换行 · @ 引用文件 · 写入文件与执行命令会先征求你确认</div>
+    <div class="hint"><span class="quickap">审批 <select id="fQuickAp" title="本轮对话的审批模式（快捷切换，不影响设置里的默认值）"></select></span><span class="hsep">·</span><kbd class="hkbd">Enter</kbd> 发送 <span class="hsep">·</span><kbd class="hkbd">Shift+Enter</kbd> 换行 <span class="hsep">·</span><kbd class="hkbd">@</kbd> 引用文件 <span class="hsep">·</span>写/命令需确认</div>
   </div>
 
   <!-- 内置终端（随当前会话目录；用户自己的持久 PTY） -->
@@ -106,12 +108,12 @@
   <div class="dhead"><span>设置</span><span class="sp"></span><button class="iconbtn" data-close="drawerSettings">关闭</button></div>
   <div class="dbody setbody">
       <nav class="setnav">
-        <button data-pane="paneModel" class="on">模型<span class="nsub">服务 · 密钥 · 采样</span></button>
-        <button data-pane="paneWorkspace">工作区<span class="nsub">目录 · 审批 · 边界</span></button>
-        <button data-pane="paneMemory">记忆<span class="nsub">跨会话记住的事</span></button>
-        <button data-pane="paneIntegrations">集成<span class="nsub">MCP · 插件 · 索引</span></button>
-        <button data-pane="paneAdvanced">高级<span class="nsub">令牌 · 提示词 · 成本</span></button>
-        <button data-pane="paneAbout">关于<span class="nsub">版本 · 数据目录</span></button>
+        <button data-pane="paneModel" class="on"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z"/></svg>模型<span class="nsub">服务 · 密钥 · 采样</span></button>
+        <button data-pane="paneWorkspace"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>工作区<span class="nsub">目录 · 审批 · 边界</span></button>
+        <button data-pane="paneMemory"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a7 7 0 0 0-4 12.7V17a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1v-2.3A7 7 0 0 0 12 2z"/><line x1="9" y1="21" x2="15" y2="21"/></svg>记忆<span class="nsub">跨会话记住的事</span></button>
+        <button data-pane="paneIntegrations"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>集成<span class="nsub">MCP · 插件 · 索引</span></button>
+        <button data-pane="paneAdvanced"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>高级<span class="nsub">令牌 · 提示词 · 成本</span></button>
+        <button data-pane="paneAbout"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><line x1="12" y1="8" x2="12.01" y2="8"/><polyline points="11 12 12 12 12 16 13 16"/></svg>关于<span class="nsub">版本 · 数据目录</span></button>
       </nav>
     <div class="setpanes">
       <div class="setpane on" id="paneModel">

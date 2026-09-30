@@ -68,7 +68,16 @@ export function initCmdPalette() {
     }
     sel = Math.max(0, Math.min(sel, shown.length - 1));
     list.innerHTML = "";
+    let curGroup = null;
     shown.forEach((it, i) => {
+      // 分组标题（会话 / 设置 / 外观 / 模式 / 帮助），对标 Raycast / VS Code 命令面板
+      if (it.g !== curGroup) {
+        curGroup = it.g;
+        const g = document.createElement("div");
+        g.className = "palette-group";
+        g.textContent = curGroup;
+        list.appendChild(g);
+      }
       const b = document.createElement("button");
       b.className = "palette-item" + (i === sel ? " sel" : "");
       b.innerHTML = '<span class="pi">' + esc(it.icon) + '</span><span class="pt"><b>' + esc(it.label) + "</b><i>" + esc(it.desc) + "</i></span>" + (it.key ? '<span class="pk">' + it.key + "</span>" : "");

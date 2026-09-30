@@ -832,3 +832,37 @@
   box-shadow: 0 2px 8px color-mix(in srgb, var(--red) 35%, transparent);
 }
 .sendbtn.stop:hover { filter: brightness(1.06); box-shadow: 0 4px 14px color-mix(in srgb, var(--red) 42%, transparent); }
+
+/* 设置导航图标 + 布局微调 */
+.setnav button { display: flex; align-items: center; gap: 8px; }
+.setnav button svg { flex: none; color: var(--text-3); transition: color var(--tr-fast); }
+.setnav button:hover svg { color: var(--text-2); }
+.setnav button.on svg { color: var(--accent); }
+.setnav button .nsub { display: block; }
+
+/* 底部提示：快捷键 kbd 样式 */
+.hint .hsep { opacity: .55; margin: 0 1px; }
+.hint kbd.hkbd {
+  font-family: var(--mono); font-size: 10px; color: var(--text-2);
+  background: var(--panel-2); border: 1px solid var(--line); border-bottom-width: 2px;
+  border-radius: 5px; padding: 1px 5px; margin: 0 1px;
+}
+
+/* 「去设置」精致化：箭头 + hover 底纹 */
+.empty .step .golink {
+  margin-left: auto; flex: none; display: inline-flex; align-items: center; gap: 3px;
+  background: none; border: none; color: var(--accent); font-size: var(--fs-xs); font-weight: 600;
+  padding: 4px 9px; border-radius: var(--r-full); transition: background-color var(--tr-fast);
+}
+.empty .step .golink::after { content: "→"; opacity: .6; transition: transform var(--tr-fast); }
+.empty .step .golink:hover { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.empty .step .golink:hover::after { transform: translateX(2px); opacity: 1; }
+
+/* 命令面板分组标题 */
+.palette-group {
+  display: flex; align-items: center; gap: 8px;
+  padding: 7px 12px 3px; font-size: 10.5px; letter-spacing: .08em;
+  color: var(--text-3); text-transform: uppercase;
+}
+.palette-group:not(:first-child) { border-top: 1px solid var(--line); margin-top: 4px; }
+.palette-group::after { content: ""; flex: 1; height: 1px; background: var(--line); }
