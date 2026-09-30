@@ -1,0 +1,17 @@
+NOTICE —— 第三方前端资源
+
+本目录包含以下随包发布的第三方资源，版权归其原始作者所有：
+
+- xterm.min.js / xterm.min.css
+  - 项目：xterm.js（xterm/xterm）
+  - 许可：MIT License
+  - 来源：https://github.com/xtermjs/xterm.js
+  - 用途：Web 内置终端渲染（无 CDN 依赖，随包离线可用）
+
+MIT License 摘要（完整文本见 https://opensource.org/licenses/MIT）：
+Copyright (c) xterm.js 项目贡献者
+特此免费授予任何人获得本软件副本及相关文档文件（"软件"）的使用权，
+包括不受限制地使用、复制、修改、合并、发布、分发、再许可和/或销售
+软件副本，并允许向其提供软件的人这样做，前提是上述版权声明和本许可
+声明包含在所有副本或实质部分中。软件按"现状"提供，不附带任何明示或
+暗示的担保。

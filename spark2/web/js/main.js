@@ -184,6 +184,36 @@ function bind() {
 }
 
 /* ---------- 初始化 ---------- */
+/* 启动依赖自检：模块按序加载（core→render→sessions→sse→approval→settings→terminal→main），
+   顺序错/缺文件时这里直接给出明确报错，而不是运行到一半白屏。
+   注意：state/termState 等是顶层 const（不挂 window），函数才挂 window；
+   统一用 typeof eval(fn) 沿作用域链检查（fn 来自下方硬编码白名单，无注入面）。 */
+const __DEP_REQS = {
+  "core": ["state", "api", "esc", "toast", "$", "$$", "applyTheme", "updateRunningUI"],
+  "render": ["mdToHtml", "addUserMsg", "newAssistant", "errorMsg", "showEmptyIfNeeded", "autoScroll"],
+  "sessions": ["loadSessions", "selectSession", "renderHistory", "newSession", "showEmptyIfNeeded"],
+  "sse": ["send", "handleEvent"],
+  "approval": ["openApproval", "selectedFiles", "updateAllowBtn"],
+  "settings": ["loadConfig", "openDrawer", "closeDrawer", "markDirty", "loadMemory", "loadRecentDirs", "renderMcp", "loadUsage", "loadGit", "doCheckpoint", "doGitReset", "loadPlugins", "addMemory", "addMcp"],
+  "terminal": ["toggleTerm", "addTermTab", "closeTermTab", "renderTermTabs", "termState"],
+  "main": ["bind", "init"],
+};
+(function depsSelfCheck() {
+  const missing = [];
+  for (const [mod, fns] of Object.entries(__DEP_REQS)) {
+    for (const fn of fns) {
+      let ok = true;
+      try { if (typeof eval(fn) === "undefined") ok = false; } catch (e) { ok = false; }
+      if (!ok) missing.push(mod + "." + fn);
+    }
+  }
+  if (missing.length) {
+    console.error("[spark] 前端模块加载缺失：", missing.join(", "));
+    const bar = document.getElementById("sessionLine");
+    if (bar) bar.textContent = "前端加载异常：" + missing.length + " 个依赖缺失（见控制台），请检查 js 加载顺序";
+  }
+})();
+
 async function init(force) {
   applyTheme(localStorage.getItem("spark2_theme") || "light");
   try { await loadConfig(); } catch (e) { if (e.message === "auth") return; toast("配置加载失败"); }

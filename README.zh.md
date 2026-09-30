@@ -26,9 +26,12 @@ Spark 是一个**本地优先的 AI 编程助手**，从零重写：无 Electron
 
 ```bash
 cd spark
-pip install -e ".[dev]"
+pip install -e ".[dev]"     # 依赖含 uvicorn[standard]（Web 终端 WS 必需）
 spark2 web          # 打开打印出的地址（仅监听 127.0.0.1）
 ```
+
+> 若 `spark2 web` 的**终端面板**连不上（WS 404/不支持升级），多半是 uvicorn 缺 websockets：
+> `pip install "uvicorn[standard]"` 后重启。
 
 1. 打开**设置** → 选模型服务（DeepSeek / 通义 / 智谱 / Kimi / 豆包 / Ollama / **演示模式**）→ 填 API Key → 把**工作目录**指向你的项目 → **保存**。
 2. 点「**+ 新建会话**」描述需求，例如"帮我修一下登录接口的 bug"。

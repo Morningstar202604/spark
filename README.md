@@ -44,9 +44,12 @@ One file frontend. One process. One `pip install`. Everything lives under `~/.sp
 
 ```bash
 cd spark
-pip install -e ".[dev]"
+pip install -e ".[dev]"     # includes uvicorn[standard] — required for the terminal WebSocket
 spark2 web          # opens the printed URL (loopback only)
 ```
+
+> If the **terminal panel** fails to connect (WS 404 / unsupported upgrade), uvicorn is
+> missing websockets: `pip install "uvicorn[standard]"` and restart.
 
 1. Open **Settings** → pick a provider (DeepSeek / Qwen / Zhipu / Kimi / Doubao / Ollama / **demo mode**) → paste your API key → point **workdir** at your project → **Save**.
 2. Click **+ New session** and tell Spark what to do — *"fix the login endpoint bug"*.
