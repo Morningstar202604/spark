@@ -1,6 +1,9 @@
-/* render.js —— 消息渲染：用户/助手/思考/计划/工具卡/错误、上下文水位
+/* render.js —— 消息渲染：用户/助手/思考/计划/工具卡/错误、上下文水位、输入框自适应
    结构全部来自 <template> 组件（components.js），本文件只创建元素 + 填数据。 */
 "use strict";
+
+import { $, state, esc, runtime } from "./core.js";
+import { showEmptyIfNeeded } from "./sessions.js"; // 消息区空状态（运行时调用）
 
 function addUserMsg(text) {
   const el = document.createElement("spark-msg");
@@ -15,13 +18,13 @@ function newAssistant() {
   el.setAttribute("type", "assistant");
   $("#msgList").appendChild(el);
   el.dataset.raw = ""; // 流式原文缓冲：Markdown 每次全量重渲染
-  curAssistant = el;
+  runtime.curAssistant = el;
   return el;
 }
 
 function getStreamSpan() {
-  if (!curAssistant) newAssistant();
-  return curAssistant.textEl;
+  if (!runtime.curAssistant) newAssistant();
+  return runtime.curAssistant.textEl;
 }
 
 /* ---------- 轻量安全 Markdown 渲染 ----------
@@ -84,9 +87,9 @@ function mdToHtml(src) {
 }
 
 function appendThinking(text) {
-  let t = curAssistant ? curAssistant.querySelector("spark-think") : null;
+  let t = runtime.curAssistant ? runtime.curAssistant.querySelector("spark-think") : null;
   if (!t) {
-    const wrap = curAssistant || newAssistant();
+    const wrap = runtime.curAssistant || newAssistant();
     const d = document.createElement("spark-think");
     wrap.appendChild(d); t = d;
   }
@@ -148,6 +151,14 @@ function errorMsg(text) {
   autoScroll();
 }
 
+/* ---------- 输入框自适应高度（textarea 随内容增高，上限 160px） ---------- */
+function autoGrow() {
+  const ta = $("#input");
+  if (!ta) return;
+  ta.style.height = "auto";
+  ta.style.height = Math.min(ta.scrollHeight, 160) + "px";
+}
+
 /* ---------- 智能滚动：用户上滚查历史时暂停跟随，回到底部附近自动恢复 ---------- */
 let userScrolled = false;   // 用户主动离开底部
 let scrollRaf = 0;          // rAF 合并高频调用
@@ -186,3 +197,9 @@ function updateMeter(est) {
   const m = $("#meter"); m.style.width = pct + "%"; m.classList.toggle("warn", pct > 80);
   m.title = "上下文约 " + state.lastUsage + " / " + max + " tokens（" + pct + "%）";
 }
+
+export {
+  addUserMsg, newAssistant, getStreamSpan, mdToHtml, appendThinking, planCard,
+  markPlanDone, toolCard, highlightDiff, updateToolResult, errorMsg, autoGrow,
+  autoScroll, bindScrollStick, updateMeter,
+};

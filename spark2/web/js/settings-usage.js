@@ -1,5 +1,7 @@
-/* settings-usage.js —— 用量成本面板：汇总 / 会话排行（settings.js 拆分） */
+/* settings-usage.js —— 用量成本面板：汇总 / 会话排行 */
 "use strict";
+
+import { $, api, esc } from "./core.js";
 
 function fmtTokens(n) { return n >= 1e6 ? (n / 1e6).toFixed(2) + "M" : n >= 1e3 ? (n / 1e3).toFixed(1) + "k" : String(n); }
 async function loadUsage() {
@@ -27,3 +29,5 @@ async function loadUsage() {
   }
   box.innerHTML = html;
 }
+
+export { loadUsage, fmtTokens };

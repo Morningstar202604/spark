@@ -1,6 +1,15 @@
 /* sse.js —— 发送 / SSE 流 / 事件分发（运行状态按会话记录） */
 "use strict";
 
+import { $, state, toast, openModal, updateRunningUI, isSidRunning, runtime } from "./core.js";
+import {
+  addUserMsg, errorMsg, getStreamSpan, mdToHtml, autoScroll, appendThinking,
+  planCard, toolCard, updateToolResult, updateMeter, markPlanDone, autoGrow,
+} from "./render.js";
+import { loadSessions } from "./sessions.js";
+import { openApproval } from "./approval.js";
+import { openDrawer } from "./settings.js";
+
 let mdRaf = 0; // 流式 Markdown 渲染帧节流（见 handleEvent text 分支）
 
 async function send() {
@@ -10,7 +19,7 @@ async function send() {
   if (isSidRunning(state.sid)) return;
   state.runningSids[state.sid] = true; updateRunningUI();
   addUserMsg(prompt); $("#input").value = ""; autoGrow();
-  curAssistant = null;
+  runtime.curAssistant = null;
   try {
     const res = await fetch("/api/chat/stream", {
       method: "POST",
@@ -44,12 +53,12 @@ function handleEvent(ev) {
     case "text":
       // Markdown 流式渲染：累积原文，rAF 合并同帧多次 delta 再全量重渲染（长回复不卡）
       getStreamSpan();
-      curAssistant.dataset.raw = (curAssistant.dataset.raw || "") + ev.delta;
+      runtime.curAssistant.dataset.raw = (runtime.curAssistant.dataset.raw || "") + ev.delta;
       if (!mdRaf) {
         mdRaf = requestAnimationFrame(() => {
           mdRaf = 0;
-          const el = curAssistant && curAssistant.querySelector(".text");
-          if (el) el.innerHTML = mdToHtml(curAssistant.dataset.raw || "");
+          const el = runtime.curAssistant && runtime.curAssistant.querySelector(".text");
+          if (el) el.innerHTML = mdToHtml(runtime.curAssistant.dataset.raw || "");
           autoScroll();
         });
       }
@@ -64,3 +73,5 @@ function handleEvent(ev) {
     case "done": if (ev.reason === "max_turns") errorMsg("已达到最大轮次，请分步提问。"); break;
   }
 }
+
+export { send, handleEvent };

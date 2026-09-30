@@ -1,6 +1,11 @@
 /* sessions.js —— 会话列表（分组 + 搜索 + 运行态/停止）、选择、新建、空状态引导 */
 "use strict";
 
+import { api, state, $, esc, shortPath, fmtTime, toast, isSidRunning, updateRunningUI, runtime } from "./core.js";
+import { addUserMsg, newAssistant, autoScroll, mdToHtml } from "./render.js";
+import { closeDrawer, openPane } from "./settings.js";
+import { termState, renderTermTabs } from "./terminal.js";
+
 async function loadSessions(silent) {
   try {
     const res = await api("/api/sessions"); state.sessions = await res.json();
@@ -105,7 +110,7 @@ function sessCard(s) {
       const r = await api("/api/sessions/" + s.id, { method: "DELETE" });
       if (!r.ok) { toast("删除失败"); return; }
       toast("会话已删除");
-      if (state.sid === s.id) { state.sid = null; $("#msgList").innerHTML = ""; curAssistant = null; showEmptyIfNeeded(); updateRunningUI(); }
+      if (state.sid === s.id) { state.sid = null; $("#msgList").innerHTML = ""; runtime.curAssistant = null; showEmptyIfNeeded(); updateRunningUI(); }
       await loadSessions(true);
     } catch (err) { toast("删除失败"); }
   }
@@ -131,14 +136,14 @@ async function selectSession(sid) {
   const data = await res.json();
   const meta = data.meta || {};
   $("#sessionLine").textContent = (meta.title || "会话") + " · " + (meta.workdir || "");
-  $("#msgList").innerHTML = ""; curAssistant = null;
+  $("#msgList").innerHTML = ""; runtime.curAssistant = null;
   for (const m of data.messages) renderHistory(m);
   renderSessions();
   showEmptyIfNeeded();
   autoScroll();
   updateRunningUI();
-  // 终端 tab 跟随会话：切换到当前会话的终端组
-  if (window.termState && termState.groups) renderTermTabs();
+  // 终端 tab 跟随会话：切换到当前会话的终端组（模块化后直接引用，不再走 window）
+  if (termState.groups) renderTermTabs();
 }
 
 function renderHistory(m) {
@@ -193,3 +198,8 @@ function ensureStart() {
   if (miss.includes("model")) { openPane("paneModel"); toast("先选模型服务并填 Key（也可用演示模式）"); return; }
   newSession();
 }
+
+export {
+  loadSessions, renderSessions, selectSession, cancelSession, showEmptyIfNeeded,
+  newSession, ensureStart, renderHistory, updateSetupState,
+};

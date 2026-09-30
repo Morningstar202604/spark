@@ -14,6 +14,10 @@
 
 "use strict";
 
+import { esc, toast, fmtTime, shortPath } from "./core.js";
+import { highlightDiff } from "./render.js";
+import { markDirty } from "./settings.js";
+
 /* 模板克隆 + 延迟回调重放 */
 function mountTpl(el, tplId) {
   if (el.__mounted) return;
@@ -293,3 +297,5 @@ const SPARK_COMPONENTS = [
 for (const [tag, cls] of SPARK_COMPONENTS) {
   if (!customElements.get(tag)) customElements.define(tag, cls);
 }
+
+export { SPARK_COMPONENTS };

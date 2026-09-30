@@ -1,6 +1,8 @@
-/* settings-mcp.js —— MCP 服务器管理面板：列表 / 增删 / 双传输
-   （行渲染走 <spark-mcp-row> 组件；输入双向写回 + 局部刷新） */
+/* settings-mcp.js —— MCP 服务器管理面板：列表 / 增删 / 双传输 */
 "use strict";
+
+import { $, state } from "./core.js";
+import { markDirty } from "./settings.js";
 
 function renderMcp() {
   const box = $("#mcpList"); box.innerHTML = "";
@@ -22,3 +24,5 @@ function addMcp() {
   if (last) last.querySelector("input[data-k=name]").focus();
   markDirty(true);
 }
+
+export { renderMcp, addMcp };

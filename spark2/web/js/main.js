@@ -1,5 +1,22 @@
-/* main.js —— 事件绑定、顶栏菜单、@ 文件补全、快捷键、初始化 */
+/* main.js —— 入口：事件绑定、顶栏菜单、@ 文件补全、快捷键、初始化
+   以 ES Module 形式被 index.html 唯一引用；依赖图保证各模块先于本文件求值。 */
 "use strict";
+
+/* 组件注册副作用（import 即执行 customElements.define，必须在其他模块之前） */
+import "./components.js";
+
+import { $, $$, state, esc, api, toast, applyTheme, initTheme, openModal, closeModal, isModalOpen, updateRunningUI } from "./core.js";
+import { bindScrollStick, autoGrow } from "./render.js";
+import { loadSessions, renderSessions, newSession, selectSession, cancelSession, showEmptyIfNeeded, ensureStart } from "./sessions.js";
+import { send } from "./sse.js";
+import { answerApproval } from "./approval.js";
+import { openDrawer, closeDrawer, markDirty, loadConfig, loadRecentDirs, saveCfg, testConn, clearToken, presetChanged, memModelRow, updHelp } from "./settings.js";
+import { addMcp } from "./settings-mcp.js";
+import { loadMemory, addMemory } from "./settings-memory.js";
+import { loadGit, doCheckpoint, doGitReset } from "./settings-git.js";
+import { loadPlugins } from "./settings-plugins.js";
+import { loadUsage } from "./settings-usage.js";
+import { toggleTerm, addTermTab, initTermDrag } from "./terminal.js";
 
 /* ---------- @ 文件补全（GET /api/fs，工作目录内只读浏览） ---------- */
 const atState = { items: [], sel: 0, dirPart: "", start: 0 };
@@ -190,40 +207,22 @@ function bind() {
   });
 }
 
-/* ---------- 初始化 ---------- */
-/* 启动依赖自检：模块按序加载（core→render→sessions→sse→approval→settings→terminal→main），
-   顺序错/缺文件时这里直接给出明确报错，而不是运行到一半白屏。
-   注意：state/termState 等是顶层 const（不挂 window），函数才挂 window；
-   统一用 typeof eval(fn) 沿作用域链检查（fn 来自下方硬编码白名单，无注入面）。 */
-const __DEP_REQS = {
-  "core": ["state", "api", "esc", "toast", "$", "$$", "applyTheme", "initTheme", "openModal", "updateRunningUI"],
-  "components": ["SparkMsg", "SparkToolCard", "SparkSessionCard", "SparkMcpRow", "SparkMemRow", "SparkGitRow"],
-  "render": ["mdToHtml", "addUserMsg", "newAssistant", "errorMsg", "showEmptyIfNeeded", "autoScroll", "bindScrollStick"],
-  "sessions": ["loadSessions", "selectSession", "renderHistory", "newSession", "showEmptyIfNeeded"],
-  "sse": ["send", "handleEvent"],
-  "approval": ["openApproval", "selectedFiles", "updateAllowBtn"],
-  "settings": ["loadConfig", "openDrawer", "closeDrawer", "markDirty", "loadMemory", "loadRecentDirs", "renderMcp", "loadUsage", "loadGit", "doCheckpoint", "doGitReset", "loadPlugins", "addMemory", "addMcp"],
-  "terminal": ["toggleTerm", "addTermTab", "closeTermTab", "renderTermTabs", "termState"],
-  "main": ["bind", "init"],
-};
-(function depsSelfCheck() {
-  const missing = [];
-  for (const [mod, fns] of Object.entries(__DEP_REQS)) {
-    for (const fn of fns) {
-      let ok = true;
-      try { if (typeof eval(fn) === "undefined") ok = false; } catch (e) { ok = false; }
-      if (!ok) missing.push(mod + "." + fn);
-    }
-  }
+/* ---------- 初始化 ----------
+   模块已保证全部依赖就绪（无需脚本顺序自检）；仅保留关键组件注册检查，
+   用于 import 被裁剪/文件缺失时给出明确报错而非白屏。 */
+function startupCheck() {
+  const want = ["SparkMsg", "SparkToolCard", "SparkPlanCard", "SparkThink", "SparkSessionCard", "SparkMcpRow", "SparkMemRow", "SparkGitRow"];
+  const missing = want.filter(n => !customElements.get(n));
   if (missing.length) {
-    console.error("[spark] 前端模块加载缺失：", missing.join(", "));
+    console.error("[spark] 组件注册缺失：", missing.join(", "));
     const bar = document.getElementById("sessionLine");
-    if (bar) bar.textContent = "前端加载异常：" + missing.length + " 个依赖缺失（见控制台），请检查 js 加载顺序";
+    if (bar) bar.textContent = "前端组件加载异常：" + missing.join(", ") + " 未注册（见控制台）";
   }
-})();
+}
 
 async function init(force) {
   initTheme();
+  startupCheck();
   try { await loadConfig(); } catch (e) { if (e.message === "auth") return; toast("配置加载失败"); }
   try { await loadSessions(); } catch {}
   if (state.sessions.length && !state.sid) selectSession(state.sessions[0].id).catch(() => {});

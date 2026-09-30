@@ -1,5 +1,7 @@
-/* core.js —— 全局状态、通用工具、主题、运行状态管理 */
+/* core.js —— 全局状态、通用工具、主题、运行状态管理（ES Module） */
 "use strict";
+
+import { openDrawer } from "./settings.js"; // 仅 updateRunBadge 按钮回调使用（运行时调用，循环依赖安全）
 
 /* 元素缓存：只缓存「引用稳定」的静态容器（msgList/chat/input 等）；
    动态重绘的列表内容不经过 $，由各渲染函数直接管理。 */
@@ -21,7 +23,10 @@ const state = {
   approval: null, lastUsage: 0,
   mcpServers: [],
 };
-let curAssistant = null; // 当前回合的助手消息元素
+
+/* 跨模块共享的可变运行态：import 绑定只读，可变状态统一放对象属性（可写）。
+   当前仅一个成员；后续共享状态都加在这里，避免再出现跨文件顶层 let。 */
+const runtime = { curAssistant: null }; // 当前回合的助手消息元素
 
 let toastTimer;
 function toast(msg) {
@@ -100,7 +105,7 @@ function updateRunBadge() {
     b.innerHTML = '<span class="dot"></span>' + n + " 个会话运行中";
     b.style.display = "";
     b.title = "点击打开会话列表，可查看或停止运行中的会话";
-    b.onclick = () => { openDrawer("drawerSessions"); };
+    b.onclick = () => openDrawer("drawerSessions");
     return;
   }
   b.style.display = "none";
@@ -121,3 +126,9 @@ function updateRunningUI() {
   }
   updateRunBadge();
 }
+
+export {
+  $, $$, state, runtime, toast, api, esc, fmtTime, shortPath, safeParseHeaders,
+  systemTheme, initTheme, applyTheme, openModal, closeModal, isModalOpen,
+  isSidRunning, runningCount, updateRunningUI,
+};

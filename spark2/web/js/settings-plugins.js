@@ -1,5 +1,7 @@
-/* settings-plugins.js —— 插件面板：列表与状态（settings.js 拆分） */
+/* settings-plugins.js —— 插件面板：列表与状态 */
 "use strict";
+
+import { $, api, esc } from "./core.js";
 
 async function loadPlugins() {
   const box = $("#pluginList");
@@ -19,3 +21,5 @@ async function loadPlugins() {
     '</span></div>'
   ).join("");
 }
+
+export { loadPlugins };

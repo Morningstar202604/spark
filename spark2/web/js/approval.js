@@ -1,6 +1,9 @@
 /* approval.js —— 审批弹窗：多文件 diff 逐文件勾选、等待指示、A/D/S 快捷键 */
 "use strict";
 
+import { $, $$, state, openModal, closeModal, updateRunningUI, api, toast, esc } from "./core.js";
+import { highlightDiff } from "./render.js";
+
 function openApproval(ev) {
   state.approval = ev;
   $("#apSummary").textContent = ev.summary || "";
@@ -113,3 +116,5 @@ async function answerApproval(action) {
   } catch (e) { toast("审批提交失败"); }
   updateRunningUI();
 }
+
+export { openApproval, answerApproval, selectedFiles, updateAllowBtn };

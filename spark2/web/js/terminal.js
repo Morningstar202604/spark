@@ -1,6 +1,8 @@
 /* terminal.js —— 内置终端：tab 按会话分组（切会话自动换目录）、可关闭、高度拖拽 */
 "use strict";
 
+import { $, $$, api, toast, state } from "./core.js";
+
 // 终端 tab 按会话分组：sid -> tabs[]。切会话后展示该会话自己的终端组，
 // 后端 PtyManager 也按 (sid, tab_id) 建 session —— 不会在旧目录敲命令。
 const termState = { groups: {}, activeId: null, barOpen: false };
@@ -165,3 +167,5 @@ function initTermDrag() {
     bar.style.height = ""; localStorage.removeItem("spark2_term_h"); termResizeAll();
   });
 }
+
+export { termState, toggleTerm, addTermTab, closeTermTab, renderTermTabs, initTermDrag };

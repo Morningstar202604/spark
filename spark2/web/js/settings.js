@@ -1,8 +1,13 @@
 /* settings.js —— 设置抽屉公共层（模型 / 工作区 / 高级 / 关于 4 面板在此）。
-   记忆/用量/插件/检查点/MCP 面板已拆到 settings-memory / settings-usage /
-   settings-plugins / settings-git / settings-mcp（同目录，settings.js 之后加载）。
-   公共职责：抽屉开关、面板切换、配置读写、未保存提示、帮助列。 */
+   记忆/用量/插件/检查点/MCP 面板在 settings-memory / settings-usage /
+   settings-plugins / settings-git / settings-mcp。 */
 "use strict";
+
+import { $, api, state, esc, shortPath, toast, safeParseHeaders } from "./core.js";
+import { updateMeter } from "./render.js";
+import { loadSessions, updateSetupState } from "./sessions.js";
+import { renderMcp } from "./settings-mcp.js";
+import { loadMemory } from "./settings-memory.js";
 
 /* ---------- 抽屉通用 ---------- */
 function _overlay(id) { return document.querySelector('.overlay[data-for="' + id + '"]'); }
@@ -16,7 +21,7 @@ function openPane(paneId) {
   if (btn) {
     document.querySelectorAll(".setnav button").forEach(x => x.classList.toggle("on", x === btn));
     document.querySelectorAll(".setpane").forEach(p => p.classList.toggle("on", p.id === paneId));
-    if (typeof updHelp === "function") updHelp(paneId);
+    updHelp(paneId);
   }
 }
 
@@ -213,3 +218,7 @@ function updHelp(pane) {
   helpStat(pane);
   $("#helpField").hidden = true;
 }
+export {
+  openDrawer, closeDrawer, openPane, markDirty, loadConfig, saveCfg, testConn,
+  clearToken, loadRecentDirs, presetChanged, memModelRow, updHelp,
+};

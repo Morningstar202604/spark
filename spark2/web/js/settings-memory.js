@@ -1,5 +1,7 @@
-/* settings-memory.js —— 长期记忆面板：列表 / 删除 / 编辑 / 新增（settings.js 拆分） */
+/* settings-memory.js —— 长期记忆面板：列表 / 删除 / 编辑 / 新增 */
 "use strict";
+
+import { $, state, api, toast } from "./core.js";
 
 async function loadMemory() {
   const box = $("#memoryList");
@@ -50,3 +52,5 @@ async function addMemory() {
     loadMemory();
   } catch (e) { toast("保存失败"); }
 }
+
+export { loadMemory, addMemory };

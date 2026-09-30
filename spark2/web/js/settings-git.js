@@ -1,5 +1,7 @@
-/* settings-git.js —— 检查点面板：git 状态 / 存档 / 回滚（settings.js 拆分） */
+/* settings-git.js —— 检查点面板：git 状态 / 存档 / 回滚 */
 "use strict";
+
+import { $, api, state, toast, esc } from "./core.js";
 
 async function loadGit() {
   const side = $("#gitSide"), list = $("#gitList");
@@ -42,3 +44,5 @@ async function doGitReset() {
     toast("已回滚到最近存档"); loadGit();
   } catch (e) { toast("回滚失败"); }
 }
+
+export { loadGit, doCheckpoint, doGitReset };
