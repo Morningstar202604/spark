@@ -112,10 +112,19 @@ function updateRunBadge() {
   b.onclick = null;
 }
 
+const SEND_ICON = '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>';
+const STOP_ICON = '<svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2.5"/></svg>';
+
 function updateRunningUI() {
   const run = isSidRunning(state.sid);
   const btn = $("#btnSend");
-  if (btn) btn.disabled = run;
+  if (btn) {
+    // 运行中：发送按钮变「停止」（可点击取消）；空闲：恢复发送图标
+    btn.disabled = run ? false : btn.disabled;
+    btn.classList.toggle("stop", run);
+    btn.innerHTML = run ? STOP_ICON : SEND_ICON;
+    btn.title = run ? "停止生成" : "发送";
+  }
   const can = $("#btnCancel");
   if (can) can.style.display = run ? "" : "none";
   const inp = $("#input");

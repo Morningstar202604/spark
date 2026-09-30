@@ -63,4 +63,20 @@ export function initInputImg() {
     if (files.length) { e.preventDefault(); addFiles(files); }
   });
   ta.addEventListener("dragover", (e) => e.preventDefault());
+
+  // 输入栏「添加图片」按钮：隐藏 file input 触发选择（同一套 addFiles 管线）
+  const attach = $("#btnAttach");
+  if (attach) {
+    const fi = document.createElement("input");
+    fi.type = "file";
+    fi.accept = ALLOW.join(",");
+    fi.multiple = true;
+    fi.style.display = "none";
+    document.body.appendChild(fi);
+    attach.addEventListener("click", () => fi.click());
+    fi.addEventListener("change", () => {
+      if (fi.files.length) addFiles(fi.files);
+      fi.value = "";
+    });
+  }
 }

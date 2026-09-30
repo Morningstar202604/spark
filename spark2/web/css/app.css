@@ -24,8 +24,8 @@
   :root {
     color-scheme: light;
     /* ---- 颜色（OKLCH 主色 + color-mix 派生，见 base 层用法） ---- */
-    --bg: #f3f5f9;
-    --bg-2: #e9edf4;
+    --bg: #f6f8fb;
+    --bg-2: #ecf0f6;
     --panel: #ffffff;
     --panel-2: #eef2f7;
     --panel-3: #e4e9f1;
@@ -321,9 +321,10 @@
   .ibox {
     max-width: 860px; margin: 0 auto; display: flex; gap: 8px; align-items: flex-end;
     position: relative;
-    border: 1.5px solid var(--line); border-radius: var(--r-xl);
-    background: var(--panel-2);
-    padding: 4px 4px 4px 14px;
+    border: 1.5px solid var(--line); border-radius: 20px;
+    background: var(--panel);
+    padding: 4px 4px 4px 10px;
+    box-shadow: var(--sh-1);
     transition: border-color var(--tr-fast), box-shadow var(--tr-fast), background-color var(--tr-fast);
   }
   .ibox:focus-within {
@@ -333,9 +334,16 @@
   }
   textarea {
     flex: 1; resize: none; background: none; border: none; color: var(--text);
-    font: var(--fs-lg)/1.6 var(--sans); padding: 8px 0; min-height: 40px; max-height: 160px;
+    font: var(--fs-lg)/1.6 var(--sans); padding: 10px 0; min-height: 42px; max-height: 160px;
     align-self: center;
   }
+  .attachbtn {
+    flex: none; width: 34px; height: 34px; align-self: center;
+    display: inline-flex; align-items: center; justify-content: center;
+    background: none; border: none; border-radius: 50%; color: var(--text-3);
+    transition: color var(--tr-fast), background-color var(--tr-fast);
+  }
+  .attachbtn:hover { color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); }
   textarea:focus { outline: none; }
   textarea::placeholder { color: var(--text-3); }
   .imgpreview {
@@ -358,14 +366,16 @@
   .imgdel:hover { background: rgb(0 0 0 / .8); }
   .img-note { color: var(--text-3); font-size: var(--fs-xs); }
   .sendbtn {
-    background: var(--accent); color: var(--on-accent); border: none;
-    border-radius: var(--r-lg); padding: 12px 18px; font-weight: 700; font-size: var(--fs-md);
-    transition: filter var(--tr-fast), transform var(--tr-fast), background-color var(--tr-fast);
-    flex: none;
+    background: linear-gradient(135deg, var(--accent), var(--accent-2));
+    color: var(--on-accent); border: none;
+    width: 40px; height: 40px; border-radius: 50%;
+    display: inline-flex; align-items: center; justify-content: center;
+    transition: filter var(--tr-fast), transform var(--tr-fast), box-shadow var(--tr-fast);
+    flex: none; box-shadow: 0 2px 8px color-mix(in srgb, var(--accent) 35%, transparent);
   }
-  .sendbtn:hover { filter: brightness(1.08); }
-  .sendbtn:active { transform: translateY(1px) scale(.98); }
-  .sendbtn:disabled { background: var(--line-2); color: var(--text-3); cursor: not-allowed; filter: none; transform: none; }
+  .sendbtn:hover { filter: brightness(1.08); box-shadow: 0 4px 14px color-mix(in srgb, var(--accent) 42%, transparent); }
+  .sendbtn:active { transform: translateY(1px) scale(.96); }
+  .sendbtn:disabled { background: var(--line-2); color: var(--text-3); cursor: not-allowed; filter: none; transform: none; box-shadow: none; }
   .hint { max-width: 860px; margin: 6px auto 0; color: var(--text-3); font-size: var(--fs-xs); }
 
   /* ---------------- 内置终端 ---------------- */
@@ -723,3 +733,102 @@
   .tb-short { display: none; }
   .termtab { padding: 5px 6px 5px 10px; }
 }
+
+/* ---------------- 空态：建议问题 chips（对标主流 AI 助手） ---------------- */
+.empty .sugg { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin: 4px 0 0; }
+.empty .chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: var(--panel); border: 1px solid var(--line); color: var(--text-2);
+  border-radius: var(--r-full); padding: 7px 14px; font-size: var(--fs-sm);
+  transition: color var(--tr-fast), border-color var(--tr-fast), background-color var(--tr-fast), box-shadow var(--tr-fast), transform var(--tr-fast);
+  box-shadow: var(--sh-1);
+}
+.empty .chip:hover {
+  color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  background: color-mix(in srgb, var(--accent) 5%, var(--panel)); transform: translateY(-1px);
+  box-shadow: var(--sh-2);
+}
+.empty .chip::before { content: "✦"; font-size: 10px; color: var(--accent); opacity: .85; }
+.empty .cta { box-shadow: 0 4px 14px color-mix(in srgb, var(--accent) 30%, transparent); transition: filter var(--tr-fast), transform var(--tr-fast), box-shadow var(--tr-fast); }
+.empty .cta:hover { filter: brightness(1.06); transform: translateY(-1px); box-shadow: 0 6px 20px color-mix(in srgb, var(--accent) 38%, transparent); }
+
+/* ---------------- 命令面板（Ctrl/Cmd+K，对标主流 IDE/AI 助手） ---------------- */
+.palette { display: none; }
+.palette.open { display: flex; position: fixed; inset: 0; z-index: 120; align-items: flex-start; justify-content: center; padding-top: 12vh; background: var(--overlay); backdrop-filter: blur(4px); animation: paletteIn var(--tr-med) var(--ease); }
+@keyframes paletteIn { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: none; } }
+.palette-card {
+  width: min(560px, 92vw); background: var(--panel); border: 1px solid var(--line-2);
+  border-radius: var(--r-xl); box-shadow: var(--sh-3); overflow: hidden;
+  display: flex; flex-direction: column; max-height: 68vh;
+}
+.palette-input { width: 100%; padding: 15px 18px; font: var(--fs-lg)/1.5 var(--sans); color: var(--text); background: none; border: none; border-bottom: 1px solid var(--line); }
+.palette-input:focus { outline: none; }
+.palette-input::placeholder { color: var(--text-3); }
+.palette-list { overflow-y: auto; padding: 6px; }
+.palette-item {
+  display: flex; align-items: center; gap: 10px; width: 100%;
+  background: none; border: none; border-radius: var(--r-md);
+  padding: 9px 12px; font: var(--fs-md) var(--sans); color: var(--text); text-align: left; cursor: pointer;
+}
+.palette-item .pi { flex: none; width: 30px; height: 30px; border-radius: var(--r-sm); background: var(--panel-2); display: inline-flex; align-items: center; justify-content: center; color: var(--accent); font-size: 15px; }
+.palette-item .pt { flex: 1; min-width: 0; }
+.palette-item .pt b { display: block; font-weight: 600; font-size: var(--fs-md); }
+.palette-item .pt i { display: block; color: var(--text-3); font-size: var(--fs-xs); font-style: normal; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.palette-item .pk { flex: none; color: var(--text-3); font-size: var(--fs-xs); font-family: var(--mono); }
+.palette-item:hover, .palette-item.sel { background: var(--hover); }
+.palette-empty { padding: 18px; text-align: center; color: var(--text-3); font-size: var(--fs-sm); }
+
+/* ---------------- 助手消息：角色行 + hover 操作栏 ---------------- */
+.msg.assistant .mhead {
+  display: flex; align-items: center; gap: 7px; margin-bottom: 3px;
+  font-size: var(--fs-xs); color: var(--text-3);
+}
+.msg.assistant .mhead .mrole { font-weight: 700; color: var(--text-2); letter-spacing: .02em; }
+.msg.assistant .mhead .mtools { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 60%; color: var(--text-3); }
+.msg.assistant .mops { position: absolute; top: 0; right: 0; display: inline-flex; gap: 2px; opacity: 0; transition: opacity var(--tr-fast); }
+.msg.assistant:hover .mops, .msg.assistant .mops:focus-within { opacity: 1; }
+.msg.assistant .mops button {
+  width: 26px; height: 24px; display: inline-flex; align-items: center; justify-content: center;
+  background: var(--panel); border: 1px solid var(--line); color: var(--text-2);
+  border-radius: var(--r-sm); box-shadow: var(--sh-1);
+  transition: color var(--tr-fast), border-color var(--tr-fast);
+}
+.msg.assistant .mops button:hover { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+.msg.assistant .mops button.danger:hover { color: var(--red); border-color: color-mix(in srgb, var(--red) 45%, transparent); }
+
+/* ---------------- 代码块头部：语言 + 复制 ---------------- */
+.msg.assistant .text pre.mdcode { position: relative; }
+.msg.assistant .text pre.mdcode .mdcodelang {
+  display: inline-block; color: var(--text-3); font-size: 10.5px; letter-spacing: .08em;
+  text-transform: uppercase; margin-bottom: 6px;
+}
+.msg.assistant .text pre.mdcode .mdcopy {
+  position: absolute; top: 8px; right: 8px; opacity: 0;
+  background: var(--panel); border: 1px solid var(--line); color: var(--text-2);
+  border-radius: var(--r-sm); font-size: var(--fs-xs); padding: 2px 8px; cursor: pointer;
+  transition: opacity var(--tr-fast), color var(--tr-fast), border-color var(--tr-fast);
+}
+.msg.assistant .text pre.mdcode:hover .mdcopy, .msg.assistant .text pre.mdcode .mdcopy:focus-visible { opacity: 1; }
+.msg.assistant .text pre.mdcode .mdcopy:hover { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+
+/* ---------------- 设置导航：图标 + 选中左条 ---------------- */
+.setnav button { position: relative; }
+.setnav button.sel::before {
+  content: ""; position: absolute; left: -8px; top: 22%; bottom: 22%;
+  width: 3px; border-radius: 3px; background: var(--accent);
+}
+
+/* ---------------- 消息气泡细节 ---------------- */
+.msg.user { box-shadow: var(--sh-1); }
+.msg { position: relative; }
+@media (hover: none) {
+  .msg.assistant .mops { opacity: 1; }
+  .msg.assistant .text pre.mdcode .mdcopy { opacity: 1; }
+}
+
+/* 发送按钮运行态 → 停止 */
+.sendbtn.stop {
+  background: linear-gradient(135deg, var(--red), color-mix(in srgb, var(--red) 75%, #000 10%));
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--red) 35%, transparent);
+}
+.sendbtn.stop:hover { filter: brightness(1.06); box-shadow: 0 4px 14px color-mix(in srgb, var(--red) 42%, transparent); }

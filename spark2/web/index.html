@@ -17,12 +17,12 @@
     <div class="sideline"><div class="st" id="sessionLine">未选择会话</div></div>
     <button class="runbadge" id="runBadge" style="display:none"></button>
     <div class="tb-short">
-      <button class="iconbtn danger" id="btnCancel" style="display:none">■ 停止</button>
-      <button class="iconbtn" id="btnTerm" title="打开内置终端（随当前会话目录）">终端</button>
-      <button class="iconbtn hide-sm" id="btnGit" title="git 检查点：状态 / 存档 / 回滚">检查点</button>
-      <button class="iconbtn hide-sm" id="btnUsage" title="用量统计">用量</button>
-      <button class="iconbtn" id="btnSessions">会话</button>
-      <button class="iconbtn" id="btnSettings">设置</button>
+      <button class="iconbtn danger" id="btnCancel" style="display:none"><svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor"><rect x="5" y="5" width="14" height="14" rx="2.5"/></svg>停止</button>
+      <button class="iconbtn" id="btnTerm" title="打开内置终端（随当前会话目录）"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>终端</button>
+      <button class="iconbtn hide-sm" id="btnGit" title="git 检查点：状态 / 存档 / 回滚"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>检查点</button>
+      <button class="iconbtn hide-sm" id="btnUsage" title="用量统计"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>用量</button>
+      <button class="iconbtn" id="btnSessions"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>会话</button>
+      <button class="iconbtn" id="btnSettings"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>设置</button>
       <button class="iconbtn" id="btnTheme" title="切换浅色/深色主题"></button>
     </div>
     <div class="menuwrap">
@@ -59,6 +59,12 @@
         <div class="step"><span class="n">3</span><span>点下面「新建会话」，描述你想做的事，例如：帮我修一下登录接口的 bug。</span></div>
       </div>
       <div class="setupstate" id="setupState"></div>
+      <div class="sugg" id="suggChips">
+        <button class="chip" data-q="帮我梳理一下这个项目的整体结构">梳理项目整体结构</button>
+        <button class="chip" data-q="看看代码里有没有明显的 bug 或安全隐患">排查明显 bug 与安全隐患</button>
+        <button class="chip" data-q="给这个项目补一个 README 和启动说明">补 README 与启动说明</button>
+        <button class="chip" data-q="按最佳实践重构项目的前端代码">按最佳实践重构前端</button>
+      </div>
       <div style="margin-top:16px"><button class="cta" id="btnStart">＋ 新建会话，开始使用</button></div>
     </div>
   </main>
@@ -66,10 +72,11 @@
   <!-- 输入栏 -->
   <div class="inputbar">
     <div class="ibox">
+      <button class="attachbtn" id="btnAttach" title="添加图片（也可直接粘贴 / 拖入，最多 3 张）"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg></button>
       <textarea id="input" placeholder="描述你想做的事，例如：帮我修一下登录接口的 bug…（输入 @ 引用工作目录文件；可直接粘贴/拖入图片，最多 3 张）" rows="1"></textarea>
       <div id="imgPreview" class="imgpreview" hidden></div>
       <div id="atPop" role="listbox"></div>
-      <button class="sendbtn" id="btnSend">发送</button>
+      <button class="sendbtn" id="btnSend" title="发送"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg></button>
     </div>
     <div class="hint"><span class="quickap">审批 <select id="fQuickAp" title="本轮对话的审批模式（快捷切换，不影响设置里的默认值）"></select></span> · Enter 发送 · Shift+Enter 换行 · @ 引用文件 · 写入文件与执行命令会先征求你确认</div>
   </div>
@@ -291,7 +298,7 @@
      结构集中于此；js/components.js 注册自定义元素并 clone 这些模板，
      渲染层不再拼长 HTML 字符串。 ============ -->
 <template id="tpl-msg-user"><div class="msg user"></div></template>
-<template id="tpl-msg-assistant"><div class="msg assistant"><div class="text"></div><button class="copy" title="复制内容" aria-label="复制内容"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button></div></template>
+<template id="tpl-msg-assistant"><div class="msg assistant"><div class="mhead"><span class="mrole">Spark</span><span class="mtools"></span></div><div class="text"></div><div class="mops"><button class="copy" title="复制内容" aria-label="复制内容"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button><button class="delmsg danger" title="移除本条（仅本地视图）" aria-label="移除本条"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/></svg></button></div></div></template>
 <template id="tpl-msg-error"><div class="msg error"></div></template>
 <template id="tpl-tool-card"><div class="tool"><div class="thead"><span class="status">⏳</span><span class="tname"></span><span class="tsum"></span><span class="tdur"></span></div><div class="tbody"><pre class="out"></pre></div></div></template>
 <template id="tpl-plan-card"><div class="plan"><div class="pt">计划</div><ol></ol></div></template>
@@ -300,6 +307,14 @@
 <template id="tpl-mcp-row"><div class="mcprow"><div class="mcphead"><input data-k="name" placeholder="名称，如 filesystem"><select data-k="transport"><option value="stdio">本地进程</option><option value="http">远程 HTTP</option></select><button class="del" title="删除">✕</button></div><div class="mcplines" data-k="stdioLines"><input data-k="command" placeholder="命令，如 npx / python"><input data-k="args" placeholder="参数，空格分隔，如 -y @modelcontextprotocol/server-filesystem /path"></div><div class="mcplines" data-k="httpLines"><input data-k="url" placeholder="https://mcp.example.com/mcp"><input data-k="headers" placeholder='请求头 JSON，如 {"Authorization":"Bearer xxx"}'></div><div class="mcpdesc"></div></div></template>
 <template id="tpl-mem-row"><div class="mem"><span class="mk"></span><span class="mv"></span><span class="md"></span><button data-edit title="修改内容">编辑</button><button data-id title="删除">删除</button></div></template>
 <template id="tpl-git-row"><div class="gitrow"><span class="gh"></span><span class="gt"></span><span class="gm"></span><button class="del">回滚</button></div></template>
+
+<!-- 命令面板（Ctrl/Cmd+K） -->
+<div class="palette" id="palette" role="dialog" aria-label="命令面板">
+  <div class="palette-card">
+    <input class="palette-input" id="paletteInput" placeholder="输入命令或关键词…（↑↓ 选择，Enter 执行，Esc 关闭）" autocomplete="off" />
+    <div class="palette-list" id="paletteList"></div>
+  </div>
+</div>
 
 <!-- 无构建、按依赖顺序加载的轻量模块 -->
 <script type="module" src="js/main.js"></script>

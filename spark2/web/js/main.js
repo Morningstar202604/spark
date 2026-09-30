@@ -5,7 +5,7 @@
 /* 组件注册副作用（import 即执行 customElements.define，必须在其他模块之前） */
 import "./components.js";
 
-import { $, $$, state, esc, api, toast, applyTheme, initTheme, openModal, closeModal, isModalOpen, updateRunningUI } from "./core.js";
+import { $, $$, state, esc, api, toast, applyTheme, initTheme, openModal, closeModal, isModalOpen, updateRunningUI, isSidRunning } from "./core.js";
 import { bindScrollStick, autoGrow } from "./render.js";
 import { loadSessions, renderSessions, newSession, selectSession, cancelSession, showEmptyIfNeeded, ensureStart } from "./sessions.js";
 import { send } from "./sse.js";
@@ -18,6 +18,8 @@ import { loadPlugins } from "./settings-plugins.js";
 import { loadUsage } from "./settings-usage.js";
 import { toggleTerm, addTermTab, initTermDrag } from "./terminal.js";
 import { initInputImg } from "./inputimg.js";
+import { initCmdPalette } from "./cmd.js";
+import { initMdActions } from "./render.js";
 
 /* ---------- @ 文件补全（GET /api/fs，工作目录内只读浏览） ---------- */
 const atState = { items: [], sel: 0, dirPart: "", start: 0 };
@@ -92,7 +94,23 @@ function closeMenu() { $("#tbMenu").classList.remove("open"); }
 function bind() {
   bindScrollStick();
   initInputImg();
-  $("#btnSend").onclick = send;
+  initCmdPalette();
+  initMdActions();
+  $("#btnSend").onclick = () => { if (isSidRunning(state.sid)) cancelSession(state.sid); else send(); };
+  // 消息被手动移除后刷新空态
+  $("#msgList").addEventListener("spark:msg-removed", showEmptyIfNeeded);
+  // 空态建议问题 chips：点击直接填充并发送
+  $$(".chip").forEach(c => {
+    c.addEventListener("click", () => {
+      const q = c.dataset.q || c.textContent;
+      newSession().then(() => {
+        const ta = $("#input");
+        ta.value = q;
+        autoGrow();
+        send();
+      });
+    });
+  });
   $("#input").addEventListener("keydown", e => {
     // @ 补全弹层打开时优先消费方向键/回车/Esc
     if ($("#atPop").classList.contains("open")) { atKey(e); return; }

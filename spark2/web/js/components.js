@@ -55,6 +55,10 @@ class SparkMsg extends HTMLElement {
             .then(() => toast("已复制"), () => toast("复制失败"));
         };
       }
+      const del = this.msgEl.querySelector(".delmsg");
+      if (del) {
+        del.onclick = () => { this.remove(); this.dispatchEvent(new CustomEvent("spark:msg-removed", { bubbles: true })); };
+      }
     }
     this.dispatchEvent(new CustomEvent("spark:msg-ready", { bubbles: true }));
     finishMount(this);

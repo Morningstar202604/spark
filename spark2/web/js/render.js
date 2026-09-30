@@ -2,7 +2,7 @@
    结构全部来自 <template> 组件（components.js），本文件只创建元素 + 填数据。 */
 "use strict";
 
-import { $, state, esc, runtime } from "./core.js";
+import { $, state, esc, runtime, toast } from "./core.js";
 import { showEmptyIfNeeded } from "./sessions.js"; // 消息区空状态（运行时调用）
 
 function addUserMsg(text, note) {
@@ -43,7 +43,7 @@ function mdToHtml(src) {
   const blocks = [];
   s = s.replace(/```([\w+-]*)[^\n]*\n?([\s\S]*?)```/g, (m, lang, code) => {
     const i = blocks.length;
-    blocks.push('<pre class="mdcode"><span class="mdcodelang">' + esc(lang || "") + '</span><code>' + esc(code.replace(/\s+$/, "")) + '</code></pre>');
+    blocks.push('<pre class="mdcode"><span class="mdcodelang">' + esc(lang || "") + '</span><button class="mdcopy" type="button" title="复制代码">复制</button><code>' + esc(code.replace(/\s+$/, "")) + '</code></pre>');
     return "\u0000B" + i + "\u0000";
   });
   // 行内代码
@@ -204,8 +204,22 @@ function updateMeter(est) {
   m.title = "上下文约 " + state.lastUsage + " / " + max + " tokens（" + pct + "%）";
 }
 
-export {
-  addUserMsg, newAssistant, getStreamSpan, mdToHtml, appendThinking, planCard,
+/* ---------- Markdown 代码块「复制代码」按钮（事件委托，流式渲染后也生效） ---------- */
+function initMdActions() {
+  const list = $("#msgList");
+  if (!list) return;
+  list.addEventListener("click", ev => {
+    const t = ev.target.closest(".mdcopy");
+    if (!t) return;
+    const code = t.parentElement.querySelector("code");
+    if (code) {
+      navigator.clipboard.writeText(code.textContent)
+        .then(() => toast("代码已复制"), () => toast("复制失败"));
+    }
+  });
+}
+
+export { addUserMsg, newAssistant, getStreamSpan, mdToHtml, appendThinking, planCard,
   markPlanDone, toolCard, highlightDiff, updateToolResult, errorMsg, autoGrow,
-  autoScroll, bindScrollStick, updateMeter,
+  autoScroll, bindScrollStick, updateMeter, initMdActions,
 };
