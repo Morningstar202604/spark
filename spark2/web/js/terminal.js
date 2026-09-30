@@ -85,6 +85,7 @@ function addTermTab() {
       if (ph) ph.remove();
       term.open(box);
       term.focus();
+      fitTerm(term, box);   // 创建即适配容器宽度（默认 80 列在窄屏会横向溢出）
       sendTermSize(tabId, box, ws);
     };
     ws.onmessage = e => {
@@ -95,7 +96,14 @@ function addTermTab() {
     };
     ws.onclose = () => term.write("\r\n[终端] 连接已断开（重新打开面板可恢复）\r\n");
     term.onData(d => { if (ws.readyState === 1) ws.send(JSON.stringify({ type: "in", data: d })); });
-    window.addEventListener("resize", () => { if (termState.activeId === tabId) sendTermSize(tabId, box, ws); });
+    // 视口变化（含移动端横竖屏/窗口缩放）：同时重设 xterm 前端尺寸与后端 cols/rows，
+    // 否则终端保持创建时的宽度，窄屏会横向溢出（此前只发后端不 resize 前端）
+    window.addEventListener("resize", () => {
+      if (termState.activeId === tabId) {
+        fitTerm(term, box);
+        sendTermSize(tabId, box, ws);
+      }
+    });
   });
 }
 
@@ -114,6 +122,11 @@ function closeTermTab(sid, tabId) {
   if (termState.activeId === tabId) termState.activeId = null;
   renderTermTabs();
   toast("终端已关闭");
+}
+
+function fitTerm(term, box) {
+  const w = box.clientWidth || 640, h = box.clientHeight || 240;
+  term.resize(Math.max(20, Math.floor(w / 9)), Math.max(5, Math.floor(h / 18)));
 }
 
 function sendTermSize(tabId, box, ws) {

@@ -10,7 +10,7 @@ import { bindScrollStick, autoGrow } from "./render.js";
 import { loadSessions, renderSessions, newSession, selectSession, cancelSession, showEmptyIfNeeded, ensureStart } from "./sessions.js";
 import { send } from "./sse.js";
 import { answerApproval } from "./approval.js";
-import { openDrawer, closeDrawer, markDirty, loadConfig, loadRecentDirs, saveCfg, testConn, clearToken, presetChanged, memModelRow, updHelp } from "./settings.js";
+import { openDrawer, closeDrawer, openPane, markDirty, loadConfig, loadRecentDirs, saveCfg, testConn, clearToken, presetChanged, memModelRow, updHelp } from "./settings.js";
 import { addMcp } from "./settings-mcp.js";
 import { loadMemory, addMemory } from "./settings-memory.js";
 import { loadGit, doCheckpoint, doGitReset } from "./settings-git.js";
@@ -104,6 +104,12 @@ function bind() {
   /* 会话抽屉 */
   $("#btnSessions").onclick = () => { openDrawer("drawerSessions"); loadSessions(true).catch(() => {}); };
   $("#sessSearch").addEventListener("input", renderSessions);
+
+  /* 引导区「去设置」：打开设置抽屉并定位到对应面板（此前为死按钮） */
+  $$(".golink").forEach(b => b.addEventListener("click", () => {
+    openDrawer("drawerSettings");
+    openPane(b.dataset.pane || "paneModel");
+  }));
 
   /* 用量 / 检查点 */
   $("#btnUsage").onclick = () => { openDrawer("drawerUsage"); loadUsage(); };

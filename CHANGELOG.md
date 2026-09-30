@@ -10,6 +10,12 @@
 - **改完自动验证**：`apply_patch` 成功后自动运行受影响测试（`pytest -q`，120s 超时）并回填结果；无测试项目自动跳过；可在设置「高级」关闭。
 - 文件树治理：新增 `CHANGELOG.md`、`Makefile`、`[tool.ruff]` 配置；`pyproject.toml` 文档改中英双语；移除 `docs/` 官网静态站与 GitHub Pages CI（重资产移出仓库）。
 
+### 修复
+- 首屏引导「去设置」死按钮：补绑事件（打开设置抽屉 + 定位对应面板）。
+- 集成面板 MCP 长命令横向溢出：toolrow 改 flex-wrap + code overflow-wrap。
+- 内置终端 xterm 不随视口适配：创建即 fit + resize 事件同步前端尺寸（此前默认 80 列在窄屏溢出）。
+- 多视口走查（1920→390 六档）：主页面/全部抽屉/审批 modal 溢出 0、console 零错误。
+
 ## [0.8.0] - 2026-09-30
 
 ### 前端架构（本轮重点）
