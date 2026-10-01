@@ -93,6 +93,14 @@ python3 -m pytest -q      # 216 个用例通过（5 跳过）
 python3 tests/e2e_manual.py  # 真实 uvicorn 端到端（流内审批 / 409 / 落盘）
 ```
 
+## 界面预览
+
+| | |
+| --- | --- |
+| ![欢迎引导](assets/screenshots/01-welcome.png) | ![对话界面](assets/screenshots/02-chat.png) |
+| ![设置面板](assets/screenshots/03-settings.png) | ![MCP 市场](assets/screenshots/04-mcp-market.png) |
+| ![内置终端](assets/screenshots/05-terminal.png) | |
+
 ## 📚 文档
 
 - `docs/CONFIG.md` — 配置文件全字段说明（config.toml）

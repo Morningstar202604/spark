@@ -31,6 +31,14 @@ One file frontend. One process. One `pip install`. Everything lives under `~/.sp
 
 ## 🎬 See it in action
 
+| | |
+| --- | --- |
+| ![Welcome](assets/screenshots/01-welcome.png) | ![Chat](assets/screenshots/02-chat.png) |
+| ![Settings](assets/screenshots/03-settings.png) | ![MCP Market](assets/screenshots/04-mcp-market.png) |
+| ![Terminal](assets/screenshots/05-terminal.png) | |
+
+## 🎬 See it in action
+
 [Watch the demo video](docs/media/promo.mp4)
 
 ## ✨ Why Spark?
