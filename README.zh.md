@@ -34,6 +34,20 @@ spark2 web          # 打开打印出的地址（仅监听 127.0.0.1）
 > 若 `spark2 web` 的**终端面板**连不上（WS 404/不支持升级），多半是 uvicorn 缺 websockets：
 > `pip install "uvicorn[standard]"` 后重启。
 
+## 📦 安装包（Windows EXE / macOS / Linux）
+
+不想用 pip？到 **GitHub Releases** 下载现成包（`git tag v0.9.0 && git push --tags` 自动构建），
+或一条命令本地打包：
+
+| 平台 | 一条命令 | 产物 |
+| --- | --- | --- |
+| Windows | `powershell -ExecutionPolicy Bypass -File scripts/build-windows.ps1` | `dist\spark\spark.exe` |
+| Linux / macOS | `bash scripts/build.sh` | `dist/spark/spark` |
+
+`spark` 可执行文件内嵌 CLI **和** Web 界面（前端资源全打包）：
+运行 `spark.exe web`（或 `./spark web`）后浏览器打开打印的地址。
+完整指南：[docs/INSTALL.md](docs/INSTALL.md) · [docs/en/INSTALL.md](docs/en/INSTALL.md)
+
 1. 打开**设置** → 选模型服务（DeepSeek / 通义 / 智谱 / Kimi / 豆包 / Ollama / **演示模式**）→ 填 API Key → 把**工作目录**指向你的项目 → **保存**。
 2. 点「**+ 新建会话**」描述需求，例如"帮我修一下登录接口的 bug"。
 3. 全程可见：计划卡 → 工具卡 → diff 预览 → **你确认** → 结果。
@@ -101,7 +115,16 @@ python3 tests/e2e_manual.py  # 真实 uvicorn 端到端（流内审批 / 409 / �
 | ![设置面板](assets/screenshots/03-settings.png) | ![MCP 市场](assets/screenshots/04-mcp-market.png) |
 | ![内置终端](assets/screenshots/05-terminal.png) | |
 
-## 📚 文档
+## 📚 文档（中文 / English）
+
+| | 中文 | English |
+| --- | --- | --- |
+| 安装与打包（Windows EXE） | [docs/INSTALL.md](docs/INSTALL.md) | [docs/en/INSTALL.md](docs/en/INSTALL.md) |
+| 配置参考 | [docs/CONFIG.md](docs/CONFIG.md) | [docs/en/CONFIG.md](docs/en/CONFIG.md) |
+| HTTP API | [docs/API.md](docs/API.md) | [docs/en/API.md](docs/en/API.md) |
+| 架构说明 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | [docs/en/ARCHITECTURE.md](docs/en/ARCHITECTURE.md) |
+| 文档索引 | [docs/README.md](docs/README.md) | [docs/en/](../docs/en/) |
+
 
 - `docs/CONFIG.md` — 配置文件全字段说明（config.toml）
 - `docs/API.md` — HTTP API 参考（SSE 事件 / 会话 / 配置 / 记忆）

@@ -1,4 +1,15 @@
+<!--
+spark: local-first AI coding agent | approval gate | prompt-injection defense |
+local semantic memory | MCP | web search | Chinese LLMs (DeepSeek/Qwen/GLM/Kimi/Doubao/Unisound) |
+SSE streaming | native Web Components | zero-Electron | Windows EXE
+-->
+
 <div align="center">
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/logo.svg">
+  <img src="assets/logo.svg" width="96" alt="Spark logo — local-first AI coding agent" />
+</picture>
 
 # ⚡ Spark
 
@@ -62,6 +73,20 @@ spark2 web          # opens the printed URL (loopback only)
 
 > If the **terminal panel** fails to connect (WS 404 / unsupported upgrade), uvicorn is
 > missing websockets: `pip install "uvicorn[standard]"` and restart.
+
+## 📦 Packages (Windows EXE / macOS / Linux)
+
+Prefer a binary over `pip`? Grab one from **GitHub Releases** — `git tag v0.9.0 && git push --tags`
+triggers the build — or build it locally in one command:
+
+| Platform | One command | Output |
+| --- | --- | --- |
+| Windows | `powershell -ExecutionPolicy Bypass -File scripts/build-windows.ps1` | `dist\spark\spark.exe` |
+| Linux / macOS | `bash scripts/build.sh` | `dist/spark/spark` |
+
+The `spark` binary bundles the CLI **and** the web UI (frontend assets embedded):
+run `spark.exe web` (or `./spark web`) and open the printed URL.
+Full guide: [docs/INSTALL.md](docs/INSTALL.md) · [docs/en/INSTALL.md](docs/en/INSTALL.md)
 
 1. Open **Settings** → pick a provider (DeepSeek / Qwen / Zhipu / Kimi / Doubao / Ollama / **demo mode**) → paste your API key → point **workdir** at your project → **Save**.
 2. Click **+ New session** and tell Spark what to do — *"fix the login endpoint bug"*.
@@ -133,6 +158,15 @@ python3 -m pytest -q      # 216 passed / 5 skipped — approval rules, tools, lo
                           # checkpoints, web API, MCP (stdio + HTTP), TUI
 python3 tests/e2e_manual.py  # real-uvicorn E2E (in-stream approval / 409 / disk writes)
 ```
+
+## 📚 Documentation (中文 / English)
+
+| | 中文 | English |
+| --- | --- | --- |
+| Install & build (Windows EXE) | [docs/INSTALL.md](docs/INSTALL.md) | [docs/en/INSTALL.md](docs/en/INSTALL.md) |
+| Configuration | [docs/CONFIG.md](docs/CONFIG.md) | [docs/en/CONFIG.md](docs/en/CONFIG.md) |
+| HTTP API | [docs/API.md](docs/API.md) | [docs/en/API.md](docs/en/API.md) |
+| Architecture | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | [docs/en/ARCHITECTURE.md](docs/en/ARCHITECTURE.md) |
 
 ## 📄 License
 

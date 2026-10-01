@@ -1,0 +1,44 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            asset: spark-windows-x86_64
+            cmd: powershell -ExecutionPolicy Bypass -File scripts/build-windows.ps1
+            pack: powershell Compress-Archive -Path dist/spark -DestinationPath spark-windows-x86_64.zip
+          - os: ubuntu-latest
+            asset: spark-linux-x86_64
+            cmd: bash scripts/build.sh
+            pack: tar -czf spark-linux-x86_64.tar.gz -C dist spark
+          - os: macos-latest
+            asset: spark-macos-x86_64
+            cmd: bash scripts/build.sh
+            pack: tar -czf spark-macos-x86_64.tar.gz -C dist spark
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build
+        run: ${{ matrix.cmd }}
+      - name: Pack
+        run: ${{ matrix.pack }}
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            spark-windows-*
+            spark-linux-*
+            spark-macos-*
+          generate_release_notes: true

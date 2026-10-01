@@ -1,5 +1,7 @@
 # Spark 架构说明
 
+> English: [docs/en/ARCHITECTURE.md](en/ARCHITECTURE.md)
+
 ## 顶层结构
 
 ```

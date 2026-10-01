@@ -1,5 +1,7 @@
 # Spark 配置文档（config.toml）
 
+> English: [docs/en/CONFIG.md](en/CONFIG.md)
+
 配置文件位于 `~/.spark2/config.toml`（可用 `SPARK2_HOME` 环境变量覆盖目录）。
 绝大多数字段可在网页「设置」面板中修改并保存，本文件列出全部字段与默认值。
 
