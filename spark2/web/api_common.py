@@ -80,7 +80,7 @@ def get_app_state(request: Request) -> AppState:
 
 
 def check_token(request: Request, state: AppState) -> None:
-    """令牌鉴权；未设置令牌 = 本机免登录（服务只绑 127.0.0.1）。"""
+    """令牌鉴权；未设置令牌 = 免登录（默认监听 0.0.0.0，公网可达时务必开启令牌；仅本机用可传 --host 127.0.0.1）。"""
     expected = (state.cfg.get("token") or "").strip()
     if not expected:
         return

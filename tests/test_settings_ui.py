@@ -60,7 +60,6 @@ FIELD_IDS = [
     "btnTest",
     "btnSaveCfg",
     "cfgStatus",
-    "fQuickAp",
 ]
 
 

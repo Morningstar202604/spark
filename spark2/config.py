@@ -170,7 +170,8 @@ def load_config() -> dict:
                 os.replace(f, backup)
             except OSError:
                 pass
-    # 访问令牌默认空 = 本机免登录（服务只绑 127.0.0.1）。
+    # 访问令牌默认空 = 免登录。默认监听 0.0.0.0（便于外部预览/代理访问），
+    # 公网可达时务必在设置里开启令牌；仅本机使用可显式 `--host 127.0.0.1`。
     # 用户可在设置里显式开启；开启后所有请求必须携带。
     cfg["token"] = str(cfg.get("token") or "").strip()
     # API Key 环境变量回退（对标主流 agent：CLAUDE_API_KEY / OPENAI_API_KEY 等）：

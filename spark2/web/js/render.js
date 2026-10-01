@@ -206,7 +206,7 @@ function updateMeter(est, maxTokens) {
   const pct = Math.min(100, Math.round(used / max * 100));
   const m = $("#meter"); m.style.width = pct + "%"; m.classList.toggle("warn", pct > 80);
   m.title = "上下文约 " + used + " / " + max + " tokens（" + pct + "%）";
-  const w = $("#meterwrap"); if (w) w.hidden = used <= 0;
+  const w = $("#meterwrap"); if (w) w.hidden = !(used > 0 || maxTokens);
   const t = $("#ctxText"); if (t) t.textContent = used ? (pct + "% · " + used + " / " + max) : "";
 }
 

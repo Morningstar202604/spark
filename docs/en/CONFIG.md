@@ -15,7 +15,7 @@ The config file lives at `~/.spark2/config.toml` (override the directory with th
 | `workdir` | startup dir | Default working directory |
 | `approval_mode` | `suggest` | `suggest` (ask on writes) / `auto-edit` (auto-apply file edits) / `full-auto` (no prompts) / `plan` (read-only planning) |
 | `max_context_tokens` | `32000` | Context window ceiling; older messages are compacted beyond this |
-| `token` | `""` | Access token; empty = local no-login (listens on 127.0.0.1 only) |
+| `token` | `""` | Access token; empty = no-login (default listen 0.0.0.0 — enable a token when publicly reachable) |
 
 ## Routing & failover
 

@@ -38,12 +38,12 @@ bash scripts/build.sh            # output: dist/spark/spark
 
 - `spark` executable — CLI + Web server (frontend assets embedded)
 - Everything runs locally under `~/.spark2/`
-- No runtime dependency on a browser other than opening `http://127.0.0.1:PORT`
+- No runtime dependency on a browser other than opening the printed `http://127.0.0.1:PORT` (the server listens on `0.0.0.0` by default for external access; the printed URL uses 127.0.0.1)
 - Optional extras (MCP / embedding / TUI) degrade gracefully when absent
 
 ## First run
 
-1. Open the printed `http://127.0.0.1:PORT`
+1. Open the printed `http://127.0.0.1:PORT` (the server listens on `0.0.0.0` by default, so external proxies / preview services can reach it directly)
 2. Settings → pick a model preset (DeepSeek / Qwen / GLM / Kimi / Doubao / Unisound / Ollama / custom), paste the API key
 3. Point the working directory at your project
 4. Create a session and start — every write and command is gated by approval

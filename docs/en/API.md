@@ -1,6 +1,6 @@
 # Spark HTTP API Reference
 
-The server listens on `127.0.0.1`. If an access `token` is configured, every request
+The server listens on `0.0.0.0` by default (for external proxy / preview access; pass `--host 127.0.0.1` for local-only). If an access `token` is configured, every request
 must carry the header `X-Spark-Token: <token>`, otherwise `401` is returned.
 Streaming endpoints use SSE (`text/event-stream`).
 

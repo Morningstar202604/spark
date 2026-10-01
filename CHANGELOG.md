@@ -5,6 +5,12 @@
 ## [Unreleased]
 
 ### 新增
+- **Web 默认监听 0.0.0.0**：`spark2 web` 默认 host 由 `127.0.0.1` 改为 `0.0.0.0`，外部预览/代理可直接访问；打印地址自动用 `127.0.0.1` 便于本机打开；本机使用可显式传 `--host 127.0.0.1`。
+- **uvicorn 日志级别可调**：`spark2 web` 新增 `--log-level`（默认 info），线上排障不必再翻无输出的 warning 日志。
+- **pip 过旧提示**：README 与 pyproject.toml 注释补充"pip < 23.2 装不上 fastapi/tomlkit"的提示（先 `python -m pip install --upgrade pip`）。
+
+### 修复
+- **Web 终端 WS 404**：`uvicorn[standard]` 缺 websockets 时终端面板无法建立连接，README 已说明补装方式。
 - **多 agent 并行探索（Agent Teams 最小版）**：`explore_parallel` 工具并发派出多个只读子 agent 探索不同目录/主题并合并结果，大仓库理解速度质变（对标 Claude Code Agent Teams）。
 - **多模态识图**：前端支持粘贴/拖拽图片（≤3 张、单张 ≤2MB），模型支持时以 `image_url` 消息送入；不支持的模型自动降级为纯文本。
 - **改完自动验证**：`apply_patch` 成功后自动运行受影响测试（`pytest -q`，120s 超时）并回填结果；无测试项目自动跳过；可在设置「高级」关闭。

@@ -88,8 +88,18 @@ function atPick() {
 }
 
 /* ---------- 顶栏 ⋯ 菜单 ---------- */
-function toggleMenu() { $("#tbMenu").classList.toggle("open"); }
-function closeMenu() { $("#tbMenu").classList.remove("open"); }
+function toggleMenu() {
+  const open = !$("#tbMenu").classList.contains("open");
+  $("#tbMenu").classList.toggle("open", open);
+  setMenuLock(open);
+}
+function closeMenu() { $("#tbMenu").classList.remove("open"); setMenuLock(false); }
+// 菜单展开时锁定消息区滚动（用户点击菜单项 / 菜单外区域 / Esc 均解锁）
+function setMenuLock(on) {
+  const chat = $("#chat");
+  if (!chat) return;
+  chat.style.overflow = on ? "hidden" : "";
+}
 
 /* ---------- 事件绑定 ---------- */
 function bind() {
@@ -114,20 +124,21 @@ function bind() {
       ta.value = text || "";
       autoGrow();
       ta.focus();
-      // 本地移除该消息及之后的所有消息卡（data-mid 在 spark-msg 元素上）
+      // 本地移除该消息及之后的所有元素（消息卡 + 工具卡 + 计划卡 + 思考块）
       let hit = false;
-      for (const el of [...$$("#msgList spark-msg")]) {
+      for (const el of [...$$("#msgList > *")]) {
         if (hit || el.getAttribute("data-mid") === mid) { hit = true; el.remove(); }
       }
       showEmptyIfNeeded();
       toast("已载入，可修改后重新发送");
     } catch (err) { toast("编辑失败"); }
   });
-  // 空态建议问题 chips：点击直接填充并发送
+  // 空态建议问题 chips：点击直接填充并发送（配置缺失时 newSession 返回 null，只引导设置）
   $$(".chip").forEach(c => {
     c.addEventListener("click", () => {
       const q = c.dataset.q || c.textContent;
-      newSession().then(() => {
+      newSession().then(id => {
+        if (!id) return;
         const ta = $("#input");
         ta.value = q;
         autoGrow();
@@ -216,11 +227,8 @@ function bind() {
   $("#btnMenu").onclick = e => { e.stopPropagation(); toggleMenu(); };
   document.addEventListener("click", e => { if (!e.target.closest(".menuwrap")) closeMenu(); });
   $("#mNewSession").onclick = () => { closeMenu(); newSession(); };
-  $("#mTerm").onclick = () => { closeMenu(); toggleTerm(); };
   $("#mGit").onclick = () => { closeMenu(); $("#btnGit").click(); };
   $("#mUsage").onclick = () => { closeMenu(); $("#btnUsage").click(); };
-  $("#mSessions").onclick = () => { closeMenu(); $("#btnSessions").click(); };
-  $("#mSettings").onclick = () => { closeMenu(); $("#btnSettings").click(); };
   $("#mTheme").onclick = () => { closeMenu(); $("#btnTheme").click(); };
 
   /* 其他 */

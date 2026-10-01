@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <title>Spark 编程助手</title>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230B1220'/%3E%3Cpath d='M20 40l6-16h3l-4 10h10l-3 6z' fill='%232DD4BF'/%3E%3C/svg%3E" />
-<link rel="stylesheet" href="css/app.css" />
+<link rel="stylesheet" href="css/app.css?v=5" />
 </head>
 <body>
 <div class="app">
@@ -28,19 +28,10 @@
     <div class="menuwrap">
       <button class="iconbtn" id="btnMenu" title="更多操作">⋯</button>
       <div class="menu" id="tbMenu">
-        <div class="mgroup">
-          <button id="mNewSession"><span class="mi">＋</span>新建会话</button>
-          <button id="mSessions"><span class="mi">☰</span>会话列表</button>
-        </div>
-        <div class="mgroup">
-          <button id="mTerm"><span class="mi">▤</span>终端</button>
-          <button id="mGit"><span class="mi">◉</span>检查点</button>
-          <button id="mUsage"><span class="mi">∑</span>用量统计</button>
-        </div>
-        <div class="mgroup">
-          <button id="mSettings"><span class="mi">⚙</span>设置</button>
-          <button id="mTheme"><span class="mi">◐</span>切换主题</button>
-        </div>
+        <button id="mNewSession"><span class="mi">＋</span>新建会话</button>
+        <button id="mGit"><span class="mi">◉</span>检查点</button>
+        <button id="mUsage"><span class="mi">∑</span>用量统计</button>
+        <button id="mTheme"><span class="mi">◐</span>切换主题</button>
       </div>
     </div>
   </div>
@@ -52,36 +43,38 @@
     <div class="empty" id="emptyState" style="display:none">
       <svg class="logo" viewBox="0 0 64 64" width="56" height="56" style="margin:0 auto 10px;display:block" aria-hidden="true"><defs><linearGradient id="lg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#14b8a6"/><stop offset="1" stop-color="#0f766e"/></linearGradient></defs><rect width="64" height="64" rx="16" fill="url(#lg)"/><path d="M33 13 22 36h6l-3 15 15-23h-7l3-15z" fill="#ffffff"/></svg>
       <h3>Spark 编程助手</h3>
-      <p style="font-size:13.5px">本地 AI 编程助手 · 审批门保护 · 记忆 · MCP · 国产模型开箱即用</p>
+      <p id="emptySub" style="font-size:13.5px">正在读取本地配置…</p>
       <div class="steps">
-        <div class="step"><span class="n">1</span><span>选一个模型服务（DeepSeek / 通义 / 智谱 / Kimi / 豆包 / Ollama），填 API Key 并保存；不填也能用「演示模式」先体验。</span><button class="golink" data-pane="paneModel">去设置</button></div>
-        <div class="step"><span class="n">2</span><span>把「工作目录」指向你的项目文件夹（Agent 只能在此内自由读写，之外需你确认）。</span><button class="golink" data-pane="paneWorkspace">去设置</button></div>
-        <div class="step"><span class="n">3</span><span>点下面「新建会话」，描述你想做的事，例如：帮我修一下登录接口的 bug。</span></div>
+        <div class="step"><span class="n">1</span><span>选模型服务并填 API Key（或用演示模式先体验）。<span class="stepstate" id="stModel"></span></span><button class="golink" data-pane="paneModel">去设置</button></div>
+        <div class="step"><span class="n">2</span><span>指定工作目录（Agent 的活动边界）。<span class="stepstate" id="stWorkdir"></span></span><button class="golink" data-pane="paneWorkspace">去设置</button></div>
+        <div class="step"><span class="n">3</span><span>新建会话，说出你想做的事。</span></div>
       </div>
-      <div class="setupstate" id="setupState"></div>
       <div class="sugg" id="suggChips">
         <button class="chip" data-q="帮我梳理一下这个项目的整体结构">梳理项目整体结构</button>
         <button class="chip" data-q="看看代码里有没有明显的 bug 或安全隐患">排查明显 bug 与安全隐患</button>
         <button class="chip" data-q="给这个项目补一个 README 和启动说明">补 README 与启动说明</button>
-        <button class="chip" data-q="按最佳实践重构项目的前端代码">按最佳实践重构前端</button>
         <button class="chip" data-q="帮我解释一下项目里最复杂的这段代码">解释最复杂的代码</button>
-        <button class="chip" data-q="给项目写一个 Dockerfile 和部署脚本">补 Dockerfile 与部署</button>
       </div>
-      <div style="margin-top:16px"><button class="cta" id="btnStart">＋ 新建会话，开始使用</button></div>
+      <div style="margin-top:16px"><button class="cta" id="btnStart">＋ 新建会话</button></div>
     </div>
   </main>
 
-  <!-- 输入栏 -->
+  <!-- 输入栏（对标豆包：两行式 —— 输入在上，工具行在下） -->
   <div class="inputbar">
     <div class="ibox">
-      <button class="attachbtn" id="btnAttach" title="添加图片（也可直接粘贴 / 拖入，最多 3 张）"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg></button>
-      <button class="attachbtn" id="btnMic" title="语音输入（说中文直接变文字）"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="22"/></svg></button>
-      <textarea id="input" placeholder="描述你想做的事，例如：帮我修一下登录接口的 bug…（输入 @ 引用工作目录文件；可直接粘贴/拖入图片，最多 3 张）" rows="1"></textarea>
+      <textarea id="input" placeholder="给 Spark 发消息…（@ 引用文件，可直接粘贴图片）" rows="1"></textarea>
       <div id="imgPreview" class="imgpreview" hidden></div>
       <div id="atPop" role="listbox"></div>
-      <button class="sendbtn" id="btnSend" title="发送"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg></button>
+      <div class="itools">
+        <div class="ileft">
+          <button class="attachbtn" id="btnAttach" title="添加图片（也可直接粘贴 / 拖入，最多 3 张）"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg></button>
+          <button class="attachbtn" id="btnMic" title="语音输入（说中文直接变文字）"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="22"/></svg></button>
+        </div>
+        <div class="iright">
+          <button class="sendbtn" id="btnSend" title="发送"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg></button>
+        </div>
+      </div>
     </div>
-    <div class="hint"><span class="quickap">审批 <select id="fQuickAp" title="本轮对话的审批模式（快捷切换，不影响设置里的默认值）"></select></span><span class="hsep">·</span><kbd class="hkbd">Enter</kbd> 发送 <span class="hsep">·</span><kbd class="hkbd">Shift+Enter</kbd> 换行 <span class="hsep">·</span><kbd class="hkbd">@</kbd> 引用文件 <span class="hsep">·</span>写/命令需确认</div>
   </div>
 
   <!-- 内置终端（随当前会话目录；用户自己的持久 PTY） -->

@@ -74,13 +74,6 @@ async function loadConfig() {
   const pr = data.current.usage_pricing || {};
   $("#fPricing").value = Object.keys(pr).length ? JSON.stringify(pr, null, 2) : "";
   $("#dirsBox").innerHTML = Object.entries(data.dirs || {}).map(([k, v]) => '<div class="drow"><span class="dk">' + esc(k) + '</span><span class="dv">' + esc(v) + '</span></div>').join("");
-  // 输入区快捷审批下拉（与设置里的默认审批模式同步）
-  const qa = $("#fQuickAp"); qa.innerHTML = "";
-  for (const m of data.approval_modes) {
-    const o = document.createElement("option"); o.value = m.value; o.textContent = m.label;
-    if (m.value === data.current.approval_mode) o.selected = true;
-    qa.appendChild(o);
-  }
   $("#version").textContent = "v" + (data.version || "");
   state.mcpServers = (data.mcp && data.mcp.servers) || [];
   state.mcpServers.forEach(s => { s.transport = s.transport || "stdio"; s.headersJson = (s.headers && Object.keys(s.headers).length) ? JSON.stringify(s.headers) : ""; });
@@ -88,6 +81,7 @@ async function loadConfig() {
   renderMarket();
   updateMeter(0);
   markDirty(false);
+  updateSetupState();
 }
 
 function presetChanged() {
@@ -151,7 +145,6 @@ async function saveCfg() {
       $("#fAuthToken").value = "";
     }
     $("#cfgStatus").className = "statusline ok"; $("#cfgStatus").textContent = "已保存。";
-    $("#fQuickAp").value = $("#fApproval").value;  // 快捷下拉与新默认值对齐
     toast("设置已保存");
     loadSessions(true);
     loadMemory();

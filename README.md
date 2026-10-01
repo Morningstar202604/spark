@@ -73,6 +73,13 @@ spark2 web          # opens the printed URL (loopback only)
 
 > If the **terminal panel** fails to connect (WS 404 / unsupported upgrade), uvicorn is
 > missing websockets: `pip install "uvicorn[standard]"` and restart.
+>
+> **Old pip pitfalls:** On systems with pip < 23.2, `pip install -e ".[dev]"` may fail with
+> "No matching distribution found for fastapi/tomlkit". Upgrade pip first:
+> `python -m pip install --upgrade pip`.
+>
+> **External preview access:** `spark2 web` defaults to `--host 0.0.0.0` so it can be reached
+> by external proxy / preview services. For local-only use pass `--host 127.0.0.1`.
 
 ## 📦 Packages (Windows EXE / macOS / Linux)
 

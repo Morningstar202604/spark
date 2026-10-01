@@ -29,9 +29,12 @@ app = typer.Typer(add_completion=False, help="Spark Agent 重构版 —— 本�
 @app.command()
 def web(
     host: str = typer.Option(
-        "127.0.0.1", "--host", help="监听地址（默认只本机，请勿随意改成 0.0.0.0）"
+        "0.0.0.0", "--host", help="监听地址（默认监听所有接口，便于外部预览代理访问；仅本机使用时可改成 127.0.0.1）"
     ),
     port: int = typer.Option(8000, "--port", help="监听端口"),
+    log_level: str = typer.Option(
+        "info", "--log-level", help="uvicorn 日志级别（info/warning/error），线上排障建议 info"
+    ),
     workdir: str = typer.Option(
         "", "--workdir", help="工作目录（可选，默认用配置里的）"
     ),
@@ -46,17 +49,20 @@ def web(
 
         save_config(cfg)
     token = (cfg.get("token") or "").strip()
-    url = f"http://{host}:{port}/" + (f"?token={token}" if token else "")
+    # 默认 0.0.0.0 供外部代理/预览访问；打印 127.0.0.1 地址便于本机浏览器直接打开
+    display_host = "127.0.0.1" if host in ("0.0.0.0", "::") else host
+    url = f"http://{display_host}:{port}/" + (f"?token={token}" if token else "")
     print(f"Spark {__version__} 已启动：")
     print(f"  地址：{url}")
     if token:
         print("  访问令牌已内嵌在地址中；换浏览器/设备时用它访问。")
     else:
-        print("  未设置访问令牌：本机免登录（仅监听 127.0.0.1）；可在网页设置里开启。")
+        hint = "（未设令牌：本机免登录）" if host == "127.0.0.1" else "（未设令牌：监听 0.0.0.0，任何可达者免登录，建议在网页设置里开启令牌）"
+        print(f"  未设置访问令牌：{hint}；可在网页设置里开启。")
     print(f"  工作目录：{cfg.get('workdir')}")
     import uvicorn
 
-    uvicorn.run(fastapi_app, host=host, port=port, log_level="warning")
+    uvicorn.run(fastapi_app, host=host, port=port, log_level=log_level)
 
 
 class StdinGate(ApprovalGate):

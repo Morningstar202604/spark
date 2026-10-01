@@ -119,9 +119,9 @@
   ::-webkit-scrollbar-thumb { background: var(--line-2); border-radius: var(--r-full); border: 2px solid transparent; background-clip: padding-box; }
   ::-webkit-scrollbar-thumb:hover { background: color-mix(in srgb, var(--text-3) 75%, transparent); border: 2px solid transparent; background-clip: padding-box; }
   ::-webkit-scrollbar-track { background: transparent; }
-  /* 触屏端不依赖 hover 的关键控件常显（如复制按钮） */
+  /* 触屏端不依赖 hover 的关键控件常显（如操作栏） */
   @media (hover: none) {
-    .msg.assistant .copy { opacity: 1; }
+    .msg .mops { opacity: 1; }
   }
   /* 动效降级 */
   @media (prefers-reduced-motion: reduce) {
@@ -183,7 +183,7 @@
     position: absolute; top: calc(100% + var(--sp-2)); right: 0;
     background: var(--panel); border: 1px solid var(--line-2); border-radius: var(--r-lg);
     box-shadow: var(--sh-3); min-width: 200px; padding: var(--sp-1);
-    display: none; z-index: 70;
+    display: none; z-index: 90;
   }
   .menu.open { display: block; }
   .menu .mgroup { display: flex; flex-direction: column; gap: 1px; padding: 3px 0; }
@@ -197,11 +197,12 @@
   .menu button .mi { flex: none; width: 15px; text-align: center; color: var(--text-3); font-size: var(--fs-sm); }
   .menu button.danger { color: var(--red); }
 
-  /* 上下文水位 */
-  .meterwrap { height: 3px; background: var(--bg-2); flex: none; display: flex; align-items: center; gap: 8px; }
-  .meterwrap .meter { flex: none; min-width: 0; }
-  .meterwrap .metertext { font-size: 10px; color: var(--text-3); white-space: nowrap; padding-right: 4px; }
-  .meter { height: 100%; width: 0%; background: var(--accent); transition: width .4s var(--ease); }
+  /* 上下文水位：顶部 18px 信息行（右侧百分比 + 用量）+ 底部 3px 进度条 */
+  .meterwrap { position: relative; height: 18px; flex: none; display: flex; align-items: center; justify-content: flex-end; }
+  .meterwrap::before { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 3px; background: var(--bg-2); }
+  .meterwrap .meter { position: absolute; left: 0; bottom: 0; height: 3px; }
+  .meterwrap .metertext { font-size: 10px; color: var(--text-3); white-space: nowrap; padding: 0 10px; line-height: 14px; position: relative; z-index: 1; }
+  .meter { width: 0%; background: var(--accent); transition: width .4s var(--ease); }
   .meter.warn { background: var(--amber); }
 
   /* ---------------- 消息区 ---------------- */
@@ -209,6 +210,8 @@
     flex: 1; overflow-y: auto; padding: var(--sp-4) var(--sp-4) var(--sp-6);
     overscroll-behavior: contain; scroll-behavior: smooth;
   }
+  /* 空态（引导）时让 main 作为 flex 容器垂直居中子项，避免 6vh 大外边距把空态挤到偏下 */
+  body.has-empty main { display: flex; flex-direction: column; }
   .inner { max-width: 860px; margin: 0 auto; display: flex; flex-direction: column; gap: var(--sp-4); }
 
   .msg { max-width: 86%; }
@@ -222,15 +225,6 @@
   }
   .msg.assistant { align-self: flex-start; width: 100%; position: relative; }
   .msg.assistant .text { white-space: pre-wrap; word-break: break-word; }
-  .msg.assistant .copy {
-    position: absolute; top: 0; right: 0; opacity: 0;
-    transition: opacity var(--tr-fast); background: var(--panel-2);
-    border: 1px solid var(--line); color: var(--text-2); border-radius: var(--r-sm);
-    width: 26px; height: 24px; display: flex; align-items: center; justify-content: center;
-    box-shadow: var(--sh-1);
-  }
-  .msg.assistant:hover .copy, .msg.assistant .copy:focus-visible { opacity: 1; }
-  .msg.assistant .copy:hover { color: var(--accent); border-color: var(--accent); }
   .msg.error {
     align-self: stretch;
     background: color-mix(in srgb, var(--red) 8%, transparent);
@@ -311,7 +305,7 @@
   .tool .diff .add { color: var(--green); } .tool .diff .del { color: var(--red); }
   .tool .diff .hdr { color: var(--blue); }
 
-  /* ---------------- 输入栏（毛玻璃 + 容器焦点态） ---------------- */
+  /* ---------------- 输入栏（对标豆包：两行式容器，毛玻璃 + 浮起卡片） ---------------- */
   .inputbar {
     flex: none;
     border-top: 1px solid color-mix(in srgb, var(--line) 85%, transparent);
@@ -321,23 +315,23 @@
     padding: 10px 14px calc(10px + env(safe-area-inset-bottom));
   }
   .ibox {
-    max-width: 860px; margin: 0 auto; display: flex; gap: 8px; align-items: flex-end;
+    max-width: 860px; margin: 0 auto;
+    display: flex; flex-direction: column; align-items: stretch;
     position: relative;
-    border: 1.5px solid var(--line); border-radius: 20px;
+    border: 1.5px solid var(--line); border-radius: 24px;
     background: var(--panel);
-    padding: 4px 4px 4px 10px;
-    box-shadow: var(--sh-1);
+    padding: 4px 8px 6px;
+    box-shadow: var(--sh-2);
     transition: border-color var(--tr-fast), box-shadow var(--tr-fast), background-color var(--tr-fast);
   }
   .ibox:focus-within {
-    border-color: color-mix(in srgb, var(--accent) 60%, transparent);
-    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 14%, transparent), var(--sh-1);
+    border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+    box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 12%, transparent), var(--sh-2);
     background: var(--panel);
   }
   textarea {
-    flex: 1; resize: none; background: none; border: none; color: var(--text);
-    font: var(--fs-lg)/1.6 var(--sans); padding: 10px 0; min-height: 42px; max-height: 160px;
-    align-self: center;
+    width: 100%; resize: none; background: none; border: none; color: var(--text);
+    font: var(--fs-lg)/1.6 var(--sans); padding: 10px 8px 2px; min-height: 48px; max-height: 160px;
   }
   .attachbtn {
     flex: none; width: 34px; height: 34px; align-self: center;
@@ -351,8 +345,11 @@
   @keyframes micpulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.15); } }
   textarea:focus { outline: none; }
   textarea::placeholder { color: var(--text-3); }
+  /* 工具行：左附件/语音，右发送（对标豆包） */
+  .itools { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 2px 2px 0; }
+  .ileft, .iright { display: flex; align-items: center; gap: 4px; min-width: 0; }
   .imgpreview {
-    display: flex; gap: 8px; flex-wrap: wrap; padding: 6px 0 2px;
+    display: flex; gap: 8px; flex-wrap: wrap; padding: 6px 8px 2px;
     width: 100%;
   }
   .imgpreview[hidden] { display: none; }
@@ -373,7 +370,7 @@
   .sendbtn {
     background: linear-gradient(135deg, var(--accent), var(--accent-2));
     color: var(--on-accent); border: none;
-    width: 40px; height: 40px; border-radius: 50%;
+    width: 36px; height: 36px; border-radius: 50%;
     display: inline-flex; align-items: center; justify-content: center;
     transition: filter var(--tr-fast), transform var(--tr-fast), box-shadow var(--tr-fast);
     flex: none; box-shadow: 0 2px 8px color-mix(in srgb, var(--accent) 35%, transparent);
@@ -381,7 +378,6 @@
   .sendbtn:hover { filter: brightness(1.08); box-shadow: 0 4px 14px color-mix(in srgb, var(--accent) 42%, transparent); }
   .sendbtn:active { transform: translateY(1px) scale(.96); }
   .sendbtn:disabled { background: var(--line-2); color: var(--text-3); cursor: not-allowed; filter: none; transform: none; box-shadow: none; }
-  .hint { max-width: 860px; margin: 6px auto 0; color: var(--text-3); font-size: var(--fs-xs); }
 
   /* ---------------- 内置终端 ---------------- */
   .termbar { flex: none; border-top: 1px solid var(--line); background: var(--panel); display: none; flex-direction: column; height: 260px; }
@@ -410,10 +406,12 @@
   }
   .termhandle:hover::after { background: var(--accent); }
 
-  /* ---------------- 空状态（引导） ---------------- */
-  .empty { max-width: 560px; margin: 6vh auto; text-align: center; color: var(--text-2); }
+  /* ---------------- 空状态（引导） ----------------
+     默认 flex 垂直居中（由 body.has-empty 切换）；有消息时切回流式布局。
+     去掉旧 margin: 6vh auto —— 在 100dvh flex 列布局里 6vh 大外边距会把空态挤到偏下。 */
+  .empty { max-width: 560px; margin: auto; text-align: center; color: var(--text-2); }
   .empty h3 { color: var(--text); font-size: var(--fs-xl); letter-spacing: .5px; margin-bottom: 6px; }
-  .empty .steps { display: flex; flex-direction: column; gap: 9px; margin: var(--sp-5) 0; text-align: left; }
+  .empty .steps { display: flex; flex-direction: column; gap: 10px; margin: 12px 0; text-align: left; }
   .empty .step {
     display: flex; gap: 11px; align-items: flex-start;
     background: var(--panel); border: 1px solid var(--line); border-radius: var(--r-lg);
@@ -438,8 +436,12 @@
   }
   .empty .cta:hover { filter: brightness(1.06); }
   .empty .cta:active { transform: translateY(1px); }
-  .empty .setupstate { display: flex; justify-content: center; gap: 14px; flex-wrap: wrap; margin: 14px 0 0; font-size: var(--fs-xs); }
-  .empty .setupstate .ok { color: var(--green); } .empty .setupstate .miss { color: var(--amber); }
+  /* 步骤卡内联状态徽标（替代旧的独立 setupstate 区块，省一行垂直空间） */
+  .stepstate { display: block; margin-top: 5px; }
+  .stepstate .ss { font-style: normal; font-size: var(--fs-xs); font-weight: 600; }
+  .stepstate .ss.ok { color: var(--green); }
+  .stepstate .ss.miss { color: var(--amber); }
+  .stepstate .ss.demo { color: var(--text-2); }
 
   /* ---------------- 抽屉 ---------------- */
   .overlay { position: fixed; inset: 0; background: var(--overlay); display: none; z-index: 40; }
@@ -674,10 +676,6 @@
   }
   #toast.show { opacity: 1; }
 
-  /* 输入区快捷审批模式 */
-  .hint .quickap { display: inline-flex; align-items: center; gap: 5px; }
-  .hint .quickap select { background: var(--panel-2); border: 1px solid var(--line); color: var(--text-2); border-radius: var(--r-xs); font-size: var(--fs-xs); padding: 1px 4px; }
-
   /* @ 文件补全弹层 */
   #atPop {
     position: absolute; bottom: 100%; left: 0; margin-bottom: 6px;
@@ -795,8 +793,15 @@
 }
 .msg.assistant .mhead .mrole { font-weight: 700; color: var(--text-2); letter-spacing: .02em; }
 .msg.assistant .mhead .mtools { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 60%; color: var(--text-3); }
-.msg .mops { position: absolute; top: 0; right: 0; display: inline-flex; gap: 2px; opacity: 0; transition: opacity var(--tr-fast); }
+/* 自定义元素透明化：让内部 .msg/.think/.tool/.plan 成为 .inner 的直接 flex 子项，
+   保证 align-self 与 position:relative 包含块计算正确 */
+spark-msg, spark-think, spark-tool-card, spark-plan-card { display: contents; }
+.msg .mops { position: absolute; top: 0; right: 0; display: inline-flex; gap: 2px; opacity: 0; transition: opacity var(--tr-fast); z-index: 5; }
 .msg:hover .mops, .msg .mops:focus-within { opacity: 1; }
+/* 用户消息气泡右对齐：操作栏放气泡内右上角，用半透明背景避免压文字 */
+.msg.user .mops { top: 6px; right: 6px; background: color-mix(in srgb, var(--panel) 75%, transparent); backdrop-filter: blur(6px); border-radius: var(--r-sm); padding: 1px; }
+/* 助手消息全宽：操作栏放角色行（mhead）右侧，top 22px 避开 mhead 行高，避免悬浮到上方压住上一条用户消息 */
+.msg.assistant .mops { top: 22px; right: 0; background: color-mix(in srgb, var(--panel) 80%, transparent); backdrop-filter: blur(4px); border-radius: var(--r-sm); padding: 1px; }
 .msg .mops button {
   width: 26px; height: 24px; display: inline-flex; align-items: center; justify-content: center;
   background: var(--panel); border: 1px solid var(--line); color: var(--text-2);
@@ -849,14 +854,6 @@
 .setnav button:hover svg { color: var(--text-2); }
 .setnav button.on svg { color: var(--accent); }
 .setnav button .nsub { display: block; }
-
-/* 底部提示：快捷键 kbd 样式 */
-.hint .hsep { opacity: .55; margin: 0 1px; }
-.hint kbd.hkbd {
-  font-family: var(--mono); font-size: 10px; color: var(--text-2);
-  background: var(--panel-2); border: 1px solid var(--line); border-bottom-width: 2px;
-  border-radius: 5px; padding: 1px 5px; margin: 0 1px;
-}
 
 /* 「去设置」精致化：箭头 + hover 底纹 */
 .empty .step .golink {

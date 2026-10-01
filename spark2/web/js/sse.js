@@ -18,6 +18,7 @@ async function send() {
   if (!prompt && !images.length) return;
   if (!state.sid) { toast("请先新建或选择一个会话"); openDrawer("drawerSessions"); return; }
   if (isSidRunning(state.sid)) return;
+  const sendSid = state.sid; // 会话守卫：切走后本流停止写 DOM
   const finalPrompt = prompt || "（图片）请分析这张图片。";
   state.runningSids[state.sid] = true; updateRunningUI();
   addUserMsg(finalPrompt, images.length ? `（附 ${images.length} 张图片）` : "");
@@ -31,7 +32,7 @@ async function send() {
     const res = await fetch("/api/chat/stream", {
       method: "POST",
       headers: { "Content-Type": "application/json", "X-Spark-Token": state.token },
-      body: JSON.stringify({ session_id: state.sid, prompt: finalPrompt, images, approval_mode: $("#fQuickAp").value || undefined }),
+      body: JSON.stringify({ session_id: sendSid, prompt: finalPrompt, images }),
     });
     if (res.status === 401) { openModal("tokenModal"); return; }
     if (!res.ok) { const e = await res.json().catch(() => ({})); errorMsg(e.detail || "请求失败（" + res.status + "）"); return; }
@@ -46,17 +47,17 @@ async function send() {
         const chunk = buf.slice(0, idx); buf = buf.slice(idx + 2);
         const line = chunk.trim(); if (!line.startsWith("data:")) continue;
         let ev; try { ev = JSON.parse(line.slice(5).trim()); } catch { continue; }
-        handleEvent(ev);
+        handleEvent(ev, sendSid);
       }
     }
-  } catch (e) { errorMsg("连接中断：" + (e.message || e)); }
-  delete state.runningSids[state.sid];
-  updateRunningUI(); markPlanDone();
-  loadSessions(true);
-  refreshCtx();
+  } catch (e) { if (state.sid === sendSid) errorMsg("连接中断：" + (e.message || e)); }
+  delete state.runningSids[sendSid];
+  if (state.sid === sendSid) { updateRunningUI(); markPlanDone(); loadSessions(true); refreshCtx(); }
 }
 
-function handleEvent(ev) {
+function handleEvent(ev, sid) {
+  // 会话守卫：用户已切走时，本流不再渲染（后端仍在跑，刷新后可见完整结果）
+  if (sid && state.sid !== sid) return;
   if (ev.type === "hello" && ev.user_msg_id) {
     // data-mid 统一设在 spark-msg 元素上（编辑/删除/截断都从组件读）
     const users = document.querySelectorAll("#msgList spark-msg[type=user]");
@@ -71,6 +72,7 @@ function handleEvent(ev) {
       if (!mdRaf) {
         mdRaf = requestAnimationFrame(() => {
           mdRaf = 0;
+          if (state.sid !== sid) return; // 帧执行前再验一次（rAF 期间可能切走）
           const el = runtime.curAssistant && runtime.curAssistant.querySelector(".text");
           if (el) el.innerHTML = mdToHtml(runtime.curAssistant.dataset.raw || "");
           autoScroll();

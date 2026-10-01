@@ -25,14 +25,20 @@ Spark 是一个**本地优先的 AI 编程助手**，从零重写：无 Electron
 
 ## 🚀 快速开始
 
-```bash
-cd spark
-pip install -e ".[dev]"     # 依赖含 uvicorn[standard]（Web 终端 WS 必需）
-spark2 web          # 打开打印出的地址（仅监听 127.0.0.1）
-```
+ ```bash
+ cd spark
+ pip install -e ".[dev]"     # 依赖含 uvicorn[standard]（Web 终端 WS 必需）
+ spark2 web          # 打开打印出的地址（默认监听 0.0.0.0，便于外部预览）
+ ```
 
-> 若 `spark2 web` 的**终端面板**连不上（WS 404/不支持升级），多半是 uvicorn 缺 websockets：
-> `pip install "uvicorn[standard]"` 后重启。
+ > 若 `spark2 web` 的**终端面板**连不上（WS 404/不支持升级），多半是 uvicorn 缺 websockets：
+ > `pip install "uvicorn[standard]"` 后重启。
+ >
+ > **pip 过旧：** 系统 pip < 23.2 时 `pip install -e ".[dev]"` 可能报 "No matching distribution
+ > found for fastapi"，先 `python -m pip install --upgrade pip` 再装。
+ >
+ > **外部预览访问：** `spark2 web` 默认 `--host 0.0.0.0`，可被外部代理/预览服务访问；
+ > 仅本机使用可显式传 `--host 127.0.0.1`。
 
 ## 📦 安装包（Windows EXE / macOS / Linux）
 

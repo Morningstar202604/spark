@@ -26,7 +26,6 @@ export function initCmdPalette() {
 
   function build() {
     const cur = document.documentElement.dataset.theme === "dark" ? "浅色" : "深色";
-    const amode = (state.cfg && state.cfg.approval_mode) || "suggest";
     const items0 = [
       { g: "会话", label: "新建会话", desc: "开始一段新的对话", icon: "＋", key: "N", run: () => newSession() },
       { g: "会话", label: "打开会话列表", desc: "浏览 / 搜索历史会话", icon: "☰", run: () => openDrawer("drawerSessions") },
@@ -37,24 +36,9 @@ export function initCmdPalette() {
       { g: "设置", label: "设置 · 集成", desc: "MCP / 插件 / 索引", icon: "⚙", run: () => { openDrawer("drawerSettings"); openPane("paneIntegrations"); } },
       { g: "设置", label: "设置 · 高级", desc: "令牌 / 提示词 / 成本", icon: "⚙", run: () => { openDrawer("drawerSettings"); openPane("paneAdvanced"); } },
       { g: "外观", label: "切换主题", desc: `当前 ${cur}，点击切换`, icon: "◐", key: "T", run: () => applyTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark") },
-      { g: "模式", label: "审批模式 · 询问", desc: "写入与命令都要确认", icon: "✓", run: () => setApproval("suggest") },
-      { g: "模式", label: "审批模式 · 自动编辑", desc: "工作区内写入不询问，命令询问", icon: "✓", run: () => setApproval("auto-edit") },
-      { g: "模式", label: "审批模式 · 全自动", desc: "都不询问，谨慎使用", icon: "✓", run: () => setApproval("full-auto") },
-      { g: "模式", label: "审批模式 · 只读分析（Plan）", desc: "禁用写入与命令", icon: "✓", run: () => setApproval("plan") },
       { g: "帮助", label: "打开终端", desc: "随当前会话目录的内置终端", icon: "▤", run: () => { document.getElementById("btnTerm").click(); } },
     ];
     items = items0.map(it => ({ ...it, g: it.g }));
-    // 当前模式高亮
-    items.forEach(it => { if (it.label.includes(`· ${labelOf(amode)}`)) it.cur = true; });
-  }
-
-  function labelOf(mode) {
-    return { suggest: "询问", "auto-edit": "自动编辑", "full-auto": "全自动", plan: "只读分析（Plan）" }[mode] || mode;
-  }
-
-  function setApproval(mode) {
-    const q = $("#fQuickAp");
-    if (q && [...q.options].some(o => o.value === mode)) { q.value = mode; q.dispatchEvent(new Event("change", { bubbles: true })); }
   }
 
   function render(filter) {

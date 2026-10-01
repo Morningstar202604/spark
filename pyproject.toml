@@ -24,6 +24,8 @@ spark2 = "spark2.cli:main"
 [build-system]
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
+# 首次部署或换机器时如遇 "No matching distribution found for fastapi" 之类报错，
+# 多半是系统 pip 太旧（<23.2），先执行 `python -m pip install --upgrade pip` 再装。
 
 [tool.setuptools.packages.find]
 include = ["spark2*"]

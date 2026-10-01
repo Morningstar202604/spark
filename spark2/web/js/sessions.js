@@ -79,7 +79,7 @@ function sessCard(s) {
       const r = await api("/api/sessions/" + s.id, { method: "PATCH", body: JSON.stringify({ title: title.trim().slice(0, 60) }) });
       if (!r.ok) { toast("重命名失败"); return; }
       toast("已重命名");
-      if (state.sid === s.id) $("#sessionLine").textContent = title.trim().slice(0, 60) + " · " + (s.workdir || "");
+      if (state.sid === s.id) $("#sessionLine").textContent = s.workdir || "未指定目录";
       await loadSessions(true);
     } catch (err) { toast("重命名失败"); }
   }
@@ -132,17 +132,23 @@ async function cancelSession(sid) {
 
 function showEmptyIfNeeded() {
   const e = $("#emptyState");
+  const hasMessages = state.sid && $("#msgList").children.length > 0;
+  // 空态 flex 垂直居中（body.has-empty）；有消息时切回流式布局
+  document.body.classList.toggle("has-empty", !hasMessages);
   if (!state.sid) { e.style.display = ""; updateSetupState(); return; }
   const has = $("#msgList").children.length > 0;
   e.style.display = has ? "none" : "";
+  // 有会话但无消息（如刚新建的空会话）：引导区同样展示，徽标/副标题实时刷新
+  if (!has) updateSetupState();
 }
 
 async function selectSession(sid) {
+  if (sid === state.sid) return;
   state.sid = sid; closeDrawer("drawerSessions");
   const res = await api("/api/sessions/" + sid);
   const data = await res.json();
   const meta = data.meta || {};
-  $("#sessionLine").textContent = (meta.title || "会话") + " · " + (meta.workdir || "");
+  $("#sessionLine").textContent = meta.workdir || "未指定目录";
   $("#msgList").innerHTML = ""; runtime.curAssistant = null;
   for (const m of data.messages) renderHistory(m);
   renderSessions();
@@ -165,29 +171,38 @@ async function refreshCtx() {
 }
 
 function renderHistory(m) {
-  if (m.role === "user") { addUserMsg(m.content || "", "", m.id); }
+  if (m.role === "user") {
+    const c = m.content;
+    // 图片消息：content 为 parts 数组（text + image_url），文本部分回填 + 标注图片数
+    const text = Array.isArray(c) ? c.filter(p => p.type === "text").map(p => p.text).join("\n") : (c || "");
+    const imgCount = Array.isArray(c) ? c.filter(p => p.type === "image_url").length : 0;
+    addUserMsg(text, imgCount ? `（附 ${imgCount} 张图片）` : "", m.id);
+  }
   else if (m.role === "assistant") {
     const el = newAssistant();
     if (m.id) el.setAttribute("data-mid", m.id);
     el.dataset.raw = m.content || "";
     el.querySelector(".text").innerHTML = mdToHtml(m.content || "");
   }
+  // 其他 role（tool 等）暂不做重放：后端只持久化 user/assistant，思考与工具卡是流式临时渲染
 }
 
-/* 新建会话：未配置模型/工作目录时直接引导到对应设置面板，而不是弹个空设置抽屉 */
+/* 新建会话：未配置模型/工作目录时直接引导到对应设置面板，而不是弹个空设置抽屉
+   返回新会话 id；未配置被引导时返回 null（调用方可据此决定是否继续发消息） */
 async function newSession() {
-  if (!state.cfg) { toast("配置尚未加载，稍后再试"); return; }
+  if (!state.cfg) { toast("配置尚未加载，稍后再试"); return null; }
   const missing = setupMissing();
   if (missing.length) {
     const label = missing.includes("workdir") ? "工作目录" : "模型配置";
     toast("请先配置" + label);
     openPane(missing.includes("workdir") ? "paneWorkspace" : "paneModel");
-    return;
+    return null;
   }
   const res = await api("/api/sessions", { method: "POST", body: JSON.stringify({ workdir: state.cfg.workdir }) });
-  if (res.status === 400) { const e = await res.json(); toast(e.detail || "请先设置工作目录"); openPane("paneWorkspace"); return; }
+  if (res.status === 400) { const e = await res.json(); toast(e.detail || "请先设置工作目录"); openPane("paneWorkspace"); return null; }
   const meta = await res.json();
   await loadSessions(true); await selectSession(meta.id);
+  return meta.id;
 }
 
 /* 配置检查：返回缺失项列表（"workdir" | "model"） */
@@ -201,12 +216,31 @@ function setupMissing() {
 }
 
 function updateSetupState() {
-  const box = $("#setupState"); if (!box) return;
+  // 状态徽标写进步骤卡（#stModel / #stWorkdir），替代旧的独立 #setupState 区块
+  const c = state.cfg;
+  const sub = $("#emptySub");
+  if (!c) {
+    // 配置尚未加载：徽标与副标题统一显示加载中，等待 loadConfig 完成后再刷新
+    for (const id of ["stModel", "stWorkdir"]) { const el = document.getElementById(id); if (el) el.innerHTML = '<i class="ss">…</i>'; }
+    if (sub) sub.textContent = "正在读取本地配置…";
+    return;
+  }
   const miss = setupMissing();
-  let html = "";
-  html += miss.includes("model") ? '<span class="miss">✗ 模型未配置</span>' : '<span class="ok">✓ 模型已配置</span>';
-  html += miss.includes("workdir") ? '<span class="miss">✗ 工作目录未设置</span>' : '<span class="ok">✓ 工作目录已设置</span>';
-  box.innerHTML = html;
+  const m = $("#stModel");
+  if (m) {
+    if (miss.includes("model")) m.innerHTML = '<i class="ss miss">✗ 未配置</i>';
+    else if (c.demo_mode) m.innerHTML = '<i class="ss demo">演示模式</i>';
+    else m.innerHTML = '<i class="ss ok">✓ 已配置</i>';
+  }
+  const w = $("#stWorkdir");
+  if (w) w.innerHTML = miss.includes("workdir") ? '<i class="ss miss">✗ 未设置</i>' : '<i class="ss ok">✓ 已设置</i>';
+  // 副标题展示实时配置摘要（模型名 / 演示模式 / 工作目录），不做静态文案
+  if (sub) {
+    const modelDesc = c.demo_mode ? "演示模式" : (c.model || "未配置模型");
+    const parts = [modelDesc];
+    parts.push(c.workdir ? c.workdir : "工作目录未设置");
+    sub.textContent = parts.join(" · ");
+  }
 }
 
 /* 「开始使用」：按缺失情况直达对应设置面板 */

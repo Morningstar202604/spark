@@ -2,7 +2,7 @@
 
 > English: [docs/en/API.md](en/API.md)
 
-服务启动后监听 `127.0.0.1`。设置过访问令牌（`token`）后，所有请求需带请求头
+服务默认监听 `0.0.0.0`（便于外部代理/预览访问；仅本机使用可 `--host 127.0.0.1`）。设置过访问令牌（`token`）后，所有请求需带请求头
 `X-Spark-Token: <token>`，否则返回 401。流式接口走 SSE（`text/event-stream`）。
 
 ## 会话
