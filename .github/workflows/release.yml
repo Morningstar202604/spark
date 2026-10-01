@@ -15,16 +15,28 @@ jobs:
         include:
           - os: windows-latest
             asset: spark-windows-x86_64
-            cmd: powershell -ExecutionPolicy Bypass -File scripts/build-windows.ps1
+            setup: |
+              pip install -e ".[dev]" pyinstaller
+              python -m pytest -q
+              pyinstaller --clean -y spark.spec
             pack: powershell Compress-Archive -Path dist/spark -DestinationPath spark-windows-x86_64.zip
+            shell: pwsh
           - os: ubuntu-latest
             asset: spark-linux-x86_64
-            cmd: bash scripts/build.sh
+            setup: |
+              pip install -e ".[dev]" pyinstaller
+              python -m pytest -q
+              pyinstaller --clean -y spark.spec
             pack: tar -czf spark-linux-x86_64.tar.gz -C dist spark
+            shell: bash
           - os: macos-latest
             asset: spark-macos-x86_64
-            cmd: bash scripts/build.sh
+            setup: |
+              pip install -e ".[dev]" pyinstaller
+              python -m pytest -q
+              pyinstaller --clean -y spark.spec
             pack: tar -czf spark-macos-x86_64.tar.gz -C dist spark
+            shell: bash
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -32,9 +44,19 @@ jobs:
         with:
           python-version: "3.12"
       - name: Build
-        run: ${{ matrix.cmd }}
+        shell: ${{ matrix.shell }}
+        run: ${{ matrix.setup }}
       - name: Pack
+        shell: ${{ matrix.shell }}
         run: ${{ matrix.pack }}
+      - name: Upload logs (diagnostics)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs-${{ matrix.os }}
+          path: |
+            build/spark/warn-spark.txt
+            build/spark/xref-spark.html
       - uses: softprops/action-gh-release@v2
         with:
           files: |
