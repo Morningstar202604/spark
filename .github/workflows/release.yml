@@ -20,14 +20,14 @@ jobs:
               python -m pytest -q
               pyinstaller --clean -y spark.spec
             pack: powershell Compress-Archive -Path dist/spark -DestinationPath spark-windows-x86_64.zip
-          - os: ubuntu-latest
+          - os: ubuntu-22.04   # GLIBC 2.35：兼容绝大多数发行版
             asset: spark-linux-x86_64
             setup: |
               pip install -e ".[dev]" pyinstaller
               python -m pytest -q
               pyinstaller --clean -y spark.spec
             pack: tar -czf spark-linux-x86_64.tar.gz -C dist spark
-          - os: macos-latest
+          - os: macos-13      # Intel x86_64 runner
             asset: spark-macos-x86_64
             setup: |
               pip install -e ".[dev]" pyinstaller
