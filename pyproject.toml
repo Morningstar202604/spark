@@ -1,8 +1,8 @@
 [project]
 name = "spark-agent"
-version = "0.8.0"
+version = "0.9.0"
 description = "Spark Agent —— 本地 AI 编程助手（单事件循环 / 审批门 / MCP / TUI / 单一前端）"
-readme = ["README.md", "README.zh.md"]  # 中英双语（中文用户主文档）
+readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "fastapi>=0.110",
