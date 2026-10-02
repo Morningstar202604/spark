@@ -29,6 +29,7 @@ from fastapi.staticfiles import StaticFiles
 from spark2 import __version__
 from spark2.config import APPROVAL_MODES
 from spark2.loop import AgentLoop
+from spark2.slash import expand_slash
 from spark2.tools import build_registry
 
 from .api_common import (
@@ -139,7 +140,7 @@ def create_app(state: AppState | None = None) -> FastAPI:
         # （此前先取后写，真实模型首轮收到空对话 → 400 No user query）
         # 多模态：body["images"] 为 [{data: base64, mime}]，≤3 张、单张 base64 ≤ 2.8MB（≈2MB 原图）
         images = body.get("images") or []
-        user_content: str | list = prompt
+        user_content: str | list = expand_slash(prompt, workdir)
         if images:
             if not isinstance(images, list) or len(images) > 3:
                 raise HTTPException(status_code=400, detail="图片最多 3 张")

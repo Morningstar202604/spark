@@ -72,12 +72,12 @@ function MessageItem({
         />
       )}
       <div
-        className="mt-2 flex items-center justify-end gap-1 opacity-0 transition-opacity group-hover/msg:opacity-100"
+        className="mt-2 flex items-center justify-end gap-1 sm:opacity-0 sm:transition-opacity sm:group-hover/msg:opacity-100"
         style={{ color: "var(--ink-muted)" }}
       >
         <button
           type="button"
-          className="rounded px-2 py-0.5 text-[10px]"
+          className="rounded px-2 py-1 text-[11px] sm:py-0.5"
           style={{ border: "1px solid var(--border)" }}
           onClick={() => onCopy(msg.raw || msg.content || "")}
         >

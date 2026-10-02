@@ -168,23 +168,24 @@ class AgentLoop:
         except (KeyError, IndexError, ValueError):
             # 自定义提示词里含裸 { }（如 JSON 示例）时不崩溃，按原文使用
             base = text
-        # 项目级指令文件（对标 CLAUDE.md / .cursorrules）：
-        # 工作目录存在 CLAUDE.md 时自动追加为项目规范，优先于全局系统提示词。
+        # 项目级指令文件（对标 CLAUDE.md / .cursorrules / .sparkrules）：
+        # 工作目录存在时自动追加为项目规范，优先于全局系统提示词。
         # 保持轻量：只读文件、大小受限（64KB），文件不存在零开销。
-        rule_file = self.workdir / "CLAUDE.md"
-        try:
-            if rule_file.is_file() and rule_file.stat().st_size <= 65536:
-                content = rule_file.read_text(
-                    encoding="utf-8", errors="replace"
-                ).strip()
-                if content:
-                    base = (
-                        base
-                        + "\n\n===== 项目指令（来自 CLAUDE.md，最高优先级）=====\n"
-                        + content
-                    )
-        except OSError:
-            pass
+        for rule_name in ("CLAUDE.md", ".cursorrules", ".sparkrules", "AGENTS.md", "spark.md"):
+            rule_file = self.workdir / rule_name
+            try:
+                if rule_file.is_file() and rule_file.stat().st_size <= 65536:
+                    content = rule_file.read_text(
+                        encoding="utf-8", errors="replace"
+                    ).strip()
+                    if content:
+                        base = (
+                            base
+                            + f"\n\n===== 项目指令（来自 {rule_name}，最高优先级）=====\n"
+                            + content
+                        )
+            except OSError:
+                continue
         return base
 
     async def cancel(self) -> None:

@@ -111,6 +111,16 @@ export function getUsage(): Promise<UsageResponse> {
   return request<UsageResponse>("/api/usage");
 }
 
+export interface SlashCommandInfo {
+  name: string;
+  label: string;
+  description: string;
+}
+
+export function getSlashCommands(): Promise<{ commands: SlashCommandInfo[] }> {
+  return request("/api/slash-commands");
+}
+
 export function getPlugins(): Promise<{ plugins: PluginItem[]; dir?: string }> {
   return request("/api/plugins");
 }

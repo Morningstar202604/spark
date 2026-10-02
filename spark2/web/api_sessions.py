@@ -121,3 +121,75 @@ async def delete_message(sid: str, message_id: str, request: Request, state: App
     if rest is None:
         raise HTTPException(status_code=404, detail="消息不存在")
     return {"ok": True, "messages": rest}
+
+
+@router.get("/api/sessions/{sid}/export")
+async def export_session(
+    sid: str, request: Request, state: AppState = Depends(get_app_state)
+):
+    """导出会话为 Markdown 或 JSON 文件（直接下载，不经模型）。"""
+    check_token(request, state)
+    fmt = (request.query_params.get("format") or "markdown").lower()
+    from datetime import datetime
+
+    meta = state.store.meta(sid)
+    if not meta:
+        raise HTTPException(status_code=404, detail="会话不存在")
+
+    safe_title = "".join(
+        c for c in str(meta.get("title", "session"))[:30] if c.isalnum() or c in (" ", "_", "-")
+    ).replace(" ", "_") or "session"
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    if fmt == "json":
+        import json
+        from fastapi.responses import JSONResponse
+
+        msgs = state.store.messages(sid)
+        out = {"meta": meta, "messages": msgs}
+        return JSONResponse(
+            content=out,
+            headers={
+                "Content-Disposition": (
+                    f'attachment; filename="session_{ts}_{sid}.json"'
+                )
+            },
+        )
+
+    from fastapi.responses import Response
+
+    msgs = state.store.messages(sid)
+    lines = [f"# {meta.get('title', '会话')}", ""]
+    lines.append(f"- 工作目录：{meta.get('workdir', '')}")
+    lines.append(f"- 模型：{meta.get('model', '')}")
+    lines.append(f"- 创建：{meta.get('created', '')}")
+    lines.append(f"- 导出：{datetime.now().isoformat(timespec='seconds')}")
+    lines.append(f"- 消息数：{len(msgs)}")
+    lines.append("")
+    for m in msgs:
+        role = m.get("role", "system")
+        content = m.get("content", "")
+        if isinstance(content, list):
+            content = "\n".join(
+                str(p.get("text", ""))
+                for p in content
+                if isinstance(p, dict) and p.get("type") == "text"
+            )
+        content = str(content).strip()
+        if not content:
+            continue
+        label = {"user": "你", "assistant": "Spark", "tool": "工具"}.get(role, role)
+        lines.append(f"## {label}")
+        lines.append("")
+        lines.append(content)
+        lines.append("")
+    body = "\n".join(lines)
+    return Response(
+        content=body,
+        media_type="text/markdown; charset=utf-8",
+        headers={
+            "Content-Disposition": (
+                f'attachment; filename="session_{ts}_{safe_title}.md"'
+            )
+        },
+    )

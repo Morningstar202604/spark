@@ -96,30 +96,36 @@ export function WelcomeView() {
 
   return (
     <div
-      className="flex flex-1 flex-col items-center justify-center overflow-y-auto p-8"
+      className="flex flex-1 flex-col items-center justify-center overflow-y-auto p-4 sm:p-8"
       style={{ background: "var(--surface)" }}
     >
       {/* Logo */}
-      <div className="mb-6 flex h-16 w-16 items-center justify-center rounded-2xl"
+      <div
+        className="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl sm:mb-6 sm:h-16 sm:w-16"
         style={{ background: "var(--accent)" }}
       >
-        <svg viewBox="0 0 64 64" width="36" height="36">
+        <svg viewBox="0 0 64 64" width="28" height="28" className="sm:h-9 sm:w-9">
           <path d="M20 40l6-16h3l-4 10h10l-3 6z" fill="#fff" />
         </svg>
       </div>
 
-      <h1 className="mb-2 text-2xl font-bold">Spark 编程助手</h1>
-      <p className="mb-8 text-sm" style={{ color: "var(--ink-muted)" }}>
+      <h1 className="mb-2 text-lg font-bold sm:text-2xl">Spark 编程助手</h1>
+      <p className="mb-4 text-xs sm:mb-8 sm:text-sm" style={{ color: "var(--ink-muted)" }}>
         {subText}
       </p>
 
       {/* Steps */}
-      <div className="mb-6 w-full max-w-md space-y-3">
+      <div className="mb-4 w-full max-w-md space-y-2 sm:mb-6 sm:space-y-3">
         {[
           {
             title: "模型服务",
             status: modelStatus,
-            desc: modelStatus === "ok" ? "已配置，可以开始对话" : modelStatus === "demo" ? "演示模式运行中" : "需要配置模型或开启演示",
+            desc:
+              modelStatus === "ok"
+                ? "已配置，可以开始对话"
+                : modelStatus === "demo"
+                  ? "演示模式运行中"
+                  : "需要配置模型或开启演示",
             action: () =>
               window.dispatchEvent(
                 new CustomEvent("spark:open-settings", { detail: { pane: "paneModel" } })
@@ -128,7 +134,10 @@ export function WelcomeView() {
           {
             title: "工作目录",
             status: workdirStatus,
-            desc: workdirStatus === "ok" ? "Agent 将在指定目录内活动" : "需要指定项目路径",
+            desc:
+              workdirStatus === "ok"
+                ? "Agent 将在指定目录内活动"
+                : "需要指定项目路径",
             action: () =>
               window.dispatchEvent(
                 new CustomEvent("spark:open-settings", { detail: { pane: "paneWorkspace" } })
@@ -143,14 +152,14 @@ export function WelcomeView() {
         ].map((step, i) => (
           <div
             key={i}
-            className="flex items-center gap-4 rounded-xl border p-4"
+            className="flex items-center gap-3 rounded-xl border p-3 sm:gap-4 sm:p-4"
             style={{
               background: "var(--card)",
               borderColor: "var(--border)",
             }}
           >
             <div
-              className="flex h-8 w-8 flex-none items-center justify-center rounded-full text-xs font-bold"
+              className="flex h-7 w-7 flex-none items-center justify-center rounded-full text-xs font-bold sm:h-8 sm:w-8"
               style={{
                 background:
                   step.status === "ok"
@@ -207,7 +216,7 @@ export function WelcomeView() {
       </div>
 
       <button
-        className="mt-6 rounded-xl px-6 py-2.5 text-sm font-medium transition-opacity disabled:opacity-50"
+        className="mt-4 rounded-xl px-5 py-2.5 text-sm font-medium transition-opacity disabled:opacity-50 sm:mt-6 sm:px-6"
         style={{ background: "var(--accent)", color: "#fff" }}
         disabled={loading}
         onClick={start}

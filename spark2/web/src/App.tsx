@@ -103,7 +103,7 @@ function ApprovalModal() {
   );
 }
 
-function Topbar() {
+function Topbar({ onToggleSidebar }: { onToggleSidebar: () => void }) {
   const {
     sid,
     sessions,
@@ -134,40 +134,52 @@ function Topbar() {
 
   return (
     <header
-      className="flex flex-none items-center justify-between gap-3 px-4 py-2.5"
+      className="flex flex-none items-center justify-between gap-2 px-3 py-2 sm:px-4 sm:py-2.5"
       style={{
         borderBottom: "1px solid var(--border)",
         background: "var(--card)",
       }}
     >
-      <div className="flex items-center gap-3">
+      <div className="flex min-w-0 items-center gap-2">
         <button
           type="button"
-          className="rounded-lg border px-2.5 py-1.5 text-xs"
+          className="rounded-lg border p-2 text-sm sm:hidden"
           style={{
             borderColor: "var(--border)",
             color: "var(--ink-muted)",
           }}
-          onClick={() => setSettingsOpen(true)}
+          onClick={onToggleSidebar}
+          aria-label="切换会话列表"
         >
-          设置
+          ☰
         </button>
-        <div className="min-w-0">
+        <button
+          type="button"
+          className="hidden rounded-lg border px-2.5 py-1.5 text-xs sm:inline-block"
+          style={{
+            borderColor: "var(--border)",
+            color: "var(--ink-muted)",
+          }}
+          onClick={() => setGitOpen(true)}
+        >
+          历史记录
+        </button>
+        <div className="min-w-0 flex-1">
           <div className="truncate text-sm font-semibold">
             {session?.title || "Spark 编程助手"}
           </div>
-          <div className="truncate text-xs" style={{ color: "var(--ink-muted)" }}>
+          <div className="hidden truncate text-xs sm:block" style={{ color: "var(--ink-muted)" }}>
             {cfg?.model || "未配置模型"}
             {cfg?.workdir ? ` · ${cfg.workdir}` : ""}
           </div>
         </div>
       </div>
 
-      <div className="flex items-center gap-2">
+      <div className="flex flex-none items-center gap-1.5 sm:gap-2">
         {isRunning && (
           <button
             type="button"
-            className="rounded-lg border px-2.5 py-1.5 text-xs"
+            className="rounded-lg border px-2 py-1.5 text-xs sm:px-2.5"
             style={{
               borderColor: "rgba(214,69,69,0.35)",
               color: "var(--red, #d64545)",
@@ -179,23 +191,7 @@ function Topbar() {
         )}
         <button
           type="button"
-          className="rounded-lg border px-2.5 py-1.5 text-xs"
-          style={{ borderColor: "var(--border)", color: "var(--ink-muted)" }}
-          onClick={() => setGitOpen(true)}
-        >
-          检查点
-        </button>
-        <button
-          type="button"
-          className="rounded-lg border px-2.5 py-1.5 text-xs"
-          style={{ borderColor: "var(--border)", color: "var(--ink-muted)" }}
-          onClick={() => setUsageOpen(true)}
-        >
-          用量
-        </button>
-        <button
-          type="button"
-          className="rounded-lg border px-2.5 py-1.5 text-xs"
+          className="rounded-lg border px-2 py-1.5 text-xs sm:px-2.5"
           style={{
             borderColor: "rgba(214,69,69,0.35)",
             color: "var(--red, #d64545)",
@@ -206,11 +202,22 @@ function Topbar() {
         </button>
         <button
           type="button"
-          className="rounded-lg border px-2.5 py-1.5 text-xs"
+          className="hidden rounded-lg border px-2.5 py-1.5 text-xs sm:inline-block"
           style={{ borderColor: "var(--border)", color: "var(--ink-muted)" }}
           onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
         >
           {theme === "dark" ? "浅色" : "深色"}
+        </button>
+        <button
+          type="button"
+          className="rounded-lg border px-2 py-1.5 text-xs sm:px-2.5"
+          style={{
+            borderColor: "var(--border)",
+            color: "var(--ink-muted)",
+          }}
+          onClick={() => setSettingsOpen(true)}
+        >
+          设置
         </button>
       </div>
 
@@ -269,7 +276,7 @@ function Composer() {
 
   return (
     <div
-      className="flex flex-none items-end gap-2 border-t p-3"
+      className="flex flex-none items-end gap-1.5 border-t p-2 sm:gap-2 sm:p-3"
       style={{ borderColor: "var(--border)", background: "var(--card)" }}
     >
       <input
@@ -282,7 +289,7 @@ function Composer() {
       />
       <button
         type="button"
-        className="rounded-xl border px-3 py-2.5 text-sm"
+        className="rounded-xl border px-2.5 py-2 text-sm sm:px-3 sm:py-2.5"
         style={{
           borderColor: "var(--border)",
           background: "var(--surface)",
@@ -295,7 +302,7 @@ function Composer() {
       </button>
       <textarea
         rows={2}
-        className="max-h-40 min-h-[62px] flex-1 resize-y rounded-xl border px-3 py-2 text-sm outline-none"
+        className="max-h-40 min-h-[56px] flex-1 resize-y rounded-xl border px-2.5 py-2 text-sm outline-none sm:min-h-[62px] sm:px-3"
         style={{
           border: "1px solid var(--border)",
           background: "var(--surface)",
@@ -313,7 +320,7 @@ function Composer() {
       />
       <button
         type="button"
-        className="rounded-xl px-4 py-2.5 text-sm font-medium"
+        className="rounded-xl px-3 py-2 text-sm font-medium sm:px-4 sm:py-2.5"
         style={{
           background: "var(--accent)",
           color: "#fff",
@@ -329,12 +336,13 @@ function Composer() {
 
 function Shell() {
   const { sid } = useApp();
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   return (
     <div className="flex h-full min-h-0">
-      <Sidebar />
+      <Sidebar open={sidebarOpen} onToggle={() => setSidebarOpen(!sidebarOpen)} />
       <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
-        <Topbar />
+        <Topbar onToggleSidebar={() => setSidebarOpen(!sidebarOpen)} />
         {sid ? <MessageList /> : <WelcomeView />}
         <Composer />
       </main>

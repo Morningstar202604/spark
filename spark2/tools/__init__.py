@@ -8,12 +8,14 @@ from spark2.tools.git import build_checkpoint_tools
 from spark2.tools.memory_tools import build_memory_search_tool, build_memory_tools
 from spark2.tools.patch import build_patch_tool
 from spark2.tools.plan import build_plan_tool
+from spark2.tools.session import build_session_tools
 from spark2.tools.shell import build_shell_tool
 from spark2.tools.subagent import build_explore_parallel_tool, build_subagent_tool
+from spark2.tools.terminal import build_terminal_tools
 from spark2.tools.web import build_web_tools
 
 # 只读工具（explore 子 Agent 专用）：只能读取/搜索/记忆检索，不含任何写与命令
-_READONLY_NAMES = {"read_file", "list_dir", "glob", "search", "memory_search", "index_project", "search_symbol", "lint_file", "web_search", "read_url"}
+_READONLY_NAMES = {"read_file", "list_dir", "glob", "search", "memory_search", "index_project", "search_symbol", "lint_file", "web_search", "read_url", "pty_read"}
 
 
 def build_registry(with_subagent: bool = True, plugin_tools: list[Tool] | None = None) -> dict[str, Tool]:
@@ -27,6 +29,8 @@ def build_registry(with_subagent: bool = True, plugin_tools: list[Tool] | None =
         + build_patch_tool()
         + build_codeindex_tools()
         + build_web_tools()
+        + build_terminal_tools()
+        + build_session_tools()
         + (plugin_tools or [])
     ):
         reg[tool.name] = tool

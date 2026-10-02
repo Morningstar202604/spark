@@ -230,3 +230,14 @@ async def get_plugins(request: Request, state: AppState = Depends(get_app_state)
         "plugins": out,
         "tool_count": len(state.plugin_tools),
     }
+
+
+@router.get("/api/slash-commands")
+async def get_slash_commands(
+    request: Request, state: AppState = Depends(get_app_state)
+) -> dict:
+    """斜杠命令预设列表（供前端输入框提示使用）。"""
+    check_token(request, state)
+    from spark2.slash import list_commands
+
+    return {"commands": list_commands()}

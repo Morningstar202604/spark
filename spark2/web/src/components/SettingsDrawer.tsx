@@ -22,6 +22,8 @@ const SETTINGS_PANES = [
   { id: "paneWorkspace", label: "工作区" },
   { id: "paneMemory", label: "记忆" },
   { id: "paneIntegrations", label: "集成" },
+  { id: "paneHistory", label: "历史记录" },
+  { id: "paneUsage", label: "用量" },
   { id: "paneAdvanced", label: "高级" },
   { id: "paneAbout", label: "关于" },
 ];
@@ -359,6 +361,10 @@ export function SettingsDrawer({
             pluginsDir={pluginsDir}
           />
         );
+      case "paneHistory":
+        return <PaneHistory />;
+      case "paneUsage":
+        return <PaneUsage />;
       case "paneAdvanced":
         return (
           <PaneAdvanced
@@ -386,12 +392,12 @@ export function SettingsDrawer({
         }}
       />
       <div
-        className="fixed z-50 flex h-full flex-col"
+        className="fixed z-50 flex h-full flex-col sm:w-[520px]"
         style={{
           right: 0,
           top: 0,
-          width: 520,
-          maxWidth: "94vw",
+          maxWidth: "100vw",
+          width: "100vw",
           background: "var(--surface)",
           borderLeft: "1px solid var(--border)",
         }}
@@ -414,7 +420,7 @@ export function SettingsDrawer({
         <div className="flex flex-1 overflow-hidden">
           {/* Left nav */}
           <div
-            className="flex w-28 flex-none flex-col gap-0.5 border-r p-2"
+            className="flex w-24 flex-none flex-col gap-0.5 border-r p-2 sm:w-28"
             style={{ borderColor: "var(--border)" }}
           >
             {SETTINGS_PANES.map((p) => (
@@ -1003,6 +1009,254 @@ function PaneAbout({ cfg, version }: { cfg: Cfg | null; version?: string }) {
   );
 }
 
+// ---------- Settings panes: history / usage ----------
+
+function PaneHistory() {
+  const { sid, toast } = useApp();
+  const [git, setGit] = useState<any>(null);
+  const [cpMsg, setCpMsg] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    loadGit();
+  }, [sid]);
+
+  async function loadGit() {
+    setLoading(true);
+    try {
+      const d = await getGitStatus(sid || "");
+      setGit(d);
+    } catch {
+      setGit({ repo: false, reason: "加载失败", checkpoints: [] });
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function doCheckpoint() {
+    try {
+      await gitCheckpoint(sid || "", cpMsg);
+      setCpMsg("");
+      toast("已存档");
+      loadGit();
+    } catch (e: any) {
+      toast(e.message || "存档失败");
+    }
+  }
+
+  async function doReset() {
+    if (!confirm("回滚到最近一次存档？未存档的改动将丢失（不可撤销）。")) return;
+    try {
+      await gitReset(sid || "");
+      toast("已回滚到最近存档");
+      loadGit();
+    } catch (e: any) {
+      toast(e.message || "回滚失败");
+    }
+  }
+
+  return (
+    <div>
+      <h3 className="mb-3 text-sm font-semibold">历史记录 / 检查点</h3>
+      {loading ? (
+        <div className="text-xs" style={{ color: "var(--ink-muted)" }}>
+          加载中…
+        </div>
+      ) : git?.repo ? (
+        <>
+          <div className="mb-3 flex flex-wrap gap-2">
+            <span
+              className="rounded-full border px-2.5 py-0.5 text-[11px]"
+              style={{ border: "1px solid var(--border)", color: "var(--ink-muted)" }}
+            >
+              分支 {git.branch}
+            </span>
+            <span
+              className="rounded-full border px-2.5 py-0.5 text-[11px]"
+              style={{
+                border: "1px solid var(--border)",
+                color: git.changes ? "var(--amber, #b26a00)" : "var(--green, #0e9d6e)",
+              }}
+            >
+              {git.changes ? `${git.changes} 处未存档改动` : "工作区干净"}
+            </span>
+            <span className="text-[11px]" style={{ color: "var(--ink-muted)" }}>
+              {git.checkpoints?.length || 0} 个检查点
+            </span>
+          </div>
+
+          <div className="mb-4 flex gap-2">
+            <input
+              className="flex-1 rounded-lg border px-2 py-1.5 text-xs"
+              style={{ border: "1px solid var(--border)", background: "var(--surface)", color: "var(--ink)" }}
+              placeholder="存档说明（可选）"
+              value={cpMsg}
+              onChange={(e) => setCpMsg(e.target.value)}
+            />
+            <button
+              className="rounded-lg px-3 py-1.5 text-xs font-medium"
+              style={{ background: "var(--accent)", color: "#fff" }}
+              onClick={doCheckpoint}
+            >
+              存档
+            </button>
+          </div>
+
+          {git.checkpoints?.length ? (
+            <div className="space-y-1.5">
+              {git.checkpoints.map((c: any, i: number) => (
+                <div
+                  key={i}
+                  className="flex items-center gap-2 rounded-lg border px-3 py-2 text-xs"
+                  style={{
+                    border:
+                      i === 0
+                        ? "1px solid color-mix(in srgb, var(--accent) 40%, transparent)"
+                        : "1px solid var(--border)",
+                    background:
+                      i === 0
+                        ? "color-mix(in srgb, var(--accent) 6%, var(--card))"
+                        : "var(--card)",
+                  }}
+                >
+                  <div className="flex-1">
+                    <div className="font-medium">
+                      {i === 0 ? "最新" : ""} {c.short_sha}
+                      {c.time && (
+                        <span className="ml-2 font-normal" style={{ color: "var(--ink-muted)" }}>
+                          {c.time}
+                        </span>
+                      )}
+                    </div>
+                    {c.subject && (
+                      <div className="mt-0.5 truncate" style={{ color: "var(--ink-muted)" }}>
+                        {c.subject}
+                      </div>
+                    )}
+                  </div>
+                  {i === 0 && (
+                    <button
+                      className="rounded px-2 py-1 text-[11px] font-medium"
+                      style={{
+                        background: "var(--red, #d64545)",
+                        color: "#fff",
+                      }}
+                      onClick={doReset}
+                    >
+                      回滚
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="text-xs" style={{ color: "var(--ink-muted)" }}>
+              暂无检查点，点「存档」创建一个。
+            </div>
+          )}
+        </>
+      ) : (
+        <div className="text-xs" style={{ color: "var(--ink-muted)" }}>
+          {git?.reason || "当前工作目录不是 Git 仓库"}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PaneUsage() {
+  const [usage, setUsageState] = useState<UsageResponse | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    loadUsage();
+  }, []);
+
+  async function loadUsage() {
+    setLoading(true);
+    try {
+      const d = await getUsage();
+      setUsageState(d);
+    } catch {
+      setUsageState(null);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  const t = usage?.totals;
+  const rows = usage?.top_sessions || [];
+
+  return (
+    <div>
+      <h3 className="mb-3 text-sm font-semibold">用量统计</h3>
+      {loading ? (
+        <div className="text-xs" style={{ color: "var(--ink-muted)" }}>
+          加载中…
+        </div>
+      ) : !t?.calls ? (
+        <div className="text-xs" style={{ color: "var(--ink-muted)" }}>
+          还没有用量记录。每轮模型调用都会统计 tokens 与估算费用。
+        </div>
+      ) : (
+        <>
+          <div className="mb-4 space-y-1 text-sm">
+            <div>
+              <b>{fmtTokens(t.total_tokens || 0)}</b> tokens
+              <span className="ml-2 text-xs" style={{ color: "var(--ink-muted)" }}>
+                （输入 {fmtTokens(t.prompt_tokens || 0)} / 输出 {fmtTokens(t.completion_tokens || 0)}）·{" "}
+                {t.calls} 次调用
+              </span>
+            </div>
+            <div>
+              估算费用：<b style={{ color: "var(--accent)" }}>¥{(t.est_cost || 0).toFixed(4)}</b>
+              <span className="ml-1 text-xs" style={{ color: "var(--ink-muted)" }}>
+                （近 {usage?.days || 30} 天）
+              </span>
+            </div>
+          </div>
+
+          {rows.length > 0 && (
+            <>
+              <div className="mb-2 text-xs font-medium" style={{ color: "var(--ink-muted)" }}>
+                会话排行
+              </div>
+              <div className="space-y-2">
+                {rows.map((r, i) => {
+                  const max = Math.max(...rows.map((x) => x.est_cost || 0), 0.0001);
+                  const w = Math.max(4, Math.round(((r.est_cost || 0) / max) * 100));
+                  return (
+                    <div key={i}>
+                      <div className="mb-0.5 flex items-center justify-between text-[11px]">
+                        <span>{(r.session_id || "").slice(0, 8)}</span>
+                        <span>
+                          {fmtTokens(r.total_tokens || 0)} · ¥{(r.est_cost || 0).toFixed(4)}
+                        </span>
+                      </div>
+                      <div
+                        className="h-1.5 rounded-full"
+                        style={{ background: "var(--surface-2)" }}
+                      >
+                        <div
+                          className="h-full rounded-full"
+                          style={{
+                            width: `${w}%`,
+                            background: "var(--accent)",
+                          }}
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
 // ---------- Git / Usage drawers ----------
 
 export function GitDrawer({ open, onClose }: { open: boolean; onClose: () => void }) {
@@ -1059,12 +1313,12 @@ export function GitDrawer({ open, onClose }: { open: boolean; onClose: () => voi
         onClick={(e) => e.target === e.currentTarget && onClose()}
       />
       <div
-        className="fixed z-50 flex h-full flex-col"
+        className="fixed z-50 flex h-full flex-col sm:w-[400px]"
         style={{
           right: 0,
           top: 0,
-          width: 400,
-          maxWidth: "94vw",
+          maxWidth: "100vw",
+          width: "100vw",
           background: "var(--surface)",
           borderLeft: "1px solid var(--border)",
         }}
@@ -1073,7 +1327,7 @@ export function GitDrawer({ open, onClose }: { open: boolean; onClose: () => voi
           className="flex flex-none items-center justify-between border-b px-4 py-3"
           style={{ borderColor: "var(--border)" }}
         >
-          <h2 className="text-sm font-semibold">检查点</h2>
+          <h2 className="text-sm font-semibold">历史记录</h2>
           <button className="rounded-md p-1 text-sm" style={{ color: "var(--ink-muted)" }} onClick={onClose}>
             ✕
           </button>
@@ -1200,12 +1454,12 @@ export function UsageDrawer({ open, onClose }: { open: boolean; onClose: () => v
         onClick={(e) => e.target === e.currentTarget && onClose()}
       />
       <div
-        className="fixed z-50 flex h-full flex-col"
+        className="fixed z-50 flex h-full flex-col sm:w-[380px]"
         style={{
           right: 0,
           top: 0,
-          width: 380,
-          maxWidth: "94vw",
+          maxWidth: "100vw",
+          width: "100vw",
           background: "var(--surface)",
           borderLeft: "1px solid var(--border)",
         }}

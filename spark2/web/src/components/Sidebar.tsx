@@ -19,7 +19,13 @@ function sessionSub(s: SessionMeta): string {
   return `${fmtTime(s.updated || "")} · ${s.messages || 0} 条消息`;
 }
 
-export function Sidebar() {
+export function Sidebar({
+  open,
+  onToggle,
+}: {
+  open?: boolean;
+  onToggle?: () => void;
+}) {
   const {
     sessions,
     sid,
@@ -80,6 +86,7 @@ export function Sidebar() {
     setSid(targetSid);
     await openSession(targetSid);
     refreshSessions();
+    onToggle?.();
   }
 
   async function doRename(s: SessionMeta) {
@@ -157,12 +164,21 @@ export function Sidebar() {
     }
   }
 
+  const isMobile = typeof window !== "undefined" && window.innerWidth <= 700;
+  const effectiveCollapsed = open !== undefined ? !open : collapsed;
+
   return (
     <div
-      className={`flex flex-none flex-col overflow-hidden transition-all ${collapsed ? "w-0" : "w-[260px]"}`}
+      className={`flex flex-none flex-col overflow-hidden transition-all ${
+        effectiveCollapsed ? "w-0" : "w-[260px]"
+      } ${isMobile && open ? "absolute z-50 h-full shadow-xl" : ""}`}
       style={{
-        borderRight: collapsed ? "none" : "1px solid var(--border)",
+        borderRight: effectiveCollapsed
+          ? "none"
+          : "1px solid var(--border)",
         background: "var(--card)",
+        top: isMobile ? 0 : undefined,
+        left: isMobile ? 0 : undefined,
       }}
     >
       {/* Top: new session + search */}
@@ -170,7 +186,10 @@ export function Sidebar() {
         <button
           className="mb-2 w-full rounded-lg px-3 py-2 text-sm font-medium transition-colors"
           style={{ background: "var(--accent)", color: "#fff" }}
-          onClick={newSession}
+          onClick={() => {
+            newSession();
+            onToggle?.();
+          }}
         >
           ＋ 新建会话
         </button>
@@ -190,11 +209,17 @@ export function Sidebar() {
       {/* Session list */}
       <div className="flex-1 overflow-y-auto px-3 py-2 scrollbar-thin">
         {sessions.length === 0 ? (
-          <div className="py-6 text-center text-xs" style={{ color: "var(--ink-muted)" }}>
+          <div
+            className="py-6 text-center text-xs"
+            style={{ color: "var(--ink-muted)" }}
+          >
             还没有会话，点上面新建
           </div>
         ) : list.length === 0 ? (
-          <div className="py-6 text-center text-xs" style={{ color: "var(--ink-muted)" }}>
+          <div
+            className="py-6 text-center text-xs"
+            style={{ color: "var(--ink-muted)" }}
+          >
             没有匹配「{searchQ}」的会话
           </div>
         ) : (
@@ -215,35 +240,57 @@ export function Sidebar() {
                     key={s.id}
                     className="group mb-1 cursor-pointer rounded-lg border p-2.5 transition-colors"
                     style={{
-                      background: isActive ? "color-mix(in srgb, var(--accent) 8%, var(--card))" : "var(--card)",
-                      borderColor: isActive ? "color-mix(in srgb, var(--accent) 40%, transparent)" : "var(--border)",
+                      background: isActive
+                        ? "color-mix(in srgb, var(--accent) 8%, var(--card))"
+                        : "var(--card)",
+                      borderColor: isActive
+                        ? "color-mix(in srgb, var(--accent) 40%, transparent)"
+                        : "var(--border)",
                     }}
                     onClick={() => selectSession(s.id)}
                   >
                     <div className="flex items-center gap-1.5">
-                      <span className="flex-1 truncate text-xs font-medium" style={{ color: "var(--ink)" }}>
+                      <span
+                        className="flex-1 truncate text-xs font-medium"
+                        style={{ color: "var(--ink)" }}
+                      >
                         {s.title || "(未命名)"}
                       </span>
                       {isRunning && (
                         <span
                           className="flex-none rounded-full px-1.5 text-[10px] font-medium"
-                          style={{ background: "color-mix(in srgb, var(--accent) 15%, transparent)", color: "var(--accent)" }}
+                          style={{
+                            background:
+                              "color-mix(in srgb, var(--accent) 15%, transparent)",
+                            color: "var(--accent)",
+                          }}
                         >
                           运行中
                         </span>
                       )}
                     </div>
-                    <div className="mt-0.5 truncate text-[11px]" style={{ color: "var(--ink-muted)" }}>
+                    <div
+                      className="mt-0.5 truncate text-[11px]"
+                      style={{ color: "var(--ink-muted)" }}
+                    >
                       {sessionSub(s)}
                     </div>
                     {s.workdir && (
-                      <div className="mt-0.5 truncate text-[10px]" style={{ color: "var(--ink-muted)", opacity: 0.7 }}>
+                      <div
+                        className="mt-0.5 truncate text-[10px]"
+                        style={{
+                          color: "var(--ink-muted)",
+                          opacity: 0.7,
+                        }}
+                      >
                         {shortPath(s.workdir)}
                       </div>
                     )}
-                    {/* Action row */}
+                    {/* Action row - always visible on mobile, hover on desktop */}
                     <div
-                      className="mt-1.5 flex flex-wrap gap-1 opacity-0 transition-opacity group-hover:opacity-100"
+                      className={`mt-1.5 flex flex-wrap gap-1 ${
+                        isMobile ? "" : "opacity-0 transition-opacity group-hover:opacity-100"
+                      }`}
                       onClick={(e) => e.stopPropagation()}
                     >
                       {isRunning && (
@@ -255,13 +302,25 @@ export function Sidebar() {
                           ■ 停止
                         </button>
                       )}
-                      <button className="rounded px-1.5 py-0.5 text-[10px]" style={{ color: "var(--ink-muted)" }} onClick={() => doRename(s)}>
+                      <button
+                        className="rounded px-1.5 py-0.5 text-[10px]"
+                        style={{ color: "var(--ink-muted)" }}
+                        onClick={() => doRename(s)}
+                      >
                         重命名
                       </button>
-                      <button className="rounded px-1.5 py-0.5 text-[10px]" style={{ color: "var(--ink-muted)" }} onClick={() => doFork(s)}>
+                      <button
+                        className="rounded px-1.5 py-0.5 text-[10px]"
+                        style={{ color: "var(--ink-muted)" }}
+                        onClick={() => doFork(s)}
+                      >
                         分叉
                       </button>
-                      <button className="rounded px-1.5 py-0.5 text-[10px]" style={{ color: "var(--ink-muted)" }} onClick={() => doExport(s)}>
+                      <button
+                        className="rounded px-1.5 py-0.5 text-[10px]"
+                        style={{ color: "var(--ink-muted)" }}
+                        onClick={() => doExport(s)}
+                      >
                         导出
                       </button>
                       <button
