@@ -227,8 +227,12 @@ function bind() {
   $("#btnMenu").onclick = e => { e.stopPropagation(); toggleMenu(); };
   document.addEventListener("click", e => { if (!e.target.closest(".menuwrap")) closeMenu(); });
   $("#mNewSession").onclick = () => { closeMenu(); newSession(); };
+  // 窄屏（≤600px）顶栏快捷按钮整体隐藏，⋯ 菜单是这些功能的唯一入口
+  $("#mSessions").onclick = () => { closeMenu(); $("#btnSessions").click(); };
+  $("#mTerm").onclick = () => { closeMenu(); $("#btnTerm").click(); };
   $("#mGit").onclick = () => { closeMenu(); $("#btnGit").click(); };
   $("#mUsage").onclick = () => { closeMenu(); $("#btnUsage").click(); };
+  $("#mSettings").onclick = () => { closeMenu(); $("#btnSettings").click(); };
   $("#mTheme").onclick = () => { closeMenu(); $("#btnTheme").click(); };
 
   /* 其他 */
