@@ -798,8 +798,8 @@
 spark-msg, spark-think, spark-tool-card, spark-plan-card { display: contents; }
 .msg .mops { position: absolute; top: 0; right: 0; display: inline-flex; gap: 2px; opacity: 0; transition: opacity var(--tr-fast); z-index: 5; }
 .msg:hover .mops, .msg .mops:focus-within { opacity: 1; }
-/* 用户消息气泡右对齐：操作栏放气泡内右上角，用半透明背景避免压文字 */
-.msg.user .mops { top: 6px; right: 6px; background: color-mix(in srgb, var(--panel) 75%, transparent); backdrop-filter: blur(6px); border-radius: var(--r-sm); padding: 1px; }
+/* 用户消息气泡右对齐：操作栏悬浮在气泡上沿（不压正文——短消息此前会被按钮盖住文字） */
+.msg.user .mops { top: -13px; right: 10px; background: color-mix(in srgb, var(--panel) 88%, transparent); backdrop-filter: blur(6px); border-radius: var(--r-sm); padding: 1px; }
 /* 助手消息全宽：操作栏放角色行（mhead）右侧，top 22px 避开 mhead 行高，避免悬浮到上方压住上一条用户消息 */
 .msg.assistant .mops { top: 22px; right: 0; background: color-mix(in srgb, var(--panel) 80%, transparent); backdrop-filter: blur(4px); border-radius: var(--r-sm); padding: 1px; }
 .msg .mops button {
