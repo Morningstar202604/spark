@@ -140,6 +140,9 @@
     background: color-mix(in srgb, var(--panel) 82%, transparent);
     backdrop-filter: blur(14px) saturate(1.5);
     -webkit-backdrop-filter: blur(14px) saturate(1.5);
+    /* backdrop-filter 会让本元素形成层叠上下文：必须显式抬层级，
+       否则 ⋯ 菜单（z-index 90 被困在本上下文内）会被 position:relative 的消息气泡盖住点不动 */
+    position: relative; z-index: 60;
     flex: none;
   }
   .logo { width: 22px; height: 22px; flex: none; }
