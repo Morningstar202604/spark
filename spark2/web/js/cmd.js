@@ -5,7 +5,7 @@
 
 import { $, state, applyTheme, esc } from "./core.js";
 import { openDrawer, openPane } from "./settings.js";
-import { newSession } from "./sessions.js";
+import { newSession, showEmptyIfNeeded } from "./sessions.js";
 
 const PANES = [
   ["paneModel", "模型", "服务 · 密钥 · 采样"],
@@ -29,7 +29,7 @@ export function initCmdPalette() {
     const items0 = [
       { g: "会话", label: "新建会话", desc: "开始一段新的对话", icon: "＋", key: "N", run: () => newSession() },
       { g: "会话", label: "打开会话列表", desc: "浏览 / 搜索历史会话", icon: "☰", run: () => openDrawer("drawerSessions") },
-      { g: "会话", label: "清空当前会话视图", desc: "仅清空消息区显示，记录仍保留", icon: "✕", run: () => { $("#msgList").innerHTML = ""; } },
+      { g: "会话", label: "清空当前会话视图", desc: "仅清空消息区显示，记录仍保留", icon: "✕", run: () => { $("#msgList").innerHTML = ""; showEmptyIfNeeded(); } },
       { g: "设置", label: "设置 · 模型", desc: "服务 / 密钥 / 采样", icon: "⚙", run: () => { openDrawer("drawerSettings"); openPane("paneModel"); } },
       { g: "设置", label: "设置 · 工作区", desc: "目录 / 审批 / 边界", icon: "⚙", run: () => { openDrawer("drawerSettings"); openPane("paneWorkspace"); } },
       { g: "设置", label: "设置 · 记忆", desc: "跨会话记住的事", icon: "⚙", run: () => { openDrawer("drawerSettings"); openPane("paneMemory"); } },
