@@ -42,7 +42,7 @@ async function api(path, opts = {}) {
   return res;
 }
 
-function esc(s) { return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+function esc(s) { return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); } // esc 也用于属性值（href/data-*/title），必须转义双引号防属性逃逸
 function fmtTime(iso) { const d = new Date(iso); return isNaN(d) ? "" : (d.getMonth()+1) + "月" + d.getDate() + "日 " + String(d.getHours()).padStart(2,"0") + ":" + String(d.getMinutes()).padStart(2,"0"); }
 function shortPath(p) { const s = String(p); const seg = s.split("/"); return seg.length > 3 ? "/…/" + seg.slice(-2).join("/") : s; }
 function safeParseHeaders(s) {
