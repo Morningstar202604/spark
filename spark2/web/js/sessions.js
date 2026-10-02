@@ -56,7 +56,8 @@ function sessCard(s) {
   card.setData({
     title: s.title,
     sub: (match && match.kind === "content"
-      ? "匹配：" + (match.role === "user" ? "你" : "Spark") + " · " + esc(match.snippet || "")
+      // 组件内部用 textContent 写入，不能再 esc（否则 < & 等会被二次转义成字面 &lt;）
+      ? "匹配：" + (match.role === "user" ? "你" : "Spark") + " · " + (match.snippet || "")
       : fmtTime(s.updated) + " · " + s.messages + " 条消息"),
     workdir: s.workdir || "",
     running: run,
