@@ -115,11 +115,13 @@ class ApprovalGate:
         fut = self.pending.get(request_id)
         if not fut:
             return False
+        # 注意 files=[] 是合法值（逐文件审批「全不勾 = 全部跳过」），
+        # 必须用 is not None 判断——按真值会把 [] 吞成「全部允许」，语义正好相反。
         if action == "always" and tool_name:
             self.always.add(tool_name)
-            self._resolve(fut, (True, files) if files else True)
+            self._resolve(fut, (True, files) if files is not None else True)
         elif action == "allow":
-            self._resolve(fut, (True, files) if files else True)
+            self._resolve(fut, (True, files) if files is not None else True)
         elif action == "deny":
             self._resolve(fut, False)
         else:

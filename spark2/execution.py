@@ -183,7 +183,8 @@ class ToolExecutor:
                 )
                 return
             # 逐文件审批：只应用用户勾选的文件（apply_patch 专用，其余工具忽略）
-            if allowed_files and name == "apply_patch":
+            # allowed_files=[] = 全部跳过（必须 is not None：空列表按真值判断会被当成「全部允许」）
+            if allowed_files is not None and name == "apply_patch":
                 args["files"] = list(allowed_files)
 
         if self.cancel_event.is_set():

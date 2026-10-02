@@ -102,15 +102,22 @@ function selectedFiles() {
 function updateAllowBtn() {
   const b = $("#btnAllow"); if (!b) return;
   const picked = selectedFiles();
-  if (picked === null) b.innerHTML = '允许全部 <span class="kbd">A</span>';
-  else b.textContent = "允许所选 " + picked.length + "/" + $$("#apDiff .dfile input[data-fname]").length + " 个文件";
+  if (picked === null) { b.disabled = false; b.innerHTML = '允许全部 <span class="kbd">A</span>'; }
+  else {
+    // 一个都没勾时禁用「允许」：0 个文件放行等于什么都不做，误点的语义又是「全部应用」，两头都坑
+    b.disabled = picked.length === 0;
+    b.textContent = "允许所选 " + picked.length + "/" + $$("#apDiff .dfile input[data-fname]").length + " 个文件";
+  }
 }
 
 async function answerApproval(action) {
   const ev = state.approval; if (!ev) return;
-  state.approval = null; closeModal("approvalModal");
   let files = undefined;
-  if (action === "allow") files = selectedFiles(); // null=全选；列表=勾选；[]=全跳过
+  if (action === "allow") {
+    files = selectedFiles(); // null=全选；列表=勾选；[]=全跳过
+    if (Array.isArray(files) && files.length === 0) { toast("一个文件都没勾，等于全部跳过；要放行请至少勾一个"); return; } // 快捷键 A 也走这里，与禁用态按钮一致
+  }
+  state.approval = null; closeModal("approvalModal");
   try {
     await api("/api/approval", { method: "POST", body: JSON.stringify({ request_id: ev.request_id, action, tool: ev.tool, files }) });
   } catch (e) { toast("审批提交失败"); }
