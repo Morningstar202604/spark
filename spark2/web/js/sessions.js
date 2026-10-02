@@ -144,8 +144,9 @@ function showEmptyIfNeeded() {
 }
 
 async function selectSession(sid) {
+  closeDrawer("drawerSessions"); // 先收抽屉：点「当前会话」也要关闭，不能提前 return 把抽屉留在屏幕上
   if (sid === state.sid) return;
-  state.sid = sid; closeDrawer("drawerSessions");
+  state.sid = sid;
   const res = await api("/api/sessions/" + sid);
   const data = await res.json();
   const meta = data.meta || {};
