@@ -132,6 +132,16 @@ class SessionStore:
         self._rewrite_messages(sid, rest)
         return rest
 
+    def clear(self, sid: str) -> list[dict] | None:
+        """清空会话消息，返回保留的消息列表（始终为空列表）。
+
+        None = 会话不存在。"""
+        meta = self.meta(sid)
+        if meta is None:
+            return None
+        self._rewrite_messages(sid, [])
+        return []
+
     def meta(self, sid: str) -> dict | None:
         if not _safe_sid(sid):
             return None

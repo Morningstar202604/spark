@@ -42,6 +42,9 @@ from .api_data import router as router_data
 from .api_sessions import router as router_sessions
 
 WEB_DIR = Path(__file__).parent
+DIST_DIR = WEB_DIR / "dist"
+STATIC_DIR = DIST_DIR if DIST_DIR.exists() else WEB_DIR
+
 
 # 与 spark2.pty._EXIT_MARKER 对应（避免跨模块耦合字符串，这里直接引用常量）
 from spark2.pty import _EXIT_MARKER as _PTY_EXIT_MARKER  # noqa: E402
@@ -57,7 +60,7 @@ def create_app(state: AppState | None = None) -> FastAPI:
 
     @app.get("/")
     async def index() -> FileResponse:
-        return FileResponse(WEB_DIR / "index.html")
+        return FileResponse(STATIC_DIR / "index.html")
 
     # 按域组装路由（各模块自行鉴权）
     app.include_router(router_config)
@@ -322,7 +325,7 @@ def create_app(state: AppState | None = None) -> FastAPI:
         return {"ok": True}
 
     # 静态资源（放在路由之后，作为兜底）
-    app.mount("/", StaticFiles(directory=str(WEB_DIR), html=True), name="static")
+    app.mount("/", StaticFiles(directory=str(STATIC_DIR), html=True), name="static")
     return app
 
 

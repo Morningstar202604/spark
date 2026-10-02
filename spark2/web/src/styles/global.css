@@ -1,0 +1,52 @@
+@import "tailwindcss/base";
+@import "tailwindcss/components";
+@import "tailwindcss/utilities";
+
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap");
+
+:root {
+  --surface: #f6f8fb;
+  --surface-2: #ecf0f6;
+  --ink: #1a2433;
+  --ink-muted: #55647a;
+  --accent: #0d9488;
+  --accent-2: #0f766e;
+  --card: #ffffff;
+  --muted-foreground: #8592a6;
+  --border: #dbe2ec;
+}
+
+[data-theme="dark"] {
+  --surface: #0b1220;
+  --surface-2: #0d1626;
+  --ink: #e7eef7;
+  --ink-muted: #93a7c0;
+  --accent: #2dd4bf;
+  --accent-2: #14b8a6;
+  --card: #111c2e;
+  --muted-foreground: #5f7592;
+  --border: #22314b;
+}
+
+html, body {
+  height: 100%;
+  overflow: hidden;
+  background: var(--surface);
+  color: var(--ink);
+  font-family: "Inter", "PingFang SC", "Noto Sans SC", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+#root {
+  height: 100%;
+  width: 100%;
+}
+
+.scrollbar-thin {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}

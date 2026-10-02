@@ -1,18 +1,20 @@
-"""设置抽屉 UI 结构契约（Codex 式分类导航重写的行为锁）。
+"""设置抽屉 UI 结构契约（React 迁移版）。
 
-R1: 设置抽屉必须是「左侧分类导航 + 右侧分区面板」结构，六个分区齐全且初始停在模型页。
-R2: saveCfg / loadConfig / bind 依赖的每个字段 id 在 index.html 中恰好出现一次
-    （防分区搬迁时丢字段、防重复 id 导致 $() 取错节点）。
-R3: 保存按钮与状态条必须位于抽屉 footer（任何分区下都可见可点）。
+R1: SettingsDrawer 必须保留六个设置分区，且初始停在模型页。
+R2: 设置表单必须覆盖历史保存契约涉及的全部配置域，避免迁移后丢失字段。
+R3: 保存按钮必须位于抽屉 footer，任何分区下都可见可点。
 """
 
 from __future__ import annotations
 
-import re
 from pathlib import Path
 
-INDEX = Path(__file__).resolve().parents[1] / "spark2" / "web" / "index.html"
-HTML = INDEX.read_text(encoding="utf-8")
+BASE = Path(__file__).resolve().parents[1]
+DRAWER = BASE / "spark2" / "web" / "src" / "components" / "SettingsDrawer.tsx"
+STATE = BASE / "spark2" / "web" / "src" / "state.tsx"
+
+DRAWER_HTML = DRAWER.read_text(encoding="utf-8")
+STATE_HTML = STATE.read_text(encoding="utf-8")
 
 PANES = [
     "paneModel",
@@ -23,74 +25,83 @@ PANES = [
     "paneAbout",
 ]
 
-# saveCfg 提交 / loadConfig 回填 / bind 绑定的全部设置域字段 id
-FIELD_IDS = [
-    "fProvider",
-    "fBaseUrl",
-    "fModel",
-    "fFastModel",
-    "fKey",
-    "fWorkdir",
-    "fApproval",
-    "fMaxCtx",
-    "fMemoryEmbed",
-    "fMemModel",
-    "fMemModelRow",
-    "fAuthToken",
-    "btnClearToken",
-    "fSysPrompt",
-    "fProtPaths",
-    "fMaxTurns",
-    "fToolTimeout",
-    "fTemp",
-    "fMaxTokens",
-    "fRouteOn",
-    "fRouteKw",
-    "fPricing",
-    "fMemKey",
-    "fMemVal",
-    "btnAddMem",
-    "mcpList",
-    "btnAddMcp",
-    "memoryList",
-    "pluginList",
-    "recentDirs",
-    "dirsBox",
-    "aboutVer",
-    "btnTest",
-    "btnSaveCfg",
-    "cfgStatus",
+FORM_FIELD_TOKENS = [
+    "provider",
+    "base_url",
+    "proxy",
+    "model",
+    "model_fast",
+    "fallback_model",
+    "api_key",
+    "workdir",
+    "approval_mode",
+    "max_context_tokens",
+    "memory_embedding",
+    "memory_embed_model",
+    "max_turns",
+    "tool_timeout",
+    "system_prompt",
+    "temperature",
+    "max_tokens",
+    "route_enabled",
+    "route_keywords",
+    "usage_pricing",
+    "protected_paths",
+    "mcpServers",
+    "token",
+]
+
+DOMAIN_COVERAGE = [
+    "provider",
+    "base_url",
+    "model",
+    "model_fast",
+    "api_key",
+    "workdir",
+    "approval_mode",
+    "max_context_tokens",
+    "memory_embedding",
+    "memory_embed_model",
+    "token",
+    "system_prompt",
+    "protected_paths",
+    "max_turns",
+    "tool_timeout",
+    "temperature",
+    "max_tokens",
+    "route_enabled",
+    "route_keywords",
+    "usage_pricing",
 ]
 
 
-def _settings_drawer() -> str:
-    start = HTML.index('id="drawerSettings"')
-    end = HTML.index("<!-- 用量统计抽屉 -->")
-    return HTML[start:end]
+def _settings_panes_block() -> str:
+    start = DRAWER_HTML.index("const SETTINGS_PANES")
+    end = DRAWER_HTML.index("export function SettingsDrawer")
+    return DRAWER_HTML[start:end]
 
 
-def test_r1_nav_and_panes() -> None:
-    d = _settings_drawer()
+def test_r1_panes_present_and_default_model() -> None:
+    block = _settings_panes_block()
     for pane in PANES:
-        assert f'id="{pane}"' in d, f"缺少分区 {pane}"
-    navs = re.findall(r'<button[^>]*data-pane="(\w+)"', d)
-    assert navs == PANES, f"导航项不符：{navs}"
-    m = re.search(r'<button[^>]*data-pane="paneModel"[^>]*>', d)
-    assert m and 'class="on"' in m.group(0), "模型页应为初始激活分区"
-    m = re.search(r'<div[^>]*id="paneModel"[^>]*>', d)
-    assert m and "setpane on" in m.group(0), "paneModel 应带 setpane on"
+        assert f'"{pane}"' in block, f"缺少分区 {pane}"
+    assert "paneModel" in DRAWER_HTML
+    assert "useState(initialPane || \"paneModel\")" in DRAWER_HTML
 
 
-def test_r2_field_ids_unique() -> None:
-    for fid in FIELD_IDS:
-        n = HTML.count(f'id="{fid}"')
-        assert n == 1, f'id="{fid}" 出现 {n} 次，应恰好 1 次'
+def test_r2_field_coverage() -> None:
+    text = f"{DRAWER_HTML}\n{STATE_HTML}"
+    for token in FORM_FIELD_TOKENS:
+        assert token in text, f"缺少字段 {token}"
+    for domain in DOMAIN_COVERAGE:
+        assert domain in DRAWER_HTML or domain in STATE_HTML, (
+            f"缺少配置域 {domain}"
+        )
 
 
-def test_r3_footer_holds_save() -> None:
-    d = _settings_drawer()
-    foot = re.search(r'<div class="dfoot">.*?</div>\s*</div>', d, re.S)
-    assert foot, "设置抽屉缺少 footer"
-    assert 'id="btnSaveCfg"' in foot.group(0), "保存按钮应在 footer"
-    assert 'id="cfgStatus"' in foot.group(0), "状态条应在 footer"
-    assert 'id="btnTest"' not in foot.group(0), "测试连接属于模型分区，不应在 footer"
+def test_r3_footer_has_save() -> None:
+    start = DRAWER_HTML.index("/* Footer */")
+    end = DRAWER_HTML.index("// ---------- Sub-panes ----------")
+    footer = DRAWER_HTML[start:end]
+    assert "保存设置" in footer
+    assert "handleSave" in footer

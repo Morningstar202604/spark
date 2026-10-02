@@ -469,6 +469,27 @@ class ToolExecutor:
 
     # ---------- 改完自动验证（apply_patch 后跑测试回填） ----------
 
+    @staticmethod
+    def _find_pytest_executable(wd: Path) -> str | None:
+        """优先找 venv / 当前解释器 / PATH 里的 pytest，避免误判验证不可用。"""
+        for name in ("pytest.exe", "pytest"):
+            for sub in (".venv", "venv"):
+                candidate = wd / sub / "bin" / name
+                if not candidate.exists():
+                    candidate = wd / sub / "Scripts" / name
+                if candidate.exists():
+                    return str(candidate)
+        try:
+            import sys
+
+            current = Path(sys.executable)
+            sibling = current.parent / ("pytest.exe" if current.name.endswith(".exe") else "pytest")
+            if sibling.exists():
+                return str(sibling)
+        except Exception:  # noqa: BLE001
+            pass
+        return shutil.which("pytest")
+
     async def _auto_verify(self) -> str:
         """apply_patch 成功后自动运行项目测试（pytest -q，120s 超时）。
 
@@ -491,7 +512,7 @@ class ToolExecutor:
         has_tests = (wd / "tests").is_dir()
         if not (has_cfg or has_tests):
             return ""
-        pytest_bin = shutil.which("pytest")
+        pytest_bin = self._find_pytest_executable(wd)
         if not pytest_bin:
             return ""
         try:

@@ -93,14 +93,20 @@ async def rename_session(sid: str, request: Request, state: AppState = Depends(g
 
 @router.post("/api/sessions/{sid}/truncate")
 async def truncate_session(sid: str, request: Request, state: AppState = Depends(get_app_state)) -> dict:
-    """编辑重发：截断到 message_id 之前（删除该消息及之后），返回保留消息。"""
+    """编辑重发：截断到 message_id 之前（删除该消息及之后），返回保留消息。message_id 为空时清空整个会话。"""
     check_token(request, state)
     body = await request.json()
     mid = str(body.get("message_id") or "")
-    if not mid:
-        raise HTTPException(status_code=400, detail="缺少 message_id")
     if sid in state.running:
         raise HTTPException(status_code=409, detail="该会话正在运行，先停止再编辑")
+    if sid in state.running:
+        raise HTTPException(status_code=409, detail="该会话正在运行，先停止再编辑")
+    if not mid:
+        # 清空会话：不保留任何历史消息
+        keep = state.store.clear(sid)
+        if keep is None:
+            raise HTTPException(status_code=404, detail="会话不存在")
+        return {"ok": True, "messages": keep}
     keep = state.store.truncate(sid, mid)
     if keep is None:
         raise HTTPException(status_code=404, detail="消息不存在")

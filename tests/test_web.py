@@ -43,7 +43,8 @@ def test_page_and_auth(tmp_path: Path) -> None:
     client, _ = _client(tmp_path)
     r = client.get("/")
     assert r.status_code == 200
-    assert "Spark 编程助手" in r.text
+    assert 'id="root"' in r.text
+    assert "Spark 编程助手" not in r.text
     assert client.get("/api/config").status_code == 401
     r = client.get("/api/config", headers={"X-Spark-Token": TOKEN})
     assert r.status_code == 200
