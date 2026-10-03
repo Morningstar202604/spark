@@ -411,6 +411,27 @@ function Shell() {
 }
 
 export function App() {
+  // 代码块「复制」按钮事件委托（mdToHtml 生成的 .mdcopy 无内联 handler）
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      const btn = target.closest?.(".mdcopy") as HTMLElement | null;
+      if (!btn) return;
+      const code = btn.closest("pre.mdcode")?.querySelector("code");
+      if (!code) return;
+      navigator.clipboard
+        .writeText(code.textContent || "")
+        .then(() => {
+          const old = btn.textContent;
+          btn.textContent = "已复制";
+          setTimeout(() => (btn.textContent = old), 1200);
+        })
+        .catch(() => {});
+    };
+    document.addEventListener("click", handler);
+    return () => document.removeEventListener("click", handler);
+  }, []);
+
   return (
     <AppProvider>
       <div className="h-screen w-screen overflow-hidden">

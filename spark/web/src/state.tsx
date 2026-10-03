@@ -339,7 +339,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           }
           return {
             role: "assistant" as const,
-            content: (m.content as string) || "",
+            content: mdToHtml((m.content as string) || ""),
             id: m.id,
             raw: (m.content as string) || "",
           };

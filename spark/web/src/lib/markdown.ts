@@ -75,6 +75,12 @@ export function mdToHtml(src: string): string {
       i++;
       continue;
     }
+    m = l.match(/^\[thinking\]\s?(.*)$/);
+    if (m) {
+      out.push(`<div class="mdreason">思考过程：${m[1]}</div>`);
+      i++;
+      continue;
+    }
     if (/^&gt;\s?/.test(l)) {
       out.push(`<blockquote class="mdq">${l.replace(/^&gt;\s?/, "")}</blockquote>`);
       i++;
