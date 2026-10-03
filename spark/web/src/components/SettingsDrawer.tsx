@@ -417,16 +417,16 @@ export function SettingsDrawer({
           </button>
         </div>
 
-        <div className="flex flex-1 overflow-hidden">
-          {/* Left nav */}
+        <div className="flex flex-1 flex-col overflow-hidden sm:flex-row">
+          {/* Left nav：移动端横向滚动标签，桌面端左侧竖栏（响应式，避免窄屏挤占） */}
           <div
-            className="flex w-24 flex-none flex-col gap-0.5 border-r p-2 sm:w-28"
+            className="flex w-full flex-none items-center gap-1 overflow-x-auto border-b p-2 sm:w-28 sm:flex-col sm:items-stretch sm:gap-0.5 sm:overflow-visible sm:border-b-0 sm:border-r"
             style={{ borderColor: "var(--border)" }}
           >
             {SETTINGS_PANES.map((p) => (
               <button
                 key={p.id}
-                className="rounded-md px-2 py-1.5 text-left text-xs transition-colors"
+                className="flex-none whitespace-nowrap rounded-md px-2.5 py-1.5 text-xs transition-colors sm:px-2 sm:text-left"
                 style={{
                   background:
                     activePane === p.id
