@@ -10,3 +10,4 @@ build/
 .spark/
 .aqg/
 node_modules/
+.temp/
