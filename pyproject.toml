@@ -16,6 +16,7 @@ dependencies = [
 
 [project.optional-dependencies]
 extras = ["tiktoken>=0.7", "trafilatura>=1.8", "mcp>=1.0,<2", "textual>=0.60"]
+office = ["python-docx>=1.1", "openpyxl>=3.1", "pypdf>=4.0"]  # 办公文档工具（docx/xlsx/pdf）
 dev = ["pytest>=8", "pytest-asyncio>=0.23", "mcp>=1.0,<2", "textual>=0.60", "ruff>=0.8"]
 
 [project.scripts]

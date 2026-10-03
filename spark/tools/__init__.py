@@ -5,8 +5,11 @@ from spark.tools.base import Tool
 from spark.tools.codeindex_tools import build_codeindex_tools
 from spark.tools.fs import build_file_tools
 from spark.tools.git import build_checkpoint_tools
+from spark.tools.knowledge import build_knowledge_tools
 from spark.tools.memory_tools import build_memory_search_tool, build_memory_tools
+from spark.tools.office import build_office_tools
 from spark.tools.patch import build_patch_tool
+from spark.tools.report import build_report_tools
 from spark.tools.plan import build_plan_tool
 from spark.tools.session import build_session_tools
 from spark.tools.shell import build_shell_tool
@@ -31,6 +34,9 @@ def build_registry(with_subagent: bool = True, plugin_tools: list[Tool] | None =
         + build_web_tools()
         + build_terminal_tools()
         + build_session_tools()
+        + build_office_tools()
+        + build_report_tools()
+        + build_knowledge_tools()
         + (plugin_tools or [])
     ):
         reg[tool.name] = tool

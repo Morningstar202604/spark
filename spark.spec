@@ -46,6 +46,10 @@ a = Analysis(
         'spark.memory',
         'spark.codeindex',
         'spark.plugins',
+        # 办公文档工具（office / report / knowledge）
+        'docx',
+        'openpyxl',
+        'pypdf',
     ],
     hookspath=[],
     hooksconfig={},
