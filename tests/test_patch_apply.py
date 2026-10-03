@@ -11,14 +11,14 @@ from pathlib import Path
 
 import pytest
 
-from spark2.approval import ApprovalGate
-from spark2.patch_apply import (
+from spark.approval import ApprovalGate
+from spark.patch_apply import (
     PatchError,
     apply_patch,
     apply_to_text,
     parse_patch,
 )
-from spark2.tools import build_registry
+from spark.tools import build_registry
 
 
 def _multi_patch() -> str:
@@ -184,7 +184,7 @@ def test_reject_empty_and_malformed(tmp_path: Path):
 
 def test_apply_to_text_errors():
     _h = type("H", (), {})  # placeholder, 直接用真实 Hunk
-    from spark2.patch_apply import Hunk
+    from spark.patch_apply import Hunk
 
     with pytest.raises(PatchError):
         apply_to_text("a\nb\n", [Hunk(99, 2, 99, 2, [(" ", "a"), ("-", "b")])])
@@ -208,9 +208,9 @@ def test_registry_and_preview(tmp_path: Path):
 
 def test_apply_patch_auto_verify_runs_pytest(tmp_path: Path) -> None:
     """改完自动验证：apply_patch 成功后自动跑 pytest 并把结果回填进 tool_result。"""
-    from spark2.execution import ToolExecutor
-    from spark2.tools.base import ToolContext
-    from spark2.tools.patch import build_patch_tool
+    from spark.execution import ToolExecutor
+    from spark.tools.base import ToolContext
+    from spark.tools.patch import build_patch_tool
 
     (tmp_path / "pytest.ini").write_text("[pytest]\n")
     (tmp_path / "test_ok.py").write_text(
@@ -253,9 +253,9 @@ def test_apply_patch_auto_verify_runs_pytest(tmp_path: Path) -> None:
 
 def test_apply_patch_auto_verify_skipped_without_pytest(tmp_path: Path) -> None:
     """无 pytest 配置/无 tests 目录：跳过自动验证，不附加验证文本。"""
-    from spark2.execution import ToolExecutor
-    from spark2.tools.base import ToolContext
-    from spark2.tools.patch import build_patch_tool
+    from spark.execution import ToolExecutor
+    from spark.tools.base import ToolContext
+    from spark.tools.patch import build_patch_tool
 
     (tmp_path / "plain.txt").write_text("x")
     gate = ApprovalGate(mode="auto")

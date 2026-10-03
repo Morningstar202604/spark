@@ -19,7 +19,7 @@
 
 Spark 是一个**本地优先的 AI 编程助手**，从零重写：无 Electron 臃肿、无云端依赖、无隐性模型调用。**审批门**保护你的项目（写文件、执行命令一律先征求同意），内置 **Prompt Injection 防护**，记忆**全部存本地**，国产模型（DeepSeek / 通义 / 智谱 / Kimi / 豆包 / 云知声 / Ollama）开箱即用。
 
-单文件前端、单进程、一条 `pip install`，所有数据都在 `~/.spark2/`。
+单文件前端、单进程、一条 `pip install`，所有数据都在 `~/.spark/`。
 
 > ✨ **与 opencode / ZCode / Codex CLI 的差异**：这三者都没有内置的注入防护和跨会话语义记忆——Spark 两者都有，还带轻量插件点、本地代码索引和成本面板。
 
@@ -28,16 +28,16 @@ Spark 是一个**本地优先的 AI 编程助手**，从零重写：无 Electron
  ```bash
  cd spark
  pip install -e ".[dev]"     # 依赖含 uvicorn[standard]（Web 终端 WS 必需）
- spark2 web          # 打开打印出的地址（默认监听 0.0.0.0，便于外部预览）
+ spark web          # 打开打印出的地址（默认监听 0.0.0.0，便于外部预览）
  ```
 
- > 若 `spark2 web` 的**终端面板**连不上（WS 404/不支持升级），多半是 uvicorn 缺 websockets：
+ > 若 `spark web` 的**终端面板**连不上（WS 404/不支持升级），多半是 uvicorn 缺 websockets：
  > `pip install "uvicorn[standard]"` 后重启。
  >
  > **pip 过旧：** 系统 pip < 23.2 时 `pip install -e ".[dev]"` 可能报 "No matching distribution
  > found for fastapi"，先 `python -m pip install --upgrade pip` 再装。
  >
- > **外部预览访问：** `spark2 web` 默认 `--host 0.0.0.0`，可被外部代理/预览服务访问；
+ > **外部预览访问：** `spark web` 默认 `--host 0.0.0.0`，可被外部代理/预览服务访问；
  > 仅本机使用可显式传 `--host 127.0.0.1`。
 
 ## 📦 安装包（Windows EXE / macOS / Linux）
@@ -60,9 +60,9 @@ Spark 是一个**本地优先的 AI 编程助手**，从零重写：无 Electron
 
 **没有 API Key？** 把模型服务设为「演示模式」，完整交互（计划卡、工具卡、审批弹窗）零配置可用。
 
-**无头模式**：`spark2 run "重构 lib.py" --workdir /path/to/project`
-**终端界面**：`spark2 tui`（同一内核，Ctrl+N 新建 / Ctrl+S 会话 / A 允许 / D 拒绝 / S 始终允许）
-**体检**：`spark2 doctor`（环境 / 配置 / MCP / 记忆 / 日志一条龙）
+**无头模式**：`spark run "重构 lib.py" --workdir /path/to/project`
+**终端界面**：`spark tui`（同一内核，Ctrl+N 新建 / Ctrl+S 会话 / A 允许 / D 拒绝 / S 始终允许）
+**体检**：`spark doctor`（环境 / 配置 / MCP / 记忆 / 日志一条龙）
 
 ## 🧰 v0.9.0 功能一览
 
@@ -73,7 +73,7 @@ Spark 是一个**本地优先的 AI 编程助手**，从零重写：无 Electron
 - 👥 **多 Agent（spawn_subagent）** — `explore` 只读调查员、`general` 全工具执行器（写操作**照样过审批门**）；事件嵌入主对话流；共享取消
 - 🍴 **会话分叉与并行** — 任意节点复制成独立会话；多会话并行运行，实时"● 运行中"徽标
 - 🔎 **代码索引** — `index_project` / `search_symbol` / `lint_file`：Python 标准库 ast 精确解析（符号+行号），其他语言行级提取；按工作目录缓存、mtime+size 失效、全只读
-- 🧩 **轻量插件点** — 往 `~/.spark2/plugins/` 丢一个 `.py` 即可加工具（`tools=` 或 `register(reg)`）；插件工具照常过审批门；失败不影响主服务
+- 🧩 **轻量插件点** — 往 `~/.spark/plugins/` 丢一个 `.py` 即可加工具（`tools=` 或 `register(reg)`）；插件工具照常过审批门；失败不影响主服务
 - 💰 **成本面板** — 每次调用的 tokens/费用按会话落 JSONL；顶栏"用量"面板带会话排行；内置 2026-09 已核验官方价（DeepSeek 谷价 / 豆包方舟），可覆盖
 - 🧠 **本地记忆** — 说"记住 XX 是 YY"即可；每轮 FTS5 本地检索（中文双字感知），可选语义（豆包向量 / 本地 BGE-M3 离线）；按工作目录隔离
 - 🔌 **MCP** — 官方 SDK，stdio + Streamable HTTP（2026-07-28 规范）；只读放行、写入过审批
@@ -84,7 +84,7 @@ Spark 是一个**本地优先的 AI 编程助手**，从零重写：无 Electron
 - 📊 **上下文水位** — 会话页进度条 + 数字（已用/上限），超窗自动压缩
 - 🎙️ **语音输入** — Web Speech 中文听写（不支持自动隐藏）
 - 🛒 **MCP 市场** — 8 个官方 server 一键安装，进列表即生效
-- 💾 **全本地** — 会话 / 记忆 / 用量 / 索引都在 `~/.spark2/`，JSONL 人可读、可审计、可删除
+- 💾 **全本地** — 会话 / 记忆 / 用量 / 索引都在 `~/.spark/`，JSONL 人可读、可审计、可删除
 
 ## 🏗️ 架构
 
@@ -145,3 +145,5 @@ MIT。站在开源巨人肩上——ripgrep、difflib、SQLite FTS5、官方 mcp
 ---
 
 **为喜欢"先问再动手、本地运行、不烧钱"的人而做。** 点 Star、Fork、插上你自己的工具——Spark 是你的。
+
+> AI生成

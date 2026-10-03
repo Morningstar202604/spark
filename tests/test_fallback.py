@@ -6,10 +6,10 @@ from pathlib import Path
 
 import pytest
 
-import spark2.loop as loop_mod
-from spark2.loop import AgentLoop
-from spark2.provider import ProviderError
-from spark2.tools import build_registry
+import spark.loop as loop_mod
+from spark.loop import AgentLoop
+from spark.provider import ProviderError
+from spark.tools import build_registry
 
 
 async def _run(provider_cfg: dict, msgs: list[dict], monkeypatch: pytest.MonkeyPatch) -> tuple[list[dict], list[str]]:

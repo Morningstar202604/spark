@@ -8,7 +8,7 @@ cd spark
 python3 -m venv .venv
 source .venv/bin/activate        # Windows: .venv\Scripts\activate
 pip install -e ".[dev]"
-spark2 web                        # open the printed URL
+spark web                        # open the printed URL
 ```
 
 ## Option B — packaged binary
@@ -37,7 +37,7 @@ bash scripts/build.sh            # output: dist/spark/spark
 ### What the package contains
 
 - `spark` executable — CLI + Web server (frontend assets embedded)
-- Everything runs locally under `~/.spark2/`
+- Everything runs locally under `~/.spark/`
 - No runtime dependency on a browser other than opening the printed `http://127.0.0.1:PORT` (the server listens on `0.0.0.0` by default for external access; the printed URL uses 127.0.0.1)
 - Optional extras (MCP / embedding / TUI) degrade gracefully when absent
 
@@ -50,7 +50,9 @@ bash scripts/build.sh            # output: dist/spark/spark
 
 ## Troubleshooting
 
-- Port busy → `spark2 web --port 8788`
+- Port busy → `spark web --port 8788`
 - Model errors → Settings → Test connection; check `base_url` / `model` / `api_key`
 - Need a proxy → set `proxy` in config or `HTTPS_PROXY` env var
 - Windows SmartScreen → click "More info → Run anyway" (unsigned build)
+
+> AI生成

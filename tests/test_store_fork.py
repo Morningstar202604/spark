@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from spark2.store import SessionStore
+from spark.store import SessionStore
 
 
 def test_fork_copies_messages(tmp_path: Path) -> None:

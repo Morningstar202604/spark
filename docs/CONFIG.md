@@ -2,7 +2,7 @@
 
 > English: [docs/en/CONFIG.md](en/CONFIG.md)
 
-配置文件位于 `~/.spark2/config.toml`（可用 `SPARK2_HOME` 环境变量覆盖目录）。
+配置文件位于 `~/.spark/config.toml`（可用 `SPARK_HOME` 环境变量覆盖目录）。
 绝大多数字段可在网页「设置」面板中修改并保存，本文件列出全部字段与默认值。
 
 ## 核心字段
@@ -64,7 +64,7 @@ env = {}              # 环境变量（JSON 对象）
 
 ## 环境变量
 
-- `SPARK2_HOME`：覆盖配置/数据目录（默认 `~/.spark2`）
+- `SPARK_HOME`：覆盖配置/数据目录（默认 `~/.spark`）
 - `<PROVIDER>_API_KEY`：provider 对应的密钥环境变量（`DEEPSEEK_API_KEY` / `DASHSCOPE_API_KEY` / `ZHIPU_API_KEY` / `MOONSHOT_API_KEY` / `ARK_API_KEY` / `UNISOUND_API_KEY` / `OLLAMA_API_KEY`）
 - `HTTPS_PROXY` / `HTTP_PROXY`：未设 `proxy` 字段时由 httpx 自动尊重
 
@@ -79,3 +79,5 @@ workdir = "/path/to/proj"
 approval_mode = "suggest"
 fallback_model = "u2-pro"   # 可选：主模型故障自动切换
 ```
+
+> AI生成

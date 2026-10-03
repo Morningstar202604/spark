@@ -10,8 +10,8 @@ from __future__ import annotations
 from pathlib import Path
 
 BASE = Path(__file__).resolve().parents[1]
-DRAWER = BASE / "spark2" / "web" / "src" / "components" / "SettingsDrawer.tsx"
-STATE = BASE / "spark2" / "web" / "src" / "state.tsx"
+DRAWER = BASE / "spark" / "web" / "src" / "components" / "SettingsDrawer.tsx"
+STATE = BASE / "spark" / "web" / "src" / "state.tsx"
 
 DRAWER_HTML = DRAWER.read_text(encoding="utf-8")
 STATE_HTML = STATE.read_text(encoding="utf-8")

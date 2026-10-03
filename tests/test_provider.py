@@ -8,7 +8,7 @@ from typing import Any
 import httpx
 import pytest
 
-from spark2 import provider
+from spark import provider
 
 
 class FakeResponse:

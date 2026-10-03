@@ -1,5 +1,5 @@
 """示例插件 2：slugify / base64 工具（register 写法）。"""
-from spark2.tools.base import Tool
+from spark.tools.base import Tool
 import base64
 import re
 

@@ -31,8 +31,8 @@ def free_port() -> int:
 RUNNER = '''
 import json, sys
 from pathlib import Path
-from spark2.store import SessionStore
-from spark2.web.server import AppState, create_app
+from spark.store import SessionStore
+from spark.web.server import AppState, create_app
 cfg = json.loads(Path(sys.argv[1]).read_text())
 state = AppState(cfg=cfg, store=SessionStore(root=Path(sys.argv[2])))
 import uvicorn

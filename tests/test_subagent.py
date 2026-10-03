@@ -3,10 +3,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from spark2.approval import ApprovalGate
-from spark2.loop import AgentLoop
-from spark2.subagent import make_subagent
-from spark2.tools import build_readonly_registry, build_registry
+from spark.approval import ApprovalGate
+from spark.loop import AgentLoop
+from spark.subagent import make_subagent
+from spark.tools import build_readonly_registry, build_registry
 
 SPAWN_EXPLORE = [
     {

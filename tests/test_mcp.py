@@ -6,9 +6,9 @@ from pathlib import Path
 
 import pytest
 
-from spark2.approval import ApprovalGate
-from spark2.loop import AgentLoop
-from spark2.tools.mcp import MCP_AVAILABLE, McpManager, McpServer
+from spark.approval import ApprovalGate
+from spark.loop import AgentLoop
+from spark.tools.mcp import MCP_AVAILABLE, McpManager, McpServer
 
 pytestmark = pytest.mark.skipif(not MCP_AVAILABLE, reason="需要 mcp SDK")
 

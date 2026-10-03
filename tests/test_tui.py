@@ -6,9 +6,9 @@ from pathlib import Path
 
 import pytest
 
-from spark2.memory import MemoryStore
-from spark2.store import SessionStore
-from spark2.tui import SparkTui
+from spark.memory import MemoryStore
+from spark.store import SessionStore
+from spark.tui import SparkTui
 
 try:
     from textual.widgets import Input

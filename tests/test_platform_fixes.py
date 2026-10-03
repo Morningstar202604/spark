@@ -7,8 +7,8 @@
 3) search 降级路径（无 rg）必须按 UTF-8 解码（与 read_file 一致），中文检索可用；
 4) provider 的 tiktoken 编码器必须惰性初始化：get_encoding 首次调用需联网下载 BPE，
    失败（无网/被墙）不得阻断 import 与整个应用启动，应回退启发式估算；
-5) SPARK2_HOME 契约：sessions/logs/usage/codeindex/plugins/recent_dirs/保护路径
-   必须在调用时动态取 config_dir()，不得固化为真实 ~/.spark2（config.py 注释自证）；
+5) SPARK_HOME 契约：sessions/logs/usage/codeindex/plugins/recent_dirs/保护路径
+   必须在调用时动态取 config_dir()，不得固化为真实 ~/.spark（config.py 注释自证）；
 6) 会话 id / 终端 tab id 必须消毒，防 "../" 与绝对路径穿越（store.meta 曾可用
    "../outside" 读到会话目录之外的 meta.json）；
 7) Windows 路径大小写不敏感：审批门的边界/保护判定不得因大小写差异被绕过。
@@ -23,10 +23,10 @@ from pathlib import Path
 
 import pytest
 
-from spark2.patch_apply import apply_patch
-from spark2.store import SessionStore
-from spark2.tools.base import ToolContext
-from spark2.tools.fs import search, write_file
+from spark.patch_apply import apply_patch
+from spark.store import SessionStore
+from spark.tools.base import ToolContext
+from spark.tools.fs import search, write_file
 
 # ---------- 1/2) apply_patch 尾换行与行尾保留 ----------
 
@@ -99,7 +99,7 @@ async def test_search_fallback_matches_utf8_chinese(
 ) -> None:
     """无 rg 时的 Python 遍历必须显式 UTF-8 解码（本机默认编码碰巧是 UTF-8，
     此测试锁定行为；cp936/cp1252 默认编码的机器上修复前中文检索必然失效）。"""
-    monkeypatch.setattr("spark2.tools.fs.shutil.which", lambda _name: None)
+    monkeypatch.setattr("spark.tools.fs.shutil.which", lambda _name: None)
     (tmp_path / "zh.txt").write_text(
         "部署说明：先安装依赖再启动服务\n", encoding="utf-8"
     )
@@ -120,7 +120,7 @@ def test_provider_survives_tiktoken_init_failure(monkeypatch) -> None:
 
     fake.get_encoding = boom  # type: ignore[attr-defined]
     monkeypatch.setitem(sys.modules, "tiktoken", fake)
-    import spark2.provider as prov
+    import spark.provider as prov
 
     importlib.reload(prov)
     try:
@@ -129,13 +129,13 @@ def test_provider_survives_tiktoken_init_failure(monkeypatch) -> None:
         importlib.reload(prov)  # 还原模块状态，避免影响其他测试
 
 
-# ---------- 5) SPARK2_HOME 动态隔离 ----------
+# ---------- 5) SPARK_HOME 动态隔离 ----------
 
 
-def test_codeindex_cache_respects_spark2_home(tmp_path: Path, monkeypatch) -> None:
+def test_codeindex_cache_respects_spark_home(tmp_path: Path, monkeypatch) -> None:
     home = tmp_path / "idx-home"
-    monkeypatch.setenv("SPARK2_HOME", str(home))
-    from spark2 import codeindex as ci
+    monkeypatch.setenv("SPARK_HOME", str(home))
+    from spark import codeindex as ci
 
     proj = tmp_path / "proj"
     proj.mkdir()
@@ -144,47 +144,47 @@ def test_codeindex_cache_respects_spark2_home(tmp_path: Path, monkeypatch) -> No
     assert (home / "codeindex").is_dir()
 
 
-def test_session_store_default_root_respects_spark2_home(
+def test_session_store_default_root_respects_spark_home(
     tmp_path: Path, monkeypatch
 ) -> None:
     home = tmp_path / "st-home"
-    monkeypatch.setenv("SPARK2_HOME", str(home))
+    monkeypatch.setenv("SPARK_HOME", str(home))
     s = SessionStore()
     assert s.root == home / "sessions"
 
 
-def test_plugins_dir_respects_spark2_home(tmp_path: Path, monkeypatch) -> None:
+def test_plugins_dir_respects_spark_home(tmp_path: Path, monkeypatch) -> None:
     home = tmp_path / "pl-home"
-    monkeypatch.setenv("SPARK2_HOME", str(home))
-    from spark2.plugins import plugins_dir
+    monkeypatch.setenv("SPARK_HOME", str(home))
+    from spark.plugins import plugins_dir
 
     assert plugins_dir() == home / "plugins"
 
 
-def test_recent_dirs_respects_spark2_home(tmp_path: Path, monkeypatch) -> None:
+def test_recent_dirs_respects_spark_home(tmp_path: Path, monkeypatch) -> None:
     home = tmp_path / "rd-home"
-    monkeypatch.setenv("SPARK2_HOME", str(home))
-    from spark2 import recent_dirs as rd
+    monkeypatch.setenv("SPARK_HOME", str(home))
+    from spark import recent_dirs as rd
 
     rd.remember(str(tmp_path / "someproj"))
     assert (home / "recent_dirs.json").exists()
     assert rd.load_recent() == [str(tmp_path / "someproj")]
 
 
-def test_loop_protected_paths_respect_spark2_home(tmp_path: Path, monkeypatch) -> None:
+def test_loop_protected_paths_respect_spark_home(tmp_path: Path, monkeypatch) -> None:
     home = tmp_path / "lp-home"
-    monkeypatch.setenv("SPARK2_HOME", str(home))
-    from spark2.approval import ApprovalGate
-    from spark2.loop import AgentLoop
+    monkeypatch.setenv("SPARK_HOME", str(home))
+    from spark.approval import ApprovalGate
+    from spark.loop import AgentLoop
 
     lp = AgentLoop(tmp_path, {"model": "mock"}, ApprovalGate())
     assert lp.ctx.protected[0] == home.resolve()
 
 
-def test_appstate_dirs_respect_spark2_home(tmp_path: Path, monkeypatch) -> None:
+def test_appstate_dirs_respect_spark_home(tmp_path: Path, monkeypatch) -> None:
     home = tmp_path / "web-home"
-    monkeypatch.setenv("SPARK2_HOME", str(home))
-    from spark2.web.server import AppState
+    monkeypatch.setenv("SPARK_HOME", str(home))
+    from spark.web.server import AppState
 
     cfg = {
         "provider": "mock",
@@ -222,7 +222,7 @@ def test_session_store_rejects_traversal_sid(tmp_path: Path) -> None:
 
 
 def test_safe_tab_id_sanitized() -> None:
-    from spark2.pty import safe_tab_id
+    from spark.pty import safe_tab_id
 
     assert safe_tab_id("../../evil") == "evil"
     assert safe_tab_id("abc-123_X") == "abc-123_X"
@@ -235,8 +235,8 @@ def test_safe_tab_id_sanitized() -> None:
 
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows 路径大小写行为")
 def test_approval_boundary_case_insensitive(tmp_path: Path) -> None:
-    from spark2.approval import ApprovalGate
-    from spark2.tools import build_registry
+    from spark.approval import ApprovalGate
+    from spark.tools import build_registry
 
     reg = build_registry()
     wd_upper = Path(str(tmp_path).upper())
@@ -252,8 +252,8 @@ def test_approval_boundary_case_insensitive(tmp_path: Path) -> None:
 
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows 路径大小写行为")
 def test_protected_path_denied_case_insensitive(tmp_path: Path) -> None:
-    from spark2.approval import ApprovalGate
-    from spark2.tools import build_registry
+    from spark.approval import ApprovalGate
+    from spark.tools import build_registry
 
     reg = build_registry()
     (tmp_path / "secret").mkdir()

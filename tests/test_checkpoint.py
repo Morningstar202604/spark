@@ -7,9 +7,9 @@ from pathlib import Path
 
 import pytest
 
-from spark2.approval import ApprovalGate
-from spark2.loop import AgentLoop
-from spark2.tools.git import git_commit, git_reset, is_git_repo
+from spark.approval import ApprovalGate
+from spark.loop import AgentLoop
+from spark.tools.git import git_commit, git_reset, is_git_repo
 
 pytestmark = pytest.mark.skipif(shutil.which("git") is None, reason="需要 git")
 
@@ -79,8 +79,8 @@ async def test_checkpoint_excludes_runtime_artifacts(tmp_path: Path) -> None:
     _make_repo(tmp_path)
     (tmp_path / ".venv" / "Lib").mkdir(parents=True)
     (tmp_path / ".venv" / "Lib" / "pyvenv.cfg").write_text("home=x", encoding="utf-8")
-    (tmp_path / ".spark2-home").mkdir()
-    (tmp_path / ".spark2-home" / "memory.db").write_text("sqlite", encoding="utf-8")
+    (tmp_path / ".spark-home").mkdir()
+    (tmp_path / ".spark-home" / "memory.db").write_text("sqlite", encoding="utf-8")
     (tmp_path / "a.txt").write_text("v2", encoding="utf-8")
 
     ok, text = await git_commit(tmp_path, "checkpoint")
@@ -92,10 +92,10 @@ async def test_checkpoint_excludes_runtime_artifacts(tmp_path: Path) -> None:
     assert "a.txt" in tracked
     # 解跟踪只动索引，工作区文件必须还在
     assert (tmp_path / ".venv" / "Lib" / "pyvenv.cfg").exists()
-    assert (tmp_path / ".spark2-home" / "memory.db").exists()
+    assert (tmp_path / ".spark-home" / "memory.db").exists()
     # 本地 exclude，不污染用户 .gitignore
     exclude = (tmp_path / ".git" / "info" / "exclude").read_text(encoding="utf-8")
-    assert ".venv/" in exclude and ".spark2-home/" in exclude
+    assert ".venv/" in exclude and ".spark-home/" in exclude
     assert not (tmp_path / ".gitignore").exists()
 
 

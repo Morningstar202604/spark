@@ -3,7 +3,7 @@
 ## Top-level layout
 
 ```
-spark2/
+spark/
 ├── config.py          # Config layer: TOML I/O, Chinese-provider presets, key masking (mask_key / is_masked_key)
 ├── loop.py            # Main loop: plan → tools → approval → execute → summarize; routing + fallback
 ├── compaction.py      # Context management: folds old messages into a summary (not a hard delete)
@@ -48,3 +48,5 @@ Events pushed to the frontend over SSE: hello → reasoning/text/tool_start/appr
 - Design tokens: CSS variables (`--accent` / `--bg-*` / `--sp-*`), light/dark theme follows the system
 - Capabilities: Ctrl+K command palette, message edit & resend, voice input (Web Speech),
   context watermark, full-text search, one-click MCP market, terminal (PTY/WS), multimodal image input
+
+> AI生成

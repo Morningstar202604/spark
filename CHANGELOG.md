@@ -4,9 +4,12 @@
 
 ## [Unreleased]
 
+### 变更
+- **包名统一为 `spark`（破坏性变更，无兼容回退）**：Python 包目录、命令入口、配置/数据目录彻底统一为 `spark`——配置目录改为 `~/.spark`、环境变量改为 `SPARK_HOME`，前端 localStorage 键 / 会话导出目录 / 插件模块名同步改 `spark_*`；命令行入口统一为 `python -m spark` / `spark`。旧命名路径与旧环境变量不再读取。
+
 ### 新增
-- **Web 默认监听 0.0.0.0**：`spark2 web` 默认 host 由 `127.0.0.1` 改为 `0.0.0.0`，外部预览/代理可直接访问；打印地址自动用 `127.0.0.1` 便于本机打开；本机使用可显式传 `--host 127.0.0.1`。
-- **uvicorn 日志级别可调**：`spark2 web` 新增 `--log-level`（默认 info），线上排障不必再翻无输出的 warning 日志。
+- **Web 默认监听 0.0.0.0**：`spark web` 默认 host 由 `127.0.0.1` 改为 `0.0.0.0`，外部预览/代理可直接访问；打印地址自动用 `127.0.0.1` 便于本机打开；本机使用可显式传 `--host 127.0.0.1`。
+- **uvicorn 日志级别可调**：`spark web` 新增 `--log-level`（默认 info），线上排障不必再翻无输出的 warning 日志。
 - **pip 过旧提示**：README 与 pyproject.toml 注释补充"pip < 23.2 装不上 fastapi/tomlkit"的提示（先 `python -m pip install --upgrade pip`）。
 
 ### 修复
@@ -101,3 +104,5 @@
 
 ### 新增
 - 首个可用版本：AgentLoop 事件流（计划→模型→工具→审批→执行）、会话存储、长期记忆（SQLite+FTS5）、用量成本记账、国产模型 PRESETS、子 agent（explore/general）、轻量插件点。
+
+> AI生成

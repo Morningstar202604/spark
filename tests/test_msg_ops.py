@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from spark2.store import SessionStore
+from spark.store import SessionStore
 
 
 @pytest.fixture

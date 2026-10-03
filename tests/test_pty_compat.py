@@ -1,5 +1,5 @@
 """平台兼容回归：ptyprocess 不可用（如 Windows 无 fcntl）时——
-1) spark2.web.server 仍可导入、Web 服务可创建；
+1) spark.web.server 仍可导入、Web 服务可创建；
 2) PtySession 创建抛出明确的 RuntimeError；
 3) /ws/pty 返回 {"type":"err"} 提示而非崩溃。
 与 tests/test_pty.py 的约定一致：Windows P1 不支持内置终端，跳过而非拒绝启动。
@@ -13,9 +13,9 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-import spark2.pty as pty_mod
-from spark2.store import SessionStore
-from spark2.web.server import AppState, create_app
+import spark.pty as pty_mod
+from spark.store import SessionStore
+from spark.web.server import AppState, create_app
 
 TOKEN = "test-token"
 
@@ -71,7 +71,7 @@ def test_windows_pty_echo_and_cwd(tmp_path: Path) -> None:
     """Windows 上 PTY 不再是"设计性缺失"：spawn cmd.exe，回显与 cwd 绑定可用。"""
     import asyncio
 
-    from spark2.pty import PTY_AVAILABLE, PtyManager
+    from spark.pty import PTY_AVAILABLE, PtyManager
 
     if not PTY_AVAILABLE:
         pytest.skip("pywinpty 未安装")

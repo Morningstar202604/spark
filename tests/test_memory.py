@@ -3,11 +3,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from spark2.approval import ApprovalGate
-from spark2.loop import AgentLoop
-from spark2.memory import MemoryStore
-from spark2.tools import build_registry
-from spark2.tools.base import ToolContext
+from spark.approval import ApprovalGate
+from spark.loop import AgentLoop
+from spark.memory import MemoryStore
+from spark.tools import build_registry
+from spark.tools.base import ToolContext
 
 
 def _store(tmp_path: Path) -> MemoryStore:
@@ -169,7 +169,7 @@ async def test_no_embedder_fallback(tmp_path: Path) -> None:
 
 
 async def test_make_embedder_off_and_local_fail(tmp_path: Path) -> None:
-    from spark2.memory import make_embedder
+    from spark.memory import make_embedder
 
     assert make_embedder({"memory_embedding": "off"}) is None
     assert make_embedder({}) is None

@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from spark2.tools.mcp import MCP_AVAILABLE, McpManager, McpServer, servers_from_cfg
+from spark.tools.mcp import MCP_AVAILABLE, McpManager, McpServer, servers_from_cfg
 
 FIXTURE = Path(__file__).parent / "fixtures" / "http_mcp_server.py"
 PORT = 8931

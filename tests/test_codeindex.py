@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from spark2 import codeindex as ci
+from spark import codeindex as ci
 
 
 def _make_proj(tmp_path: Path) -> Path:

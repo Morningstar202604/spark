@@ -6,7 +6,7 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from spark2.web.server import AppState, create_app
+from spark.web.server import AppState, create_app
 from tests.test_web import TOKEN, _state
 
 
@@ -38,7 +38,7 @@ def test_config_save_persists_fallback_model(tmp_path: Path) -> None:
 
 def test_config_save_ignores_masked_key(tmp_path: Path) -> None:
     """打码后的密钥回传必须被忽略，不得覆盖真 key（此前全星号判定漏掉带前缀的脱敏值）。"""
-    from spark2.config import mask_key
+    from spark.config import mask_key
 
     client, state = _client(tmp_path)
     client.post(

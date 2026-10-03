@@ -2,7 +2,7 @@
 
 注意：进程内测试传输层（TestClient / httpx ASGITransport）都是"先收完整个响应体、
 再返回给客户端"，因此在测试里无法模拟"流打开期间并发回发审批"（会死锁）。
-审批在流内的并发回发由 spark2 的 uvicorn 真实服务器承担，用真端口手动验证；
+审批在流内的并发回发由 spark 的 uvicorn 真实服务器承担，用真端口手动验证；
 本文件覆盖：鉴权/配置/会话/SSE 事件格式/审批接口的响应逻辑。
 """
 from __future__ import annotations
@@ -13,8 +13,8 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from spark2.store import SessionStore
-from spark2.web.server import AppState, create_app
+from spark.store import SessionStore
+from spark.web.server import AppState, create_app
 
 TOKEN = "test-token"
 
@@ -181,7 +181,7 @@ def test_chat_stream_sends_current_prompt_to_model(tmp_path: Path, monkeypatch) 
             "model": cfg.get("model"),
         }
 
-    monkeypatch.setattr("spark2.loop.stream_chat", fake_stream_chat)
+    monkeypatch.setattr("spark.loop.stream_chat", fake_stream_chat)
     client, state = _client(tmp_path)
     sid = client.post("/api/sessions", headers={"X-Spark-Token": TOKEN}, json={"workdir": str(tmp_path)}).json()["id"]
 
@@ -266,7 +266,7 @@ def test_chat_stream_with_images_multimodal(tmp_path: Path, monkeypatch) -> None
         yield {"type": "text", "text": "这是 PNG 图片，内容是登录页设计稿。"}
         yield {"type": "usage", "estimated": 10, "prompt_tokens": 8, "completion_tokens": 2, "model": "mock"}
 
-    monkeypatch.setattr("spark2.loop.stream_chat", fake_stream_chat)
+    monkeypatch.setattr("spark.loop.stream_chat", fake_stream_chat)
     client, state = _client(tmp_path)
     r = client.post("/api/sessions", headers={"X-Spark-Token": TOKEN}, json={"workdir": str(tmp_path)})
     sid = r.json()["id"]
@@ -313,7 +313,7 @@ def test_chat_stream_rejects_too_many_images(tmp_path: Path) -> None:
 
 def test_mock_chat_accepts_content_list(tmp_path: Path) -> None:
     """mock provider 对 content list（多模态消息）不崩溃且正确取文本。"""
-    from spark2.provider import stream_chat
+    from spark.provider import stream_chat
 
     async def run():
         cfg = {"model": "mock", "mock_script": None}

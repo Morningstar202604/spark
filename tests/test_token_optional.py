@@ -9,8 +9,8 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from spark2.store import SessionStore
-from spark2.web.server import AppState, create_app
+from spark.store import SessionStore
+from spark.web.server import AppState, create_app
 
 
 def _client(tmp_path: Path, token: str = "") -> tuple[TestClient, AppState]:
@@ -57,8 +57,8 @@ def test_token_set_and_clear_via_api(tmp_path: Path) -> None:
 
 
 def test_load_config_does_not_autogenerate_token(tmp_path: Path, monkeypatch) -> None:
-    monkeypatch.setenv("SPARK2_HOME", str(tmp_path))
-    from spark2.config import load_config
+    monkeypatch.setenv("SPARK_HOME", str(tmp_path))
+    from spark.config import load_config
 
     assert load_config()["token"] == ""
     assert load_config()["token"] == ""  # 重复加载也不得偷偷生成

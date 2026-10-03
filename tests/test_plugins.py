@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from spark2.plugins import collect_plugin_tools, load_plugins
+from spark.plugins import collect_plugin_tools, load_plugins
 
 
 def _write_plugin(d: Path, name: str, code: str) -> Path:
@@ -16,7 +16,7 @@ def _write_plugin(d: Path, name: str, code: str) -> Path:
 def test_load_plugin_tools_list(tmp_path: Path) -> None:
     _write_plugin(
         tmp_path, "hello",
-        "from spark2.tools.base import Tool\n"
+        "from spark.tools.base import Tool\n"
         "def _h(args, ctx):\n    return 'hello '\n"
         "tools = [Tool(name='hello', description='say hello', parameters={'type':'object','properties':{}}, category='read', handler=_h)]\n",
     )
@@ -30,7 +30,7 @@ def test_load_plugin_tools_list(tmp_path: Path) -> None:
 def test_load_plugin_register_function(tmp_path: Path) -> None:
     _write_plugin(
         tmp_path, "reg",
-        "from spark2.tools.base import Tool\n"
+        "from spark.tools.base import Tool\n"
         "def register(reg):\n"
         "    reg.append(Tool(name='reg_tool', description='d', parameters={'type':'object','properties':{}}, category='read', handler=lambda a,c:'ok'))\n",
     )

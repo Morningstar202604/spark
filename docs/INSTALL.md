@@ -8,7 +8,7 @@ cd spark
 python3 -m venv .venv
 source .venv/bin/activate        # Windows: .venv\Scripts\activate
 pip install -e ".[dev]"
-spark2 web                        # 打开打印出的地址
+spark web                        # 打开打印出的地址
 ```
 
 ## 方式 B — 打包版二进制
@@ -36,7 +36,7 @@ bash scripts/build.sh            # 产物：dist/spark/spark
 ### 打包内容
 
 - `spark` 可执行文件 —— CLI + Web 服务（前端资源已内嵌）
-- 全部数据本地化，运行于 `~/.spark2/`
+- 全部数据本地化，运行于 `~/.spark/`
 - 无需额外浏览器依赖，浏览器打开打印的 `http://127.0.0.1:端口` 即可（服务默认监听 `0.0.0.0` 便于外部预览，打印地址自动用 127.0.0.1）
 - 可选能力（MCP / 嵌入 / TUI）缺失时优雅降级
 
@@ -49,7 +49,9 @@ bash scripts/build.sh            # 产物：dist/spark/spark
 
 ## 常见问题
 
-- 端口被占 → `spark2 web --port 8788`
+- 端口被占 → `spark web --port 8788`
 - 模型报错 → 设置面板「测试连接」；检查 `base_url` / `model` / `api_key`
 - 需要代理 → 配置 `proxy` 或设 `HTTPS_PROXY` 环境变量
 - Windows SmartScreen 提示 → 「更多信息 → 仍要运行」（未签名构建）
+
+> AI生成

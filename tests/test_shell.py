@@ -12,8 +12,8 @@ import os
 import sys
 from pathlib import Path
 
-from spark2.tools.base import ToolContext
-from spark2.tools.shell import run_shell
+from spark.tools.base import ToolContext
+from spark.tools.shell import run_shell
 
 
 async def test_run_shell_echo(tmp_path: Path) -> None:

@@ -1,4 +1,4 @@
-# Spark 配置示例 —— 复制为 ~/.spark2/config.toml 后按需修改
+# Spark 配置示例 —— 复制为 ~/.spark/config.toml 后按需修改
 # 完整字段说明见 docs/CONFIG.md
 
 provider = "deepseek"                # deepseek / qwen / glm / kimi / doubao / unisound / ollama / custom / mock

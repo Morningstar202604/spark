@@ -1,5 +1,5 @@
 """示例插件 1：now 工具（列表写法）。"""
-from spark2.tools.base import Tool
+from spark.tools.base import Tool
 
 
 def _now(args, ctx):

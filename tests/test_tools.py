@@ -3,8 +3,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from spark2.tools.base import ToolContext
-from spark2.tools.fs import build_file_tools, read_file, search, write_file
+from spark.tools.base import ToolContext
+from spark.tools.fs import build_file_tools, read_file, search, write_file
 
 REGS = {t.name: t for t in build_file_tools()}
 

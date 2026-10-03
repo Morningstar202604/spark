@@ -14,7 +14,7 @@ import pytest
 
 ptyprocess = pytest.importorskip("ptyprocess")
 
-from spark2.pty import PtyManager  # noqa: E402
+from spark.pty import PtyManager  # noqa: E402
 
 pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="PTY 暂不支持 Windows")
 

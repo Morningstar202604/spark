@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from spark2.tools.web import _extract_links, _strip, build_web_tools
+from spark.tools.web import _extract_links, _strip, build_web_tools
 
 
 def test_tools_registered() -> None:

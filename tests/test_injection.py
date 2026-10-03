@@ -1,7 +1,7 @@
 """Prompt Injection 防护测试：特征检测 + 工具输出回填标记。"""
 from __future__ import annotations
 
-from spark2.tools.injection import detect_injection, guard_tool_output
+from spark.tools.injection import detect_injection, guard_tool_output
 
 
 def test_clean_output_not_flagged() -> None:

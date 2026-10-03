@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from spark2.patch_apply import apply_patch
+from spark.patch_apply import apply_patch
 
 NL_MARK = "\\ No newline at end of file"
 

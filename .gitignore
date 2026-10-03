@@ -5,7 +5,8 @@ __pycache__/
 .venv/
 venv/
 dist/
+!spark/web/dist/
 build/
-.spark2/
+.spark/
 .aqg/
 node_modules/

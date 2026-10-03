@@ -1,5 +1,5 @@
 """示例插件 3：count_loc 工具（只读统计代码行数）。"""
-from spark2.tools.base import Tool
+from spark.tools.base import Tool
 from pathlib import Path
 
 _SKIP = {".git", "node_modules", ".venv", "venv", "dist", "build", "target", "__pycache__"}

@@ -1,7 +1,7 @@
 # Spark Configuration (config.toml)
 
-The config file lives at `~/.spark2/config.toml` (override the directory with the
-`SPARK2_HOME` environment variable). Most fields are editable from the in-app
+The config file lives at `~/.spark/config.toml` (override the directory with the
+`SPARK_HOME` environment variable). Most fields are editable from the in-app
 **Settings** panel; this document lists every field and its default.
 
 ## Core
@@ -63,7 +63,7 @@ env = {}              # environment variables (JSON object)
 
 ## Environment variables
 
-- `SPARK2_HOME` — override config/data dir (default `~/.spark2`)
+- `SPARK_HOME` — override config/data dir (default `~/.spark`)
 - `<PROVIDER>_API_KEY` — provider key env var (`DEEPSEEK_API_KEY` / `DASHSCOPE_API_KEY` / `ZHIPU_API_KEY` / `MOONSHOT_API_KEY` / `ARK_API_KEY` / `UNISOUND_API_KEY` / `OLLAMA_API_KEY`)
 - `HTTPS_PROXY` / `HTTP_PROXY` — respected by httpx when `proxy` is unset
 
@@ -78,3 +78,5 @@ workdir = "/path/to/proj"
 approval_mode = "suggest"
 fallback_model = "u2-pro"   # optional: auto-failover
 ```
+
+> AI生成

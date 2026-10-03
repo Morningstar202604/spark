@@ -24,7 +24,7 @@ listo para usar de modelos chinos (DeepSeek / Qwen / GLM / Kimi / Doubao / Uniso
 ```bash
 cd spark
 pip install -e ".[dev]"     # incluye uvicorn[standard] (necesario para la terminal Web)
-spark2 web                   # abre la URL impresa (solo escucha 127.0.0.1)
+spark web                   # abre la URL impresa (solo escucha 127.0.0.1)
 ```
 
 ## Características
@@ -36,7 +36,7 @@ spark2 web                   # abre la URL impresa (solo escucha 127.0.0.1)
 - 🎙️ **Entrada por voz** — dictado en chino con Web Speech
 - 🛒 **Mercado MCP** — instala servidores oficiales con un clic
 - 🧠 **Memoria local** — memoria entre sesiones con FTS5 y búsqueda semántica opcional
-- 🧩 **Plugins** — coloca un `.py` en `~/.spark2/plugins/`
+- 🧩 **Plugins** — coloca un `.py` en `~/.spark/plugins/`
 
 ## Documentación
 
@@ -47,3 +47,5 @@ spark2 web                   # abre la URL impresa (solo escucha 127.0.0.1)
 ## Licencia
 
 MIT.
+
+> AI生成

@@ -16,9 +16,9 @@ pip install -e ".[dev]"
 每次提交前请保证：
 
 ```bash
-ruff check spark2 tests          # 无 lint 错误
+ruff check spark tests          # 无 lint 错误
 python -m pytest -q              # 216+ 用例全过
-node --check spark2/web/js/*.js  # 前端语法（改了前端时）
+node --check spark/web/js/*.js  # 前端语法（改了前端时）
 ```
 
 ## 分支与提交
@@ -45,3 +45,5 @@ node --check spark2/web/js/*.js  # 前端语法（改了前端时）
 - Python 3.11+，类型注解齐全，遵循 ruff 默认规则
 - 不引入重依赖：HTTP 用 httpx，UI 原生 Web Components + ES Modules（无构建）
 - 安全优先：写操作一律过审批门；密钥不回显、不落日志
+
+> AI生成

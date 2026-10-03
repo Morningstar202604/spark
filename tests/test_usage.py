@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from spark2.usage import UsageStore, _match_pricing
+from spark.usage import UsageStore, _match_pricing
 
 
 def test_record_and_session_summary(tmp_path: Path) -> None:

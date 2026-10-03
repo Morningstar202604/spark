@@ -1,4 +1,4 @@
-# Spark 示例插件（直接复制到 ~/.spark2/plugins/ 即可生效，重启后出现在设置→插件）
+# Spark 示例插件（直接复制到 ~/.spark/plugins/ 即可生效，重启后出现在设置→插件）
 
 ## 1. time_tool.py —— now 工具
 返回当前日期时间，最简单的插件示范（工具列表写法 `tools = [...]`）。
@@ -13,6 +13,8 @@
 
 ## 插件契约
 - 每个 .py 是一个插件；导出 `tools`（列表）或 `register(reg)` 函数均可；
-- 工具用 `spark2.tools.base.Tool` 定义：name / description / parameters(JSON Schema) / category(read|write|shell|system) / handler；
+- 工具用 `spark.tools.base.Tool` 定义：name / description / parameters(JSON Schema) / category(read|write|shell|system) / handler；
 - **category 决定审批**：read 直接执行；write / shell 会在弹窗征求你确认——插件不会绕过审批门；
 - 插件是本地代码，信任级与"内置终端/运行脚本"一致；加载失败只提示不中断服务。
+
+> AI生成

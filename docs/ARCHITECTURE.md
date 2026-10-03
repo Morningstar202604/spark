@@ -5,7 +5,7 @@
 ## 顶层结构
 
 ```
-spark2/
+spark/
 ├── config.py          # 配置层：TOML 读写、国产模型预设、密钥打码（mask_key/is_masked_key）
 ├── loop.py            # 主循环：计划→工具→审批→执行→总结，多模型路由 + fallback 切换
 ├── compaction.py      # 上下文管理：超窗把旧消息折叠成摘要（不是硬删）
@@ -51,3 +51,5 @@ spark2/
 - 能力清单：命令面板 Ctrl+K、消息编辑重发、语音输入（Web Speech）、
   上下文水位、全文搜索、MCP 市场一键安装、终端（PTY/WS）、多模态识图
 ```
+
+> AI生成

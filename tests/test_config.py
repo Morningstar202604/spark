@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from spark2.config import PRESETS, _defaults, load_config, save_config
+from spark.config import PRESETS, _defaults, load_config, save_config
 
 
 def test_presets_cover_domestic_models_2026() -> None:
@@ -35,12 +35,12 @@ def test_defaults_have_mcp_and_token(tmp_path) -> None:
     assert "token" in cfg
     assert cfg["approval_mode"] == "suggest"
     assert cfg["proxy"] == ""
-    assert "plan" in __import__("spark2.config", fromlist=["APPROVAL_MODES"]).APPROVAL_MODES
+    assert "plan" in __import__("spark.config", fromlist=["APPROVAL_MODES"]).APPROVAL_MODES
 
 
 def test_api_key_env_fallback(tmp_path, monkeypatch) -> None:
     """配置未填密钥时，依次回退 SPARK_API_KEY / <provider>_API_KEY。"""
-    monkeypatch.setenv("SPARK2_HOME", str(tmp_path))
+    monkeypatch.setenv("SPARK_HOME", str(tmp_path))
     monkeypatch.delenv("SPARK_API_KEY", raising=False)
     monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
     # 无任何 env：api_key 保持空
@@ -62,7 +62,7 @@ def test_api_key_env_fallback(tmp_path, monkeypatch) -> None:
 
 
 def test_save_load_roundtrip_mcp_servers(tmp_path, monkeypatch) -> None:
-    monkeypatch.setenv("SPARK2_HOME", str(tmp_path))
+    monkeypatch.setenv("SPARK_HOME", str(tmp_path))
     cfg = _defaults()
     cfg["mcp_servers"] = [
         {
@@ -78,7 +78,7 @@ def test_save_load_roundtrip_mcp_servers(tmp_path, monkeypatch) -> None:
 
 
 def test_is_masked_key():
-    from spark2.config import is_masked_key, mask_key
+    from spark.config import is_masked_key, mask_key
 
     raw = "sk-1234567890abcdef"
     masked = mask_key(raw)

@@ -6,11 +6,11 @@
 # 构建说明见 docs/INSTALL.md（中英双语）
 
 a = Analysis(
-    ['spark2/__main__.py'],
+    ['spark/__main__.py'],
     pathex=[],
     binaries=[],
     datas=[
-        ('spark2/web', 'spark2/web'),          # 前端静态资源（index.html / js / css / vendor）
+        ('spark/web', 'spark/web'),          # 前端静态资源（index.html / js / css / vendor）
         ('assets/logo.svg', 'assets'),         # 品牌 logo
     ],
     hiddenimports=[
@@ -34,18 +34,18 @@ a = Analysis(
         'sniffio',
         'certifi',
         # Web Speech / MCP 等可选能力不硬依赖，缺失时优雅降级
-        'spark2.web',
-        'spark2.web.server',
-        'spark2.web.api_common',
-        'spark2.web.api_sessions',
-        'spark2.web.api_config',
-        'spark2.web.api_data',
-        'spark2.tools',
-        'spark2.tools.web',
-        'spark2.subagent',
-        'spark2.memory',
-        'spark2.codeindex',
-        'spark2.plugins',
+        'spark.web',
+        'spark.web.server',
+        'spark.web.api_common',
+        'spark.web.api_sessions',
+        'spark.web.api_config',
+        'spark.web.api_data',
+        'spark.tools',
+        'spark.tools.web',
+        'spark.subagent',
+        'spark.memory',
+        'spark.codeindex',
+        'spark.plugins',
     ],
     hookspath=[],
     hooksconfig={},

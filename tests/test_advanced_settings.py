@@ -9,17 +9,17 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from spark2.loop import AgentLoop, route_model
-from spark2.provider import _opt_float, _opt_int
-from spark2.store import SessionStore
-from spark2.subagent import make_subagent
-from spark2.web.server import AppState, create_app
+from spark.loop import AgentLoop, route_model
+from spark.provider import _opt_float, _opt_int
+from spark.store import SessionStore
+from spark.subagent import make_subagent
+from spark.web.server import AppState, create_app
 
 # ---------- 配置层 ----------
 
 
 def test_defaults_contain_advanced_keys() -> None:
-    from spark2.config import _defaults
+    from spark.config import _defaults
 
     d = _defaults()
     assert d["system_prompt"] == ""
@@ -34,8 +34,8 @@ def test_defaults_contain_advanced_keys() -> None:
 
 
 def test_save_load_roundtrip_list_and_dict(tmp_path: Path, monkeypatch) -> None:
-    monkeypatch.setenv("SPARK2_HOME", str(tmp_path))
-    from spark2.config import load_config, save_config
+    monkeypatch.setenv("SPARK_HOME", str(tmp_path))
+    from spark.config import load_config, save_config
 
     cfg = load_config()
     cfg["protected_paths"] = ["/tmp/keep", str(tmp_path / "sealed")]
@@ -244,7 +244,7 @@ def test_extra_protected_paths_join_ctx(tmp_path: Path) -> None:
     )
     assert sealed.resolve() in loop.ctx.protected
     # 内置保护仍在
-    from spark2.config import config_dir
+    from spark.config import config_dir
 
     assert config_dir().resolve() in loop.ctx.protected
 
