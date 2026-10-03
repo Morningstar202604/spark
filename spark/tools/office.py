@@ -153,6 +153,52 @@ async def _read_pdf(args: dict, ctx: ToolContext) -> str:
         return f"读取 pdf 失败：{e}"
 
 
+async def _meeting_notes(args: dict, ctx: ToolContext) -> str:
+    if not _HAS_DOCX:
+        return _need("python-docx")
+    path = resolve_path(str(args.get("path", "")), ctx.workdir)
+    if not is_within(path, ctx.workdir):
+        return "错误：写入路径需在工作目录内"
+    meeting = str(args.get("meeting") or "会议纪要")
+    date = str(args.get("date") or "")
+    participants = [str(x) for x in (args.get("participants") or [])]
+    agenda = [str(x) for x in (args.get("agenda") or [])]
+    decisions = [str(x) for x in (args.get("decisions") or [])]
+    todos = args.get("todos") or []
+    try:
+        from docx import Document  # noqa: PLC0415
+
+        doc = Document()
+        doc.add_heading(meeting, 0)
+        doc.add_paragraph(f"时间：{date or '——'}")
+        if participants:
+            doc.add_paragraph("参会人：" + "、".join(participants))
+        if agenda:
+            doc.add_heading("一、议程", level=1)
+            for i, a in enumerate(agenda, 1):
+                doc.add_paragraph(f"{i}. {a}")
+        if decisions:
+            doc.add_heading("二、决议", level=1)
+            for d in decisions:
+                doc.add_paragraph("· " + d)
+        if todos:
+            doc.add_heading("三、待办事项", level=1)
+            table = doc.add_table(rows=1, cols=3)
+            table.style = "Light Grid Accent 1"
+            hdr = table.rows[0].cells
+            hdr[0].text, hdr[1].text, hdr[2].text = "待办", "负责人", "截止"
+            for t in todos:
+                row = table.add_row().cells
+                row[0].text = str(t.get("action", ""))
+                row[1].text = str(t.get("owner", ""))
+                row[2].text = str(t.get("due", ""))
+        path.parent.mkdir(parents=True, exist_ok=True)
+        doc.save(path)
+        return f"已生成会议纪要：{path}（议程 {len(agenda)} 项 / 决议 {len(decisions)} 条 / 待办 {len(todos)} 条）"
+    except Exception as e:  # noqa: BLE001
+        return f"生成会议纪要失败：{e}"
+
+
 def build_office_tools() -> list[Tool]:
     return [
         Tool(
@@ -220,5 +266,24 @@ def build_office_tools() -> list[Tool]:
             },
             category="read",
             handler=_read_pdf,
+        ),
+        Tool(
+            name="meeting_notes",
+            description="生成规范的会议纪要 .docx。输入会议标题/时间/参会人/议程/决议/待办，输出结构化的 Word 纪要（含待办表格）。对标腾讯会议/钉钉 AI 纪要。",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "输出 .docx 纪要路径"},
+                    "meeting": {"type": "string", "description": "会议名称"},
+                    "date": {"type": "string", "description": "会议时间"},
+                    "participants": {"type": "array", "items": {"type": "string"}, "description": "参会人列表"},
+                    "agenda": {"type": "array", "items": {"type": "string"}, "description": "议程列表"},
+                    "decisions": {"type": "array", "items": {"type": "string"}, "description": "决议/结论列表"},
+                    "todos": {"type": "array", "description": "待办列表，每项 {\"action\":\"做什么\",\"owner\":\"负责人\",\"due\":\"截止\"}"},
+                },
+                "required": ["path", "meeting"],
+            },
+            category="write",
+            handler=_meeting_notes,
         ),
     ]
