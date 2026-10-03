@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AppProvider, useApp } from "./state";
 import { Sidebar } from "./components/Sidebar";
 import { WelcomeView } from "./components/WelcomeView";
@@ -10,6 +10,17 @@ import {
 } from "./components/SettingsDrawer";
 import { highlightDiff } from "./lib/markdown";
 import { cancelSession } from "./lib/api";
+import {
+  History,
+  Menu,
+  Moon,
+  Paperclip,
+  Send,
+  Settings,
+  Square,
+  Sun,
+  Trash2,
+} from "lucide-react";
 
 function Toasts() {
   const { toasts, dismissToast } = useApp();
@@ -134,7 +145,7 @@ function Topbar({ onToggleSidebar }: { onToggleSidebar: () => void }) {
 
   return (
     <header
-      className="flex flex-none items-center justify-between gap-2 px-3 py-2 sm:px-4 sm:py-2.5"
+      className="flex flex-none items-center justify-between gap-2 px-3 py-2 sm:px-4"
       style={{
         borderBottom: "1px solid var(--border)",
         background: "var(--card)",
@@ -151,73 +162,101 @@ function Topbar({ onToggleSidebar }: { onToggleSidebar: () => void }) {
           onClick={onToggleSidebar}
           aria-label="切换会话列表"
         >
-          ☰
+          <Menu size={16} />
         </button>
         <button
           type="button"
-          className="hidden rounded-lg border px-2.5 py-1.5 text-xs sm:inline-block"
+          className="hidden rounded-lg border p-2 sm:inline-flex"
           style={{
             borderColor: "var(--border)",
             color: "var(--ink-muted)",
           }}
           onClick={() => setGitOpen(true)}
+          aria-label="历史记录"
+          title="历史记录"
         >
-          历史记录
+          <History size={16} />
         </button>
-        <div className="min-w-0 flex-1">
-          <div className="truncate text-sm font-semibold">
-            {session?.title || "Spark 编程助手"}
+        {session ? (
+          <div className="min-w-0 flex-1">
+            <div className="truncate text-sm font-semibold">
+              {session.title || "新会话"}
+            </div>
+            <div
+              className="hidden truncate text-xs sm:block"
+              style={{ color: "var(--ink-muted)" }}
+            >
+              {cfg?.model || "未配置模型"}
+              {cfg?.workdir ? ` · ${cfg.workdir}` : ""}
+            </div>
           </div>
-          <div className="hidden truncate text-xs sm:block" style={{ color: "var(--ink-muted)" }}>
-            {cfg?.model || "未配置模型"}
-            {cfg?.workdir ? ` · ${cfg.workdir}` : ""}
+        ) : (
+          <div className="flex min-w-0 items-center gap-2">
+            <div
+              className="flex h-7 w-7 flex-none items-center justify-center rounded-lg"
+              style={{ background: "var(--accent)" }}
+            >
+              <svg viewBox="0 0 64 64" width="14" height="14">
+                <path d="M20 40l6-16h3l-4 10h10l-3 6z" fill="#fff" />
+              </svg>
+            </div>
+            <span className="truncate text-sm font-semibold">Spark</span>
           </div>
-        </div>
+        )}
       </div>
 
       <div className="flex flex-none items-center gap-1.5 sm:gap-2">
         {isRunning && (
           <button
             type="button"
-            className="rounded-lg border px-2 py-1.5 text-xs sm:px-2.5"
+            className="inline-flex items-center gap-1 rounded-lg px-2 py-1.5 text-xs"
             style={{
-              borderColor: "rgba(214,69,69,0.35)",
+              border: "1px solid rgba(214,69,69,0.35)",
               color: "var(--red, #d64545)",
             }}
             onClick={cancelCurrentSession}
           >
-            停止
+            <Square size={12} /> 停止
           </button>
         )}
         <button
           type="button"
-          className="rounded-lg border px-2 py-1.5 text-xs sm:px-2.5"
+          className="rounded-lg p-2"
           style={{
-            borderColor: "rgba(214,69,69,0.35)",
-            color: "var(--red, #d64545)",
+            border: "1px solid var(--border)",
+            color: "var(--ink-muted)",
+          }}
+          onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+          aria-label={theme === "dark" ? "切换为浅色" : "切换为深色"}
+          title={theme === "dark" ? "浅色" : "深色"}
+        >
+          {theme === "dark" ? <Sun size={16} /> : <Moon size={16} />}
+        </button>
+        <button
+          type="button"
+          className="rounded-lg p-2"
+          style={{
+            border: "1px solid var(--border)",
+            color: "var(--ink-muted)",
           }}
           onClick={() => clearCurrentSession()}
+          aria-label="清空当前会话"
+          title="清空当前会话"
         >
-          清空
+          <Trash2 size={16} />
         </button>
         <button
           type="button"
-          className="hidden rounded-lg border px-2.5 py-1.5 text-xs sm:inline-block"
-          style={{ borderColor: "var(--border)", color: "var(--ink-muted)" }}
-          onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
-        >
-          {theme === "dark" ? "浅色" : "深色"}
-        </button>
-        <button
-          type="button"
-          className="rounded-lg border px-2 py-1.5 text-xs sm:px-2.5"
+          className="rounded-lg p-2"
           style={{
-            borderColor: "var(--border)",
+            border: "1px solid var(--border)",
             color: "var(--ink-muted)",
           }}
           onClick={() => setSettingsOpen(true)}
+          aria-label="设置"
+          title="设置"
         >
-          设置
+          <Settings size={16} />
         </button>
       </div>
 
@@ -236,6 +275,15 @@ function Composer() {
   const { pendingPrompt, requestSend, runningSids, sid, setPendingImages, pendingImages, toast } =
     useApp();
   const [files, setFiles] = useState<File[]>([]);
+  const taRef = useRef<HTMLTextAreaElement>(null);
+
+  // 输入框自动增高（现代聊天体验），到上限后出滚动条
+  useEffect(() => {
+    const ta = taRef.current;
+    if (!ta) return;
+    ta.style.height = "auto";
+    ta.style.height = Math.min(ta.scrollHeight, 160) + "px";
+  }, [pendingPrompt]);
 
   useEffect(() => {
     if (!pendingPrompt) return;
@@ -289,7 +337,7 @@ function Composer() {
       />
       <button
         type="button"
-        className="rounded-xl border px-2.5 py-2 text-sm sm:px-3 sm:py-2.5"
+        className="rounded-xl border p-2.5 sm:p-3"
         style={{
           borderColor: "var(--border)",
           background: "var(--surface)",
@@ -297,16 +345,19 @@ function Composer() {
         }}
         onClick={() => document.getElementById("composer-images")?.click()}
         title="添加图片"
+        aria-label="添加图片"
       >
-        图片
+        <Paperclip size={18} />
       </button>
       <textarea
-        rows={2}
-        className="max-h-40 min-h-[56px] flex-1 resize-y rounded-xl border px-2.5 py-2 text-sm outline-none sm:min-h-[62px] sm:px-3"
+        ref={taRef}
+        rows={1}
+        className="max-h-40 min-h-[44px] flex-1 resize-none rounded-xl border px-3 py-2.5 text-sm leading-relaxed outline-none sm:px-3.5"
         style={{
           border: "1px solid var(--border)",
           background: "var(--surface)",
           color: "var(--ink)",
+          overflowY: "auto",
         }}
         placeholder="给 Spark 发消息，Enter 发送，Shift+Enter 换行"
         value={pendingPrompt}
@@ -320,15 +371,21 @@ function Composer() {
       />
       <button
         type="button"
-        className="rounded-xl px-3 py-2 text-sm font-medium sm:px-4 sm:py-2.5"
+        className="flex h-11 w-11 flex-none items-center justify-center rounded-full sm:h-12 sm:w-12"
         style={{
           background: "var(--accent)",
           color: "#fff",
-          opacity: sid ? 1 : 0.55,
+          opacity: sid ? 1 : 0.5,
         }}
-        onClick={() => sid && requestSend(pendingPrompt)}
+        onClick={() => {
+          if (!sid) return;
+          if (runningSids[sid]) cancelSession(sid);
+          else requestSend(pendingPrompt);
+        }}
+        aria-label={runningSids[sid || ""] ? "停止生成" : "发送"}
+        title={runningSids[sid || ""] ? "停止生成" : "发送"}
       >
-        {runningSids[sid || ""] ? "运行中" : "发送"}
+        {runningSids[sid || ""] ? <Square size={18} /> : <Send size={18} />}
       </button>
     </div>
   );
@@ -336,7 +393,9 @@ function Composer() {
 
 function Shell() {
   const { sid } = useApp();
-  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(
+    () => typeof window !== "undefined" && window.innerWidth > 700
+  );
 
   return (
     <div className="flex h-full min-h-0">
