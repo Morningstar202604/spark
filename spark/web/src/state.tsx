@@ -91,6 +91,7 @@ export interface AppState {
   ctxUsed: number;
   ctxMax: number;
   pendingPrompt: string;
+  setPending: (v: string) => void;
   requestSend: (prompt: string) => void;
 
   loadConfig: () => Promise<boolean>;
@@ -501,6 +502,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       window.removeEventListener("spark:auth-required", handler);
   }, []);
 
+  const setPending = useCallback((v: string) => setPendingPrompt(v), []);
+
   const value: AppState = {
     token,
     setToken,
@@ -532,6 +535,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     ctxUsed,
     ctxMax,
     pendingPrompt,
+    setPending,
     requestSend,
     loadConfig,
     refreshSessions,

@@ -101,11 +101,11 @@ export function WelcomeView() {
     >
       {/* Logo */}
       <div
-        className="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl sm:mb-6 sm:h-16 sm:w-16"
+        className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl sm:mb-6 sm:h-16 sm:w-16"
         style={{ background: "var(--accent)" }}
       >
-        <svg viewBox="0 0 64 64" width="28" height="28" className="sm:h-9 sm:w-9">
-          <path d="M20 40l6-16h3l-4 10h10l-3 6z" fill="#fff" />
+        <svg viewBox="0 0 64 64" className="h-8 w-8 sm:h-9 sm:w-9">
+          <path d="M40.2 3.5 12.7 36h18.2L22 60.5 50.3 27h-18l7.9-23.5z" fill="#fff" />
         </svg>
       </div>
 

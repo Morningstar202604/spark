@@ -196,8 +196,8 @@ function Topbar({ onToggleSidebar }: { onToggleSidebar: () => void }) {
               className="flex h-7 w-7 flex-none items-center justify-center rounded-lg"
               style={{ background: "var(--accent)" }}
             >
-              <svg viewBox="0 0 64 64" width="14" height="14">
-                <path d="M20 40l6-16h3l-4 10h10l-3 6z" fill="#fff" />
+              <svg viewBox="0 0 64 64" className="h-4 w-4">
+                <path d="M40.2 3.5 12.7 36h18.2L22 60.5 50.3 27h-18l7.9-23.5z" fill="#fff" />
               </svg>
             </div>
             <span className="truncate text-sm font-semibold">Spark</span>
@@ -272,7 +272,7 @@ function Topbar({ onToggleSidebar }: { onToggleSidebar: () => void }) {
 }
 
 function Composer() {
-  const { pendingPrompt, requestSend, runningSids, sid, setPendingImages, pendingImages, toast } =
+  const { pendingPrompt, setPending, requestSend, runningSids, sid, setPendingImages, pendingImages, toast } =
     useApp();
   const [files, setFiles] = useState<File[]>([]);
   const taRef = useRef<HTMLTextAreaElement>(null);
@@ -361,11 +361,11 @@ function Composer() {
         }}
         placeholder="给 Spark 发消息，Enter 发送，Shift+Enter 换行"
         value={pendingPrompt}
-        onChange={(e) => requestSend(e.target.value)}
+        onChange={(e) => setPending(e.target.value)}
         onKeyDown={(e) => {
           if (e.key === "Enter" && !e.shiftKey) {
             e.preventDefault();
-            if (sid) requestSend(pendingPrompt);
+            requestSend(pendingPrompt);
           }
         }}
       />
@@ -375,12 +375,14 @@ function Composer() {
         style={{
           background: "var(--accent)",
           color: "#fff",
-          opacity: sid ? 1 : 0.5,
+          opacity: pendingPrompt.trim() ? 1 : 0.5,
         }}
         onClick={() => {
-          if (!sid) return;
-          if (runningSids[sid]) cancelSession(sid);
-          else requestSend(pendingPrompt);
+          if (runningSids[sid || ""]) {
+            if (sid) cancelSession(sid);
+          } else {
+            requestSend(pendingPrompt);
+          }
         }}
         aria-label={runningSids[sid || ""] ? "停止生成" : "发送"}
         title={runningSids[sid || ""] ? "停止生成" : "发送"}
