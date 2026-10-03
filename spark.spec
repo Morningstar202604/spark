@@ -10,7 +10,7 @@ a = Analysis(
     pathex=[],
     binaries=[],
     datas=[
-        ('spark/web', 'spark/web'),          # 前端静态资源（index.html / js / css / vendor）
+        ('spark/web/dist', 'spark/web/dist'),  # 前端构建产物（仅 dist，不含 node_modules，控制体积）
         ('assets/logo.svg', 'assets'),         # 品牌 logo
     ],
     hiddenimports=[
