@@ -15,8 +15,12 @@ export function fmtTime(iso: string): string {
 
 export function shortPath(p: string): string {
   const s = String(p);
-  const seg = s.split("/");
-  return seg.length > 3 ? "/…/" + seg.slice(-2).join("/") : s;
+  const sep = s.includes("\\") ? "\\" : "/";
+  const seg = s.split(/[\\/]+/).filter(Boolean);
+  if (seg.length <= 3) return s;
+  const head = seg[0]; // Windows 盘符（C:）或根段
+  const tail = seg.slice(-2).join(sep);
+  return head + sep + "…" + sep + tail;
 }
 
 export function fmtTokens(n: number): string {

@@ -110,7 +110,11 @@ export function WelcomeView() {
       </div>
 
       <h1 className="mb-2 text-lg font-bold sm:text-2xl">Spark 编程助手</h1>
-      <p className="mb-4 text-xs sm:mb-8 sm:text-sm" style={{ color: "var(--ink-muted)" }}>
+      <p
+        className="mb-4 max-w-full truncate px-2 text-center text-xs sm:mb-8 sm:text-sm"
+        style={{ color: "var(--ink-muted)" }}
+        title={subText}
+      >
         {subText}
       </p>
 

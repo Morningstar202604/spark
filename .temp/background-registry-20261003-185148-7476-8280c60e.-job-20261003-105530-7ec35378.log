@@ -1,0 +1,29 @@
+INFO:     Started server process [2368]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
+Spark 0.8.0 已启动：
+  地址：http://127.0.0.1:8000/
+  未设置访问令牌：（未设令牌：本机免登录）；可在网页设置里开启。
+  工作目录：C:\Users\X1882\Desktop\github\spark
+INFO:     127.0.0.1:58359 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58360 - "GET /api/config HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57043 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57043 - "GET /assets/index-sZtAKjbg.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58061 - "GET /assets/index-Dg8tPDpi.css HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58061 - "GET /api/config HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58061 - "GET /api/sessions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58061 - "GET /api/sessions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56456 - "GET /api/config HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56456 - "GET /api/sessions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56456 - "GET /api/sessions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51383 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51383 - "GET /api/config HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51383 - "GET /api/sessions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51383 - "GET /api/sessions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49972 - "GET /api/config HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49972 - "GET /api/sessions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49972 - "GET /api/sessions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50616 - "GET /api/config HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50616 - "GET /api/sessions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50616 - "GET /api/sessions HTTP/1.1" 200 OK
