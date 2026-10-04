@@ -142,11 +142,13 @@ def create_app(state: AppState | None = None) -> FastAPI:
         # （此前先取后写，真实模型首轮收到空对话 → 400 No user query）
         # 多模态：body["images"] 为 [{data: base64, mime}]，≤3 张、单张 base64 ≤ 2.8MB（≈2MB 原图）
         images = body.get("images") or []
-        user_content: str | list = expand_slash(prompt, workdir)
+        expanded_prompt = expand_slash(prompt, workdir)
+        user_content: str | list = expanded_prompt
         if images:
             if not isinstance(images, list) or len(images) > 3:
                 raise HTTPException(status_code=400, detail="图片最多 3 张")
-            parts: list = [{"type": "text", "text": prompt}]
+            # 文本部分必须用展开后的 prompt：斜杠命令 + 贴图同时出现时曾丢失展开
+            parts: list = [{"type": "text", "text": expanded_prompt}]
             for img in images[:3]:
                 data = str((img or {}).get("data") or "")
                 mime = str((img or {}).get("mime") or "image/png")

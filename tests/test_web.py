@@ -297,6 +297,40 @@ def test_chat_stream_with_images_multimodal(tmp_path: Path, monkeypatch) -> None
     assert any(p.get("type") == "image_url" for p in user_msg["content"])
 
 
+def test_chat_stream_images_keep_slash_expansion(tmp_path: Path, monkeypatch) -> None:
+    """斜杠命令 + 贴图同时出现时，文本部分必须是展开后的模板（曾回退成原始 "/explain"）。"""
+    captured: list[list[dict]] = []
+
+    async def fake_stream_chat(cfg, messages, tools=None, max_delta=None):
+        captured.append([dict(m) for m in messages])
+        yield {"type": "text", "text": "已解释。"}
+        yield {"type": "usage", "estimated": 5, "prompt_tokens": 4, "completion_tokens": 1, "model": "mock"}
+
+    monkeypatch.setattr("spark.loop.stream_chat", fake_stream_chat)
+    client, state = _client(tmp_path)
+    r = client.post("/api/sessions", headers={"X-Spark-Token": TOKEN}, json={"workdir": str(tmp_path)})
+    sid = r.json()["id"]
+    with client.stream(
+        "POST",
+        "/api/chat/stream",
+        headers={"X-Spark-Token": TOKEN},
+        json={
+            "session_id": sid,
+            "prompt": "/explain 这个文件",
+            "images": [{"data": "aGVsbG8=", "mime": "image/png"}],
+        },
+    ) as resp:
+        assert resp.status_code == 200
+        for _ in resp.iter_lines():
+            pass
+    text_part = state.store.messages(sid)[0]["content"][0]
+    assert text_part["type"] == "text"
+    assert text_part["text"] != "/explain 这个文件"
+    assert "这个文件" in text_part["text"] and "解释" in text_part["text"]
+    user_msg = next(m for m in captured[0] if m["role"] == "user")
+    assert "解释" in user_msg["content"][0]["text"]
+
+
 def test_chat_stream_rejects_too_many_images(tmp_path: Path) -> None:
     """图片上限：超过 3 张拒绝。"""
     client, state = _client(tmp_path)

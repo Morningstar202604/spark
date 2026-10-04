@@ -99,8 +99,6 @@ async def truncate_session(sid: str, request: Request, state: AppState = Depends
     mid = str(body.get("message_id") or "")
     if sid in state.running:
         raise HTTPException(status_code=409, detail="该会话正在运行，先停止再编辑")
-    if sid in state.running:
-        raise HTTPException(status_code=409, detail="该会话正在运行，先停止再编辑")
     if not mid:
         # 清空会话：不保留任何历史消息
         keep = state.store.clear(sid)
@@ -142,7 +140,6 @@ async def export_session(
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
 
     if fmt == "json":
-        import json
         from fastapi.responses import JSONResponse
 
         msgs = state.store.messages(sid)
