@@ -19,7 +19,7 @@ Runs on your machine · Sees every step · Approves every write & command · Zer
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-14b8a6.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-0f766e.svg)]()
-[![Tests](https://img.shields.io/badge/tests-216%20passed-14b8a6.svg)]()
+[![CI](https://img.shields.io/github/actions/workflow/status/X33834/spark/ci.yml?branch=main&label=CI)](https://github.com/X33834/spark/actions/workflows/ci.yml)
 [![Local-first](https://img.shields.io/badge/local--first-100%25%20offline-0f766e.svg)]()
 
 **English** · [中文](README.zh.md)
@@ -108,7 +108,7 @@ Full guide: [docs/INSTALL.md](docs/INSTALL.md) · [docs/en/INSTALL.md](docs/en/I
 **Terminal UI:** `spark tui` — same kernel, keyboard-first (Ctrl+N new / Ctrl+S sessions / A allow / D deny / S always allow)
 **Health check:** `spark doctor` — environment, config, MCP, memory, logs in one pass
 
-## 🧰 What's inside (v0.8.0)
+## 🧰 What's inside (v0.9.0)
 
 - 🛡️ **Approval gate** — suggest / auto-edit / full-auto; protected paths are always refused; writes outside workdir always confirmed; session-scoped "always allow"
 - 🧠 **Prompt-injection defense** — every tool/file result is untrusted data; CN/EN injection patterns flagged with an inline banner; permissions always stay with the gate
@@ -164,7 +164,7 @@ tests/           pytest — approval / tools / loop / config / memory / checkpoi
 ## ✅ Tests
 
 ```bash
-python3 -m pytest -q      # 216 passed / 5 skipped — approval rules, tools, loop, memory, injection,
+python3 -m pytest -q      # 227 tests — approval rules, tools, loop, memory, injection,
                           # checkpoints, web API, MCP (stdio + HTTP), TUI
 python3 tests/e2e_manual.py  # real-uvicorn E2E (in-stream approval / 409 / disk writes)
 ```

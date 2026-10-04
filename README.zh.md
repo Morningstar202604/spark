@@ -8,7 +8,7 @@
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-14b8a6.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-0f766e.svg)]()
-[![Tests](https://img.shields.io/badge/tests-216%20passed-14b8a6.svg)]()
+[![CI](https://img.shields.io/github/actions/workflow/status/X33834/spark/ci.yml?branch=main&label=CI)](https://github.com/X33834/spark/actions/workflows/ci.yml)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
 [English](README.md) · **中文** · [日本語](README.ja.md) · [Español](README.es.md)
@@ -109,7 +109,7 @@ flowchart TB
 ## ✅ 测试
 
 ```bash
-python3 -m pytest -q      # 216 个用例通过（5 跳过）
+python3 -m pytest -q      # 227 个用例（审批/工具/循环/记忆/注入/检查点/Web API/MCP/TUI/斜杠命令/设置契约）
 python3 tests/e2e_manual.py  # 真实 uvicorn 端到端（流内审批 / 409 / 落盘）
 ```
 

@@ -5,4 +5,21 @@
 单一前端随包发布；中文优先；不引入任何按轮计费的隐性 LLM 调用。
 """
 
-__version__ = "0.8.0"
+def _resolve_version() -> str:
+    """版本号单一来源：打包元数据（pyproject.toml）。
+
+    直接跑源码或用 PyInstaller 打包时可能查不到 distribution 元数据，
+    此时回落到下面的字面量——改动版本只需要动 pyproject.toml。
+    """
+    try:
+        from importlib.metadata import version
+
+        return version("spark-agent")
+    except Exception:  # noqa: BLE001 - 元数据缺失不应影响导入
+        return _FALLBACK_VERSION
+
+
+_FALLBACK_VERSION = "0.9.0"
+
+__version__ = _resolve_version()
+
