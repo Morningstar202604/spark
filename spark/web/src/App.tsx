@@ -15,6 +15,7 @@ import {
   Menu,
   Moon,
   Paperclip,
+  BarChart3,
   Send,
   Settings,
   Square,
@@ -244,6 +245,19 @@ function Topbar({ onToggleSidebar }: { onToggleSidebar: () => void }) {
           title="清空当前会话"
         >
           <Trash2 size={16} />
+        </button>
+        <button
+          type="button"
+          className="rounded-lg p-2"
+          style={{
+            border: "1px solid var(--border)",
+            color: "var(--ink-muted)",
+          }}
+          onClick={() => setUsageOpen(true)}
+          aria-label="用量统计"
+          title="用量统计"
+        >
+          <BarChart3 size={16} />
         </button>
         <button
           type="button"

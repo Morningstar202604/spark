@@ -50,13 +50,39 @@ async def _kb_add(args: dict, ctx: ToolContext) -> str:
     if not text:
         return f"（{src} 无可提取文本，未能入库）"
 
-    # 分片写入：knowledge/<源文件名>.txt
+    # 分片写入：knowledge/<源文件名>.txt（按句子/段落边界切，避免硬切破坏语义）
     out_path = kb / (src.stem + ".txt")
-    blocks = [text[i : i + CHUNK] for i in range(0, len(text), CHUNK)]
+    blocks = _chunk_by_sentence(text, CHUNK)
     with out_path.open("w", encoding="utf-8") as f:
         for b in blocks:
             f.write(b + "\n\u0000BLOCK\u0000\n")
     return f"已入库：{out_path.name}（{len(text)} 字符，{len(blocks)} 片）。可随时用 kb_search 检索。"
+
+
+def _chunk_by_sentence(text: str, size: int) -> list[str]:
+    """按句读/段落边界切块（块长尽量贴近 size，兼顾语义完整）。"""
+    if len(text) <= size:
+        return [text]
+    pieces = re.split(r"(?<=[。！？!?；;\n])", text)
+    blocks: list[str] = []
+    cur = ""
+    for p in pieces:
+        if not p:
+            continue
+        if len(cur) + len(p) <= size:
+            cur += p
+        else:
+            if cur:
+                blocks.append(cur.strip())
+            if len(p) > size:  # 超长单句按硬切
+                for i in range(0, len(p), size):
+                    blocks.append(p[i : i + size].strip())
+                cur = ""
+            else:
+                cur = p
+    if cur.strip():
+        blocks.append(cur.strip())
+    return [b for b in blocks if b]
 
 
 def _search(kb: Path, query: str, limit: int) -> list[tuple[float, str, str]]:
@@ -105,6 +131,43 @@ def _kb_context(ctx: ToolContext) -> Path:
     return _kb_dir(ctx)
 
 
+async def _kb_list(args: dict, ctx: ToolContext) -> str:
+    """列出知识库已收录的文档（文件名 + 大小），便于管理。"""
+    kb = _kb_dir(ctx)
+    if not kb.exists():
+        return "知识库为空。可先用 kb_add 收录文档。"
+    files = sorted(kb.glob("*.txt"))
+    if not files:
+        return "知识库为空。可先用 kb_add 收录文档。"
+    rows = []
+    for f in files:
+        try:
+            size = f.stat().st_size
+            blocks = f.read_text(encoding="utf-8", errors="ignore").count(
+                "\u0000BLOCK\u0000"
+            )
+        except OSError:
+            size, blocks = 0, 0
+        rows.append(f"{f.stem}（{blocks} 片，{size}B）")
+    return "知识库文档：\n" + "\n".join(rows)
+
+
+async def _kb_remove(args: dict, ctx: ToolContext) -> str:
+    """从知识库删除一个文档（按文件名，不带 .txt 后缀）。"""
+    name = str(args.get("name", "")).strip()
+    if not name:
+        return "错误：需要 name（文档名，不带后缀）"
+    kb = _kb_dir(ctx)
+    target = kb / (name + ".txt")
+    if not target.exists():
+        return f"没有在知识库中找到「{name}」"
+    try:
+        target.unlink()
+    except OSError as e:
+        return f"错误：删除失败 {e}"
+    return f"已从知识库删除「{name}」"
+
+
 def build_knowledge_tools() -> list[Tool]:
     return [
         Tool(
@@ -131,5 +194,23 @@ def build_knowledge_tools() -> list[Tool]:
             },
             category="read",
             handler=_kb_search,
+        ),
+        Tool(
+            name="kb_list",
+            description="列出知识库已收录的文档（文件名 + 分片数 + 大小）。用于了解知识库现状。",
+            parameters={"type": "object", "properties": {}},
+            category="read",
+            handler=_kb_list,
+        ),
+        Tool(
+            name="kb_remove",
+            description="从知识库删除一个文档（name 为文档名，不带后缀）。删除会进审批确认。",
+            parameters={
+                "type": "object",
+                "properties": {"name": {"type": "string", "description": "要删除的知识文档名（不带 .txt 后缀）"}},
+                "required": ["name"],
+            },
+            category="write",
+            handler=_kb_remove,
         ),
     ]
