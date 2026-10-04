@@ -1208,6 +1208,8 @@ function PaneUsage() {
     loadUsage();
   }, []);
 
+  const byModel = usage?.by_model || [];
+
   async function loadUsage() {
     setLoading(true);
     try {
@@ -1251,6 +1253,25 @@ function PaneUsage() {
               </span>
             </div>
           </div>
+
+          {byModel.length > 0 && (
+            <>
+              <div className="mb-2 text-xs font-medium" style={{ color: "var(--ink-muted)" }}>
+                按模型拆分
+              </div>
+              <div className="space-y-1.5">
+                {byModel.map((m, i) => (
+                  <div key={i} className="flex items-center justify-between text-[11px]">
+                    <span>{m.model || "unknown"}</span>
+                    <span>
+                      {m.calls || 0} 次 · {fmtTokens(m.total_tokens || 0)} · ¥
+                      {(m.est_cost || 0).toFixed(4)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
 
           {rows.length > 0 && (
             <>

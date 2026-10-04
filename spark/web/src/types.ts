@@ -77,6 +77,7 @@ export interface UsageResponse {
     est_cost?: number;
   };
   top_sessions: { session_id: string; total_tokens?: number; est_cost?: number }[];
+  by_model: { model?: string; total_tokens?: number; est_cost?: number; calls?: number }[];
   days?: number;
 }
 

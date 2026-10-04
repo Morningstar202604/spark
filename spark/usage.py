@@ -102,10 +102,11 @@ class UsageStore:
             bm["est_cost"] = round(bm["est_cost"], 4)
         return {"session_id": session_id, "totals": totals, "by_model": by_model}
 
-    def global_summary(self, days: int = 30) -> dict:
+def global_summary(self, days: int = 30) -> dict:
         """全部会话聚合（成本面板总览）。"""
         totals = {"prompt_tokens": 0, "completion_tokens": 0, "est_cost": 0.0, "calls": 0}
         by_session: dict[str, dict] = {}
+        by_model: dict[str, dict] = {}
         import datetime
 
         today = datetime.date.today()
@@ -129,6 +130,12 @@ class UsageStore:
                 bs["completion_tokens"] += int(rec.get("completion_tokens", 0))
                 bs["est_cost"] += float(rec.get("est_cost", 0))
                 bs["calls"] += 1
+                m = rec.get("model", "unknown")
+                bm = by_model.setdefault(m, {"prompt_tokens": 0, "completion_tokens": 0, "est_cost": 0.0, "calls": 0})
+                bm["prompt_tokens"] += int(rec.get("prompt_tokens", 0))
+                bm["completion_tokens"] += int(rec.get("completion_tokens", 0))
+                bm["est_cost"] += float(rec.get("est_cost", 0))
+                bm["calls"] += 1
         totals["total_tokens"] = totals["prompt_tokens"] + totals["completion_tokens"]
         totals["est_cost"] = round(totals["est_cost"], 4)
         ranked = sorted(
@@ -139,4 +146,12 @@ class UsageStore:
         for bs in ranked:
             bs["est_cost"] = round(bs["est_cost"], 4)
             bs["total_tokens"] = int(bs.get("prompt_tokens", 0)) + int(bs.get("completion_tokens", 0))
-        return {"totals": totals, "top_sessions": ranked, "days": days}
+        # 按模型聚合（前端成本面板展示各模型花费）
+        by_model_list = [
+            {"model": k, **v}
+            for k, v in sorted(by_model.items(), key=lambda x: x[1]["est_cost"], reverse=True)
+        ]
+        for bm in by_model_list:
+            bm["est_cost"] = round(bm["est_cost"], 4)
+            bm["total_tokens"] = int(bm.get("prompt_tokens", 0)) + int(bm.get("completion_tokens", 0))
+        return {"totals": totals, "top_sessions": ranked, "by_model": by_model_list, "days": days}
