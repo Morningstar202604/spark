@@ -20,8 +20,11 @@ async def remember(args: dict, ctx: ToolContext) -> str:
         return "错误：需要 key 和 value（如 remember(key='部署方式', value='用 systemd 服务')）"
     if ctx.memory is None:
         return "错误：记忆库未启用"
-    await asyncio.to_thread(ctx.memory.remember, str(ctx.workdir), key, value)
-    return f"已记住：{key}"
+    level = str(args.get("level") or "semantic").strip().lower()
+    if level not in ("situational", "semantic", "episodic", "procedural"):
+        level = "semantic"
+    await asyncio.to_thread(ctx.memory.remember, str(ctx.workdir), key, value, level)
+    return f"已记住：{key}" + (f"（{level}）" if level != "semantic" else "")
 
 
 async def forget(args: dict, ctx: ToolContext) -> str:
@@ -74,12 +77,17 @@ def build_memory_tools() -> list[Tool]:
     return [
         Tool(
             name="remember",
-            description="记住一条长期记忆（按当前工作目录隔离，同 key 会覆盖更新）。key：简短关键词；value：要点内容。仅当用户明确要求记住时才调用。",
+            description="记住一条长期记忆（按当前工作目录隔离，同 key 会覆盖更新）。key：简短关键词；value：要点内容。可选 level：semantic=通用事实/偏好(默认)、situational=当前任务上下文、episodic=发生过的事件、procedural=常用流程做法。仅当用户明确要求记住时才调用。",
             parameters={
                 "type": "object",
                 "properties": {
                     "key": {"type": "string", "description": "记忆关键词，简短"},
                     "value": {"type": "string", "description": "记忆内容要点"},
+                    "level": {
+                        "type": "string",
+                        "description": "记忆分层：semantic/situational/episodic/procedural",
+                        "enum": ["semantic", "situational", "episodic", "procedural"],
+                    },
                 },
                 "required": ["key", "value"],
             },

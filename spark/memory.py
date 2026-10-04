@@ -31,6 +31,7 @@ CREATE TABLE IF NOT EXISTS memories (
   key TEXT NOT NULL,
   value TEXT NOT NULL,
   created_at TEXT NOT NULL,
+  level TEXT NOT NULL DEFAULT 'semantic',
   UNIQUE(workdir, key)
 );
 CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(
@@ -48,8 +49,11 @@ CREATE TRIGGER IF NOT EXISTS memories_au AFTER UPDATE ON memories BEGIN
 END;
 """
 
-# 语义向量列（旧库迁移：缺列时 ALTER 补上）
+# 语义向量列 + 记忆分层（旧库迁移：缺列时 ALTER 补上）
 _EMBED_COLUMN = "ALTER TABLE memories ADD COLUMN embedding TEXT"
+_LEVEL_COLUMN = "ALTER TABLE memories ADD COLUMN level TEXT NOT NULL DEFAULT 'semantic'"
+
+MEMORY_LEVELS = ("situational", "semantic", "episodic", "procedural")
 
 
 def _now() -> str:
@@ -167,18 +171,24 @@ class MemoryStore:
             cols = [r["name"] for r in conn.execute("PRAGMA table_info(memories)").fetchall()]
             if "embedding" not in cols:
                 conn.execute(_EMBED_COLUMN)
+            if "level" not in cols:
+                conn.execute(_LEVEL_COLUMN)
 
     # ---------- 写 ----------
 
-    def remember(self, workdir: str, key: str, value: str) -> None:
-        """记住一条（同 workdir+key 覆盖更新，符合"记住了就更新"的人的直觉）。"""
+    def remember(self, workdir: str, key: str, value: str, level: str = "semantic") -> None:
+        """记住一条（同 workdir+key 覆盖更新，符合"记住了就更新"的人的直觉）。
+
+        level 为记忆分层：situational=情景 / semantic=语义(默认) / episodic=事件 / procedural=程序。
+        """
         embedding = self._embed_for(key, value)
+        lvl = level if level in MEMORY_LEVELS else "semantic"
         with self._connect() as conn:
             conn.execute(
-                "INSERT INTO memories(workdir, key, value, embedding, created_at) VALUES(?,?,?,?,?) "
+                "INSERT INTO memories(workdir, key, value, level, embedding, created_at) VALUES(?,?,?,?,?,?) "
                 "ON CONFLICT(workdir, key) DO UPDATE SET value=excluded.value, "
-                "embedding=excluded.embedding, created_at=excluded.created_at",
-                (workdir, key.strip(), value.strip(), embedding, _now()),
+                "level=excluded.level, embedding=excluded.embedding, created_at=excluded.created_at",
+                (workdir, key.strip(), value.strip(), lvl, embedding, _now()),
             )
 
     def _embed_for(self, key: str, value: str) -> str | None:
@@ -208,7 +218,7 @@ class MemoryStore:
     def list(self, workdir: str, limit: int = 50) -> list[dict]:
         with self._connect() as conn:
             rows = conn.execute(
-                "SELECT id, key, value, created_at FROM memories WHERE workdir=? "
+                "SELECT id, key, value, level, created_at FROM memories WHERE workdir=? "
                 "ORDER BY created_at DESC LIMIT ?",
                 (workdir, limit),
             ).fetchall()
@@ -228,7 +238,7 @@ class MemoryStore:
                 vec = self.embedder.embed([q])
                 if vec and vec[0]:
                     rows = conn.execute(
-                        "SELECT id, key, value, embedding, created_at FROM memories "
+                        "SELECT id, key, value, level, embedding, created_at FROM memories "
                         "WHERE workdir=? AND embedding IS NOT NULL",
                         (workdir,),
                     ).fetchall()
@@ -240,7 +250,7 @@ class MemoryStore:
                             continue
                         sim = _cosine(vec[0], emb)
                         if sim > 0.3:  # 阈值：低于此视为无关
-                            scored.append((sim, {"id": r["id"], "key": r["key"], "value": r["value"], "created_at": r["created_at"]}))
+                            scored.append((sim, {"id": r["id"], "key": r["key"], "value": r["value"], "level": r["level"], "created_at": r["created_at"]}))
                     scored.sort(key=lambda x: x[0], reverse=True)
                     for _sim, row in scored[:limit]:
                         found[row["id"]] = row
@@ -248,7 +258,7 @@ class MemoryStore:
 
             # 1) key 精确匹配
             rows = conn.execute(
-                "SELECT id, key, value, created_at FROM memories WHERE workdir=? AND key=? LIMIT ?",
+                "SELECT id, key, value, level, created_at FROM memories WHERE workdir=? AND key=? LIMIT ?",
                 (workdir, q, limit),
             ).fetchall()
             for r in rows:
@@ -258,7 +268,7 @@ class MemoryStore:
             phrase = '"' + q.replace('"', '""') + '"'
             try:
                 rows = conn.execute(
-                    "SELECT m.id, m.key, m.value, m.created_at FROM memories_fts f "
+                    "SELECT m.id, m.key, m.value, m.level, m.created_at FROM memories_fts f "
                     "JOIN memories m ON m.id=f.rowid "
                     "WHERE m.workdir=? AND memories_fts MATCH ? ORDER BY m.created_at DESC LIMIT ?",
                     (workdir, phrase, limit),
@@ -276,7 +286,7 @@ class MemoryStore:
                     conds.append("(key LIKE ? OR value LIKE ?)")
                     params += [f"%{t}%", f"%{t}%"]
                 rows = conn.execute(
-                    "SELECT id, key, value, created_at FROM memories WHERE workdir=? "
+                    "SELECT id, key, value, level, created_at FROM memories WHERE workdir=? "
                     f"AND ({' OR '.join(conds)}) ORDER BY created_at DESC LIMIT ?",
                     (*params, limit),
                 ).fetchall()

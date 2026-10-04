@@ -60,7 +60,7 @@ export function SettingsDrawer({
   const [form, setForm] = useState<Partial<Cfg>>({});
   const [memKey, setMemKey] = useState("");
   const [memVal, setMemVal] = useState("");
-  const [memoryItems, setMemoryItems] = useState<{ id: string; key: string; value: string }[]>([]);
+  const [memoryItems, setMemoryItems] = useState<{ id: string; key: string; value: string; level?: string }[]>([]);
   const [plugins, setPlugins] = useState<{ name: string; tools?: string[]; error?: string }[]>([]);
   const [pluginsDir, setPluginsDir] = useState("");
   const [recentDirs, setRecentDirsState] = useState<string[]>([]);
@@ -820,7 +820,14 @@ function PaneMemory({
               style={{ border: "1px solid var(--border)", background: "var(--card)" }}
             >
               <div className="flex-1">
-                <div className="text-xs font-medium" style={{ color: "var(--accent)" }}>{it.key}</div>
+                <div className="flex items-center gap-2">
+                  <div className="text-xs font-medium" style={{ color: "var(--accent)" }}>{it.key}</div>
+                  {it.level && (
+                    <span className="rounded px-1 text-[10px]" style={{ background: "var(--surface-2)", color: "var(--ink-muted)" }}>
+                      {it.level}
+                    </span>
+                  )}
+                </div>
                 <div className="mt-0.5 text-xs" style={{ color: "var(--ink-muted)" }}>{it.value}</div>
               </div>
               <button

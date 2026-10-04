@@ -27,6 +27,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from spark import __version__
+from spark.compaction import compact_messages
 from spark.config import APPROVAL_MODES
 from spark.loop import AgentLoop
 from spark.sanitize import sanitize_event
@@ -197,12 +198,22 @@ def create_app(state: AppState | None = None) -> FastAPI:
                                 m["id"] = m.get("id") or uuid.uuid4().hex[:12]
                                 aid = m["id"]
                                 break
+                        # 摘要持久化：落库前把超窗历史折叠为摘要写回，
+                        # 下次恢复从摘要开始，不再对全量旧历史重复压缩。
+                        try:
+                            await compact_messages(
+                                messages,
+                                provider_cfg,
+                                int(state.cfg.get("max_context_tokens", 32000)),
+                            )
+                        except Exception:  # noqa: BLE001
+                            pass
                         state.store.replace(sid, messages)
                         yield sse(
                             {**ev, **({"assistant_msg_id": aid} if aid else {})}
                         )
+                        yield sse({"type": "close"})
                         break
-                yield sse({"type": "close"})
             except asyncio.CancelledError:
                 await loop.cancel()
                 raise
