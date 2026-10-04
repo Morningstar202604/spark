@@ -140,6 +140,8 @@ export function SettingsDrawer({
       max_context_tokens: parseInt(f.max_context_tokens, 10) || 32000,
       memory_embedding: f.memory_embedding,
       memory_embed_model: (f.memory_embed_model || "").trim(),
+      embed_base_url: (f.embed_base_url || "").trim(),
+      embed_api_key: f.embed_api_key,
       mcp_servers: mcpServers.map((s) => ({
         name: s.name,
         transport: s.transport || "stdio",
@@ -738,11 +740,45 @@ function PaneMemory({
           value={f.memory_embedding || "off"}
           onChange={(e) => updateForm("memory_embedding", e.target.value)}
         >
-          <option value="off">关闭</option>
-          <option value="keyword">关键词检索</option>
+          <option value="off">关闭（仅关键词检索）</option>
+          <option value="api">API 语义检索（embed 端点）</option>
           <option value="local">本地语义检索</option>
         </select>
       </Field>
+
+      {f.memory_embedding === "api" && (
+        <div className="space-y-2 rounded-xl border p-3" style={{ border: "1px solid var(--border)", background: "var(--card)" }}>
+          <div className="text-xs font-medium">语义嵌入端点（独立配置，主模型无 /embeddings 时必填）</div>
+          <Field label="嵌入接口 Base URL（如火山方舟 https://ark.cn-beijing.volces.com/api/v3）">
+            <input
+              className="w-full rounded-lg border px-3 py-2 text-sm"
+              style={{ border: "1px solid var(--border)", background: "var(--surface)", color: "var(--ink)" }}
+              value={f.embed_base_url || ""}
+              onChange={(e) => updateForm("embed_base_url", e.target.value)}
+              placeholder="https://ark.cn-beijing.volces.com/api/v3"
+            />
+          </Field>
+          <Field label="嵌入 API Key（留空复用主模型 Key）">
+            <input
+              type="password"
+              className="w-full rounded-lg border px-3 py-2 text-sm"
+              style={{ border: "1px solid var(--border)", background: "var(--surface)", color: "var(--ink)" }}
+              value={f.embed_api_key || ""}
+              onChange={(e) => updateForm("embed_api_key", e.target.value)}
+              placeholder="（复用主模型 Key）"
+            />
+          </Field>
+          <Field label="嵌入模型（默认 doubao-embedding-vision）">
+            <input
+              className="w-full rounded-lg border px-3 py-2 text-sm"
+              style={{ border: "1px solid var(--border)", background: "var(--surface)", color: "var(--ink)" }}
+              value={f.memory_embed_model || ""}
+              onChange={(e) => updateForm("memory_embed_model", e.target.value)}
+              placeholder="doubao-embedding-vision"
+            />
+          </Field>
+        </div>
+      )}
 
       <div className="rounded-xl border p-3" style={{ border: "1px solid var(--border)", background: "var(--card)" }}>
         <div className="mb-2 text-xs font-medium">新增记忆</div>

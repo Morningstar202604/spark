@@ -130,9 +130,13 @@ def make_embedder(cfg: dict):
     """按配置构造嵌入器；失败/未启用返回 None（纯关键词检索）。"""
     mode = (cfg.get("memory_embedding") or "off").strip().lower()
     if mode == "api":
+        # 独立 embedding 端点优先：主 provider 可能无 /embeddings 接口（DeepSeek/通义等），
+        # 单独配火山方舟等 embed 端点才真正生效；未配则回退复用主模型 base_url/api_key。
+        base = (cfg.get("embed_base_url") or cfg.get("base_url") or "").strip()
+        key = (cfg.get("embed_api_key") or cfg.get("api_key") or "").strip()
         return ApiEmbedder(
-            cfg.get("base_url") or "",
-            cfg.get("api_key") or "",
+            base,
+            key,
             cfg.get("memory_embed_model") or "doubao-embedding-vision",
         )
     if mode == "local":

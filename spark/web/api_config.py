@@ -39,6 +39,7 @@ async def set_config(request: Request, state: AppState = Depends(get_app_state))
         "approval_mode",
         "model_fast",
         "memory_embed_model",
+        "embed_base_url",
     ):
         v = body.get(k)
         if isinstance(v, str) and v.strip():
@@ -54,6 +55,10 @@ async def set_config(request: Request, state: AppState = Depends(get_app_state))
     key = body.get("api_key")
     if isinstance(key, str) and key and not is_masked_key(key):
         state.cfg["api_key"] = key
+    # 独立语义嵌入密钥：与 api_key 同样的"打码不回写"规则
+    ek = body.get("embed_api_key")
+    if isinstance(ek, str) and ek and not is_masked_key(ek):
+        state.cfg["embed_api_key"] = ek
     if new_provider == "mock":
         # 演示模式不联网：清掉本轮可能写入的密钥，不留残留
         state.cfg["api_key"] = ""

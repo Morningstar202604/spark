@@ -132,6 +132,10 @@ def _defaults() -> dict:
         # 语义记忆：off=仅关键词检索（默认，零依赖）/ api=火山方舟 doubao-embedding / local=本地模型
         "memory_embedding": "off",
         "memory_embed_model": "",
+        # 独立语义嵌入端点（api 模式可选）：当主 provider 无 /embeddings 接口（如 DeepSeek/通义）
+        # 时，可单独配火山方舟等 embed 端点；留空则复用主模型的 base_url/api_key。
+        "embed_base_url": "",
+        "embed_api_key": "",
         "mcp_servers": [],
         # ---- 高级可调项（全部可从 Web 设置控制） ----
         "system_prompt": "",  # 自定义系统提示词；空 = 内置默认。支持 {workdir} {protected} 占位符

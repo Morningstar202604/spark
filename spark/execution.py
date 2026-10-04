@@ -318,7 +318,7 @@ class ToolExecutor:
             lines.append("（子 Agent 未返回文本）")
         if done_reason == "cancelled":
             lines.append("（已取消）")
-        out = "\n".join(lines)[:4000]
+        out, _ = guard_tool_output("spawn_subagent", "\n".join(lines)[:4000])
         dur = int((time.monotonic() - t0) * 1000)
         yield {
             "type": "tool_result",
@@ -455,7 +455,7 @@ class ToolExecutor:
                 parts.append(f"## {area}\n（探索失败：{res}）")
             else:
                 parts.append(f"## {res[0]}\n{res[1]}")
-        out = "\n\n".join(parts)[:4000]
+        out, _ = guard_tool_output("explore_parallel", "\n\n".join(parts)[:4000])
         dur = int((time.monotonic() - t0) * 1000)
         yield {
             "type": "tool_result",

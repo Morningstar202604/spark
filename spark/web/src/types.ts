@@ -17,6 +17,8 @@ export interface Cfg {
   max_context_tokens?: number;
   memory_embedding?: string;
   memory_embed_model?: string;
+  embed_base_url?: string;
+  embed_api_key?: string;
   token_set?: boolean;
   system_prompt?: string;
   protected_paths?: string[];

@@ -141,6 +141,8 @@ def config_payload(state: AppState) -> dict:
             "max_context_tokens": state.cfg.get("max_context_tokens", 32000),
             "memory_embedding": state.cfg.get("memory_embedding", "off"),
             "memory_embed_model": state.cfg.get("memory_embed_model", ""),
+            "embed_base_url": state.cfg.get("embed_base_url", ""),
+            "embed_api_key": mask_key(state.cfg.get("embed_api_key", "")),
             "token_set": bool((state.cfg.get("token") or "").strip()),
             # 高级可调项（全部可在设置面板控制）
             "system_prompt": state.cfg.get("system_prompt", ""),

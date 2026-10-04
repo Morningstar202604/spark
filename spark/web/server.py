@@ -29,6 +29,7 @@ from fastapi.staticfiles import StaticFiles
 from spark import __version__
 from spark.config import APPROVAL_MODES
 from spark.loop import AgentLoop
+from spark.sanitize import sanitize_event
 from spark.slash import expand_slash
 from spark.tools import build_registry
 
@@ -160,6 +161,16 @@ def create_app(state: AppState | None = None) -> FastAPI:
 
         async def event_stream() -> AsyncIterator[str]:
             assistant_text = ""
+            # 输出门禁：SSE 出口统一脱敏（密钥/主目录/堆栈），模型内部仍保留原始信息
+            secrets = tuple(
+                s
+                for s in (
+                    state.cfg.get("api_key"),
+                    state.cfg.get("token"),
+                    state.cfg.get("embed_api_key"),
+                )
+                if s and isinstance(s, str)
+            )
             try:
                 yield sse({"type": "hello", "session_id": sid, "user_msg_id": user_msg_id})
                 async for ev in loop.stream(messages):
@@ -176,7 +187,7 @@ def create_app(state: AppState | None = None) -> FastAPI:
                             )
                         except Exception:  # noqa: BLE001
                             pass
-                    yield sse(ev)
+                    yield sse(sanitize_event(ev, secrets))
                     if ev["type"] == "done":
                         if assistant_text:
                             aid = uuid.uuid4().hex[:12]
