@@ -5,9 +5,7 @@
 """
 from __future__ import annotations
 
-from pathlib import Path
-
-from spark.tools.base import Tool, ToolContext, resolve_path, is_within
+from spark.tools.base import Tool, ToolContext, is_within, resolve_path
 
 MAX_POINTS = 24  # 柱状图最多显示 24 个分类
 
@@ -26,7 +24,6 @@ def _svg_bar(labels: list[str], series: list[dict], height: int = 320) -> str:
     max_v = max_v * 1.1 or 1
     ser_count = max(1, len(series))
     slot = plot_w / n
-    bar_w = min(44, slot * 0.62 / ser_count)
 
     parts: list[str] = []
     parts.append(
@@ -49,12 +46,14 @@ def _svg_bar(labels: list[str], series: list[dict], height: int = 320) -> str:
         parts.append(
             f'<text x="{cx:.1f}" y="{height - 18}" text-anchor="middle" font-size="11" fill="#6b7280">{lb}</text>'
         )
-    # 柱子
+    # 柱子：单柱最宽 44px（分类很少时不再被拉成巨型色块），同槽位的多系列整体居中
+    bar_w = min(44.0, slot * 0.62 / ser_count)
+    group_w = bar_w * ser_count
     for s_idx, s in enumerate(series):
         for i, v in enumerate(s["data"]):
             cx = pad_l + slot * i + slot / 2
-            bw = slot * 0.62 / ser_count
-            x = cx - slot / 2 + (slot * 0.19) + s_idx * bw
+            bw = bar_w
+            x = cx - group_w / 2 + s_idx * bar_w
             h = (v / max_v) * plot_h
             y = pad_t + plot_h - h
             color = s.get("color") or ("#0d9488" if s_idx % 2 == 0 else "#38bdf8")
@@ -87,6 +86,11 @@ async def _gen_report(args: dict, ctx: ToolContext) -> str:
     keys = list(rows[0].keys()) if rows and isinstance(rows[0], dict) else []
     if not keys:
         return "错误：rows 每行应为对象，如 {\"分类\":\"华东\",\"销售额\":100}"
+    # columns（可选）用于挑选并按需排序展示哪些列；全部不匹配时退回"全列"，不静默产出空表
+    if columns:
+        wanted = [c for c in columns if c in keys]
+        if wanted:
+            keys = wanted
     label_key = keys[0]
     labels = [str(r[label_key]) for r in rows][:MAX_POINTS]
     series = []
@@ -141,7 +145,7 @@ def build_report_tools() -> list[Tool]:
                     "path": {"type": "string", "description": "输出 .html 报表路径"},
                     "title": {"type": "string", "description": "报表标题"},
                     "rows": {"type": "array", "description": "数据行，如 [{\"月份\":\"1月\",\"销售额\":120}, ...]"},
-                    "columns": {"type": "array", "description": "可选列说明（纯展示）"},
+                    "columns": {"type": "array", "description": "可选：只展示这些列并按此顺序排列，首列作分类轴"},
                     "note": {"type": "string", "description": "可选说明文字"},
                 },
                 "required": ["path", "rows"],

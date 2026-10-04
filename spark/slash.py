@@ -132,16 +132,25 @@ SLASH_COMMANDS: list[SlashCommand] = [
 ]
 
 
-def match_slash(raw: str) -> SlashCommand | None:
-    """匹配 "/cmd rest..." 格式，返回预设指令；未匹配返回 None。"""
+def _split_slash(raw: str) -> tuple[str, str] | None:
+    """把 "/cmd rest..." 拆成 (小写命令名, 其余输入)；非斜杠输入返回 None。
+
+    匹配与展开共用这一份解析，避免两处各写一遍 split 而慢慢走偏。
+    """
     text = raw.strip()
     if not text.startswith("/"):
         return None
     parts = text[1:].split(" ", 1)
-    cmd_name = parts[0].lower()
-    rest = parts[1].strip() if len(parts) > 1 else ""
+    return parts[0].lower(), (parts[1].strip() if len(parts) > 1 else "")
+
+
+def match_slash(raw: str) -> SlashCommand | None:
+    """匹配 "/cmd rest..." 格式，返回预设指令；未匹配返回 None。"""
+    split = _split_slash(raw)
+    if split is None:
+        return None
     for c in SLASH_COMMANDS:
-        if c.name == cmd_name:
+        if c.name == split[0]:
             return c
     return None
 
@@ -151,10 +160,7 @@ def expand_slash(raw: str, workdir: str) -> str:
     cmd = match_slash(raw)
     if cmd is None:
         return raw
-    user_input = ""
-    parts = raw.strip()[1:].split(" ", 1)
-    if len(parts) > 1:
-        user_input = parts[1].strip()
+    user_input = _split_slash(raw)[1]  # 已确认非 None
     return cmd.template.format(user_input=user_input, workdir=workdir)
 
 
