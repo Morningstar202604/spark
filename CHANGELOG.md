@@ -5,6 +5,13 @@
 ## [Unreleased]
 
 ### 变更
+- **CI 门禁可信化**：`ruff check spark tests` 在 main 上有 21 项存量错误（未用导入、导入排序、缺行尾换行、
+  `raise ... from`、未使用变量），意味着镜像同步正常时 CI 也一定是红的——现已清零。
+  同时 `tests/test_shell.py` 的"取消清进程组"用例改为跨平台断言（观察孙进程心跳是否停更），
+  在 Windows 本机也能真实执行；新增 `tests/test_slash.py`（斜杠命令 8 例）。
+- **文档纠偏（docs/API.md、docs/ARCHITECTURE.md 中英双版）**：仍在描述 `executor.py`、`tui/` 目录与
+  "单文件原生 Web Components 前端、无构建步骤"，与 React + Vite 的现实完全不符；
+  审批/记忆接口请求体字段也是错的，且缺 `/api/slash-commands`、`/api/sessions/{sid}/export`。已按实现重写。
 - **包名统一为 `spark`（破坏性变更，无兼容回退）**：Python 包目录、命令入口、配置/数据目录彻底统一为 `spark`——配置目录改为 `~/.spark`、环境变量改为 `SPARK_HOME`，前端 localStorage 键 / 会话导出目录 / 插件模块名同步改 `spark_*`；命令行入口统一为 `python -m spark` / `spark`。旧命名路径与旧环境变量不再读取。
 
 ### 新增
@@ -13,6 +20,21 @@
 - **pip 过旧提示**：README 与 pyproject.toml 注释补充"pip < 23.2 装不上 fastapi/tomlkit"的提示（先 `python -m pip install --upgrade pip`）。
 
 ### 修复
+- **用量面板 500（阻断级）**：`spark/usage.py` 里 `global_summary` 的缩进掉到 `UsageStore` 类外，成了模块级函数，
+  `GET /api/usage` 直接 `AttributeError`，设置页「用量」永远打不开。由 `6c5d122`（用量按模型拆分）引入。
+- **多模态丢斜杠命令展开**：带图片发送时，`/api/chat/stream` 用原始 prompt 重建 `content`，
+  把已展开的 `expand_slash()` 结果丢弃——`/explain 这张图` 会退化成字面量发给模型。
+- **设置「高级 → 改完自动验证」是假开关**：前端一直提交 `auto_verify`，但后端 POST 不解析、GET 不回读，
+  关掉了刷新又亮回来。现按 bool 严格接收并在配置负载中回读，附 POST→GET→落盘三段契约测试。
+- **`gen_report` 的 `columns` 参数被静默忽略**：解析后从未使用（schema 还写着"纯展示"）。
+  现在 `columns` 真正决定表格列的挑选与顺序（全部不匹配时回退全列，不会产出空表）。
+- **`gen_report` 柱状图宽度上限失效**：`bar_w`（44px 上限）算出来没用，绘图处另用无上限的 `bw`，
+  分类很少时柱子被拉成巨型色块。改为统一使用带上限的 `bar_w` 并让多系列组居中。
+- **斜杠命令解析重复**：`match_slash` 与 `expand_slash` 各写一遍 split（前者还留下未使用的死变量），
+  统一走 `_split_slash()`。
+- **会话截断重复守卫**：`api_sessions.py` 里 `if sid in state.running` 连写两遍（第二遍是死代码）。
+- **版本号三处打架**：`spark/__init__.py` 写 0.8.0、`pyproject.toml` 写 0.9.0，界面设置页显示的是过旧的
+  `__version__`。改为以打包元数据为单一来源（`importlib.metadata`），元数据不可用时回落到字面量。
 - **Web 终端 WS 404**：`uvicorn[standard]` 缺 websockets 时终端面板无法建立连接，README 已说明补装方式。
 - **多 agent 并行探索（Agent Teams 最小版）**：`explore_parallel` 工具并发派出多个只读子 agent 探索不同目录/主题并合并结果，大仓库理解速度质变（对标 Claude Code Agent Teams）。
 - **多模态识图**：前端支持粘贴/拖拽图片（≤3 张、单张 ≤2MB），模型支持时以 `image_url` 消息送入；不支持的模型自动降级为纯文本。
