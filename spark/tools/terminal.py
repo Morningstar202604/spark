@@ -15,7 +15,6 @@ from __future__ import annotations
 import asyncio
 import os
 import sys
-import time
 import uuid
 
 from spark.tools.base import Tool, ToolContext
@@ -179,7 +178,7 @@ def build_terminal_tools() -> list[Tool]:
             },
             category="shell",
             handler=pty_run,
-            preview=lambda a, c: (f"启动终端", f"bash -i（cwd={a.get('workdir') or c.workdir}）"),
+            preview=lambda a, c: ("启动终端", f"bash -i（cwd={a.get('workdir') or c.workdir}）"),
         ),
         Tool(
             name="pty_send",

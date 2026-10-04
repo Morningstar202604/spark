@@ -9,8 +9,8 @@ from spark.tools.knowledge import build_knowledge_tools
 from spark.tools.memory_tools import build_memory_search_tool, build_memory_tools
 from spark.tools.office import build_office_tools
 from spark.tools.patch import build_patch_tool
-from spark.tools.report import build_report_tools
 from spark.tools.plan import build_plan_tool
+from spark.tools.report import build_report_tools
 from spark.tools.session import build_session_tools
 from spark.tools.shell import build_shell_tool
 from spark.tools.subagent import build_explore_parallel_tool, build_subagent_tool

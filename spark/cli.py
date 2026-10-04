@@ -68,7 +68,7 @@ def _ensure_web_built() -> None:
             f"可手动执行：cd \"{web_dir}\" && npm install && npm run build",
             fg=typer.colors.RED,
         )
-        raise typer.Exit(1)
+        raise typer.Exit(1) from exc  # 保留 npm 原始异常链，便于排障
     if not (web_dir / "dist" / "index.html").exists():
         typer.secho("[web] 构建完成但未找到产物 dist/index.html，请检查前端构建日志。", fg=typer.colors.RED)
         raise typer.Exit(1)

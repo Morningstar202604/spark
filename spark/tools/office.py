@@ -6,9 +6,8 @@
 from __future__ import annotations
 
 import importlib.util
-from pathlib import Path
 
-from spark.tools.base import Tool, ToolContext, resolve_path, is_within
+from spark.tools.base import Tool, ToolContext, is_within, resolve_path
 
 _HAS_DOCX = importlib.util.find_spec("docx") is not None
 _HAS_XLSX = importlib.util.find_spec("openpyxl") is not None
@@ -55,7 +54,6 @@ async def _write_docx(args: dict, ctx: ToolContext) -> str:
     content = str(args.get("content", ""))
     try:
         from docx import Document  # noqa: PLC0415
-        from docx.shared import Pt  # noqa: PLC0415
 
         doc = Document()
         for line in content.split("\n"):

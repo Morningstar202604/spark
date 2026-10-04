@@ -9,7 +9,7 @@ import re
 from pathlib import Path
 
 from spark.config import config_dir
-from spark.tools.base import Tool, ToolContext, resolve_path, is_within
+from spark.tools.base import Tool, ToolContext, resolve_path
 
 KB_DIR_NAME = "knowledge"
 CHUNK = 900  # 每片字符数
