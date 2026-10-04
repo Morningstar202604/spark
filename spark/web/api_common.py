@@ -153,6 +153,8 @@ def config_payload(state: AppState) -> dict:
             "max_tokens": state.cfg.get("max_tokens", ""),
             "route_enabled": bool(state.cfg.get("route_enabled", True)),
             "route_keywords": state.cfg.get("route_keywords", ""),
+            # 改完自动验证：必须回读，否则前端「高级」里的开关关掉后一刷新又亮回来
+            "auto_verify": bool(state.cfg.get("auto_verify", True)),
             "usage_pricing": dict(state.cfg.get("usage_pricing") or {}),
         },
         "approval_modes": [

@@ -147,6 +147,10 @@ async def set_config(request: Request, state: AppState = Depends(get_app_state))
             pass
     if isinstance(body.get("route_enabled"), bool):
         state.cfg["route_enabled"] = body["route_enabled"]
+    # 改完自动验证（apply_patch 成功后跑受影响测试）：布尔开关，仅接受真正的 bool，
+    # 否则前端关掉后 GET 回读不到、开关会"弹回"成开启
+    if isinstance(body.get("auto_verify"), bool):
+        state.cfg["auto_verify"] = body["auto_verify"]
     if "route_keywords" in body and isinstance(body.get("route_keywords"), str):
         state.cfg["route_keywords"] = body["route_keywords"][:2000]
     if "usage_pricing" in body and isinstance(body.get("usage_pricing"), dict):

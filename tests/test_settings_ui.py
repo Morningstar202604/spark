@@ -45,6 +45,7 @@ FORM_FIELD_TOKENS = [
     "max_tokens",
     "route_enabled",
     "route_keywords",
+    "auto_verify",
     "usage_pricing",
     "protected_paths",
     "mcpServers",
@@ -71,6 +72,7 @@ DOMAIN_COVERAGE = [
     "max_tokens",
     "route_enabled",
     "route_keywords",
+    "auto_verify",
     "usage_pricing",
 ]
 

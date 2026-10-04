@@ -30,6 +30,7 @@ def test_defaults_contain_advanced_keys() -> None:
     assert d["max_tokens"] == ""
     assert d["route_enabled"] is True
     assert d["route_keywords"] == ""
+    assert d["auto_verify"] is True
     assert d["usage_pricing"] == {}
 
 
@@ -179,6 +180,31 @@ def test_set_config_route_flags(tmp_path: Path) -> None:
     assert state.cfg["route_enabled"] is False
 
 
+def test_set_config_auto_verify_roundtrip(tmp_path: Path) -> None:
+    """「高级 → 改完自动验证」必须是真开关：POST 落盘 + GET 回读 + 非法值不污染。
+
+    回归背景：前端一直发送 auto_verify，但后端 POST 不解析、GET 不回读，
+    面板上关掉后一刷新又亮回来（假开关）。
+    """
+    client, state = _client(tmp_path)
+    assert client.get("/api/config").json()["current"]["auto_verify"] is True
+    client.post("/api/config", json={"auto_verify": False})
+    assert state.cfg["auto_verify"] is False
+    assert client.get("/api/config").json()["current"]["auto_verify"] is False
+    # 重新打开
+    client.post("/api/config", json={"auto_verify": True})
+    assert state.cfg["auto_verify"] is True
+    assert client.get("/api/config").json()["current"]["auto_verify"] is True
+    # 非 bool 不接受（避免 "false" 这类字符串被当假值写脏）
+    client.post("/api/config", json={"auto_verify": "no"})
+    assert state.cfg["auto_verify"] is True
+    # 落盘持久：重启后仍是关
+    client.post("/api/config", json={"auto_verify": False})
+    from spark.config import load_config
+
+    assert load_config()["auto_verify"] is False
+
+
 def test_config_payload_exposes_advanced_and_dirs(tmp_path: Path) -> None:
     client, _ = _client(tmp_path)
     cur = client.get("/api/config").json()
@@ -191,6 +217,7 @@ def test_config_payload_exposes_advanced_and_dirs(tmp_path: Path) -> None:
         "max_tokens",
         "route_enabled",
         "route_keywords",
+        "auto_verify",
         "usage_pricing",
     ):
         assert k in cur["current"], k
