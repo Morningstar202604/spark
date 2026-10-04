@@ -102,7 +102,7 @@ class UsageStore:
             bm["est_cost"] = round(bm["est_cost"], 4)
         return {"session_id": session_id, "totals": totals, "by_model": by_model}
 
-def global_summary(self, days: int = 30) -> dict:
+    def global_summary(self, days: int = 30) -> dict:
         """全部会话聚合（成本面板总览）。"""
         totals = {"prompt_tokens": 0, "completion_tokens": 0, "est_cost": 0.0, "calls": 0}
         by_session: dict[str, dict] = {}
