@@ -189,12 +189,18 @@ def create_app(state: AppState | None = None) -> FastAPI:
                             pass
                     yield sse(sanitize_event(ev, secrets))
                     if ev["type"] == "done":
-                        if assistant_text:
-                            aid = uuid.uuid4().hex[:12]
-                            state.store.append(
-                                sid, {"role": "assistant", "content": assistant_text, "id": aid}
-                            )
-                            yield sse({**ev, "assistant_msg_id": aid})
+                        # 中间轮工具消息也一并落库（原来只存最终文本），
+                        # 断点/重开会话时恢复完整上下文不失真。
+                        aid = None
+                        for m in reversed(messages):
+                            if m.get("role") == "assistant":
+                                m["id"] = m.get("id") or uuid.uuid4().hex[:12]
+                                aid = m["id"]
+                                break
+                        state.store.replace(sid, messages)
+                        yield sse(
+                            {**ev, **({"assistant_msg_id": aid} if aid else {})}
+                        )
                         break
                 yield sse({"type": "close"})
             except asyncio.CancelledError:

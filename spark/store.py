@@ -99,6 +99,44 @@ class SessionStore:
             out.append(msg)
         return out
 
+    def replace(self, sid: str, msgs: list[dict]) -> None:
+        """整段替换会话消息（含中间轮 tool 消息），并刷新元信息计数。
+
+        用于对话结束后落库完整上下文——含 assistant.tool_calls 与 tool 结果，
+        这样断点/重开会话时恢复的上下文不失真（不只有最终文本）。
+        无 id 的消息自动补稳定 id；新会话标题按首条 user 内容自动生成。
+        """
+        if not _safe_sid(sid):
+            return
+        clean = []
+        for m in msgs:
+            if not isinstance(m, dict):
+                continue
+            if not m.get("id"):
+                m = {**m, "id": uuid.uuid4().hex[:12]}
+            clean.append(m)
+        with self._msgs_path(sid).open("w", encoding="utf-8") as f:
+            for m in clean:
+                f.write(json.dumps(m, ensure_ascii=False) + "\n")
+        meta = self.meta(sid) or {}
+        meta["messages"] = len(clean)
+        meta["updated"] = _now()
+        if meta.get("title") == "新会话":
+            first_user = next(
+                (m for m in clean if m.get("role") == "user" and m.get("content")),
+                None,
+            )
+            if first_user:
+                c = first_user.get("content")
+                if isinstance(c, list):  # 多模态 parts：取 text 段
+                    c = " ".join(
+                        str(p.get("text") or "")
+                        for p in c
+                        if isinstance(p, dict) and p.get("text")
+                    )
+                meta["title"] = str(c).strip().replace("\n", " ")[:24]
+        self._write_meta(sid, meta)
+
     def _rewrite_messages(self, sid: str, msgs: list[dict]) -> None:
         """整段重写消息文件（截断/删除后），并刷新元信息计数。"""
         with self._msgs_path(sid).open("w", encoding="utf-8") as f:
