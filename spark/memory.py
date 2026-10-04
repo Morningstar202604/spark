@@ -167,12 +167,29 @@ class MemoryStore:
     def _init(self) -> None:
         with self._connect() as conn:
             conn.executescript(_SCHEMA)
-            # 旧库迁移：补 embedding 列（幂等）
+            # 旧库迁移：补 embedding/level 列（幂等）
             cols = [r["name"] for r in conn.execute("PRAGMA table_info(memories)").fetchall()]
             if "embedding" not in cols:
                 conn.execute(_EMBED_COLUMN)
             if "level" not in cols:
                 conn.execute(_LEVEL_COLUMN)
+            # 旧库 FTS 结构可能不匹配（早期版本列名/列序不同），触发器插入会报
+            # "memories_fts has no column named key"：检测缺列则重建 FTS 表。
+            # 源数据在 memories 表，重建不丢数据；重建后触发器立即指向新表。
+            try:
+                fts_cols = [
+                    r["name"]
+                    for r in conn.execute("PRAGMA table_info(memories_fts)").fetchall()
+                ]
+                if "key" not in fts_cols or "value" not in fts_cols:
+                    conn.execute("DROP TABLE memories_fts")
+                    conn.execute(
+                        "CREATE VIRTUAL TABLE memories_fts USING fts5("
+                        "key, value, content='memories', content_rowid='id', "
+                        "tokenize='unicode61')"
+                    )
+            except Exception:  # noqa: BLE001 —— 极端情况不阻塞记忆读写
+                pass
 
     # ---------- 写 ----------
 

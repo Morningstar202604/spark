@@ -60,6 +60,7 @@ export function SettingsDrawer({
   const [form, setForm] = useState<Partial<Cfg>>({});
   const [memKey, setMemKey] = useState("");
   const [memVal, setMemVal] = useState("");
+  const [memLevel, setMemLevel] = useState("semantic");
   const [memoryItems, setMemoryItems] = useState<{ id: string; key: string; value: string; level?: string }[]>([]);
   const [plugins, setPlugins] = useState<{ name: string; tools?: string[]; error?: string }[]>([]);
   const [pluginsDir, setPluginsDir] = useState("");
@@ -227,9 +228,10 @@ export function SettingsDrawer({
       return;
     }
     try {
-      await addMemory(form.workdir, memKey.trim(), memVal.trim());
+      await addMemory(form.workdir, memKey.trim(), memVal.trim(), memLevel);
       setMemKey("");
       setMemVal("");
+      setMemLevel("semantic");
       toast(`已记住「${memKey.trim()}」`);
       const res = await listMemory(form.workdir);
       setMemoryItems(res.items || []);
@@ -782,6 +784,20 @@ function PaneMemory({
 
       <div className="rounded-xl border p-3" style={{ border: "1px solid var(--border)", background: "var(--card)" }}>
         <div className="mb-2 text-xs font-medium">新增记忆</div>
+        <div className="mb-2 flex gap-2">
+          <select
+            className="rounded-lg border px-2 py-1.5 text-xs"
+            style={{ border: "1px solid var(--border)", background: "var(--surface)", color: "var(--ink)" }}
+            value={memLevel}
+            onChange={(e) => setMemLevel(e.target.value)}
+            aria-label="记忆分层"
+          >
+            <option value="semantic">语义（通用/偏好）</option>
+            <option value="situational">情景（当前任务）</option>
+            <option value="episodic">事件（发生过的事）</option>
+            <option value="procedural">程序（流程做法）</option>
+          </select>
+        </div>
         <div className="flex gap-2">
           <input
             className="flex-1 rounded-lg border px-2 py-1.5 text-xs"
@@ -1509,6 +1525,7 @@ export function UsageDrawer({ open, onClose }: { open: boolean; onClose: () => v
 
   const t = usage?.totals;
   const rows = usage?.top_sessions || [];
+  const byModel = usage?.by_model || [];
 
   return (
     <>
@@ -1562,6 +1579,25 @@ export function UsageDrawer({ open, onClose }: { open: boolean; onClose: () => v
                   </span>
                 </div>
               </div>
+
+              {byModel.length > 0 && (
+                <>
+                  <div className="mb-2 text-xs font-medium" style={{ color: "var(--ink-muted)" }}>
+                    按模型拆分
+                  </div>
+                  <div className="space-y-1.5">
+                    {byModel.map((m, i) => (
+                      <div key={i} className="flex items-center justify-between text-[11px]">
+                        <span>{m.model || "unknown"}</span>
+                        <span>
+                          {m.calls || 0} 次 · {fmtTokens(m.total_tokens || 0)} · ¥
+                          {(m.est_cost || 0).toFixed(4)}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
 
               {rows.length > 0 && (
                 <>

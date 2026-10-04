@@ -210,11 +210,12 @@ export function listMemory(workdir: string): Promise<{ items: MemoryItem[] }> {
 export function addMemory(
   workdir: string,
   key: string,
-  value: string
+  value: string,
+  level?: string
 ): Promise<MemoryItem> {
   return request("/api/memory", {
     method: "POST",
-    body: JSON.stringify({ workdir, key, value }),
+    body: JSON.stringify({ workdir, key, value, level: level || "semantic" }),
   });
 }
 

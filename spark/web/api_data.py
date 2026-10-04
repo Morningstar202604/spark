@@ -55,9 +55,13 @@ async def add_memory(request: Request, state: AppState = Depends(get_app_state))
         raise HTTPException(
             status_code=400, detail="key/value 超长（200/5000 字符）"
         )
+    # 记忆分层（可选）：semantic=通用事实/偏好 / situational=当前任务 / episodic=事件 / procedural=流程做法
+    level = str(body.get("level") or "semantic").strip().lower()
+    if level not in ("semantic", "situational", "episodic", "procedural"):
+        level = "semantic"
     # 写入走线程池：remember 内部可能触发同步语义嵌入（HTTP/本地模型），
     # 直接执行会阻塞单事件循环。
-    await asyncio.to_thread(state.memory.remember, workdir, key, value)
+    await asyncio.to_thread(state.memory.remember, workdir, key, value, level)
     return {"ok": True, "count": state.memory.count(workdir)}
 
 
