@@ -5,6 +5,13 @@
 - 审批：工具需确认时底部出现审批条，按 A 允许 / D 拒绝 / S 本次始终允许 / Esc 拒绝。
 - 快捷键：Enter 发送；Ctrl+N 新建会话；Ctrl+S 会话列表；Ctrl+C 取消当前回合；Ctrl+Q 退出。
 - 会话历史从 JSONL 恢复，记忆 / 检查点 / MCP 全部与 Web 同源。
+
+信任边界：
+- TUI 与 Web 共用 AgentLoop 内核，但 TUI 信任边界与 Web 不同。
+- 本进程是本地单用户的：工具输出直接渲染，不做 sanitize_event（密钥/路径脱敏）。
+- Web 路径 (api_chat.py) 在 SSE 出口调 sanitize_event 脱敏——因为 Web 前端可能被
+  第三方代理/浏览器扩展读取。TUI 是本机直接运行，泄露面相同，无需二次脱敏。
+- 若未来 TUI 改为远程桌面/Terminal 共享模式，应在 EvText/EvToolResult 渲染层加脱敏。
 """
 from __future__ import annotations
 

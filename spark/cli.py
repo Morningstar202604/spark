@@ -32,7 +32,7 @@ def _default_start(ctx: typer.Context) -> None:
     """傻瓜式：不指定子命令时，默认直接打开 Web 界面（像 opencode 一样即开即用）。"""
     if ctx.invoked_subcommand is None:
         # 显式传默认值：typer 的 Option 默认是 OptionInfo 对象，不能直接当参数用
-        web(host="0.0.0.0", port=8000, log_level="info", workdir="")
+        web(host="127.0.0.1", port=8000, log_level="info", workdir="")
 
 
 def _ensure_web_built() -> None:
@@ -77,7 +77,7 @@ def _ensure_web_built() -> None:
 @app.command()
 def web(
     host: str = typer.Option(
-        "0.0.0.0", "--host", help="监听地址（默认监听所有接口，便于外部预览代理访问；仅本机使用时可改成 127.0.0.1）"
+        "127.0.0.1", "--host", help="监听地址（默认仅本机；监听 0.0.0.0 等非回环地址时必须先设置访问令牌）"
     ),
     port: int = typer.Option(8000, "--port", help="监听端口"),
     log_level: str = typer.Option(
@@ -98,7 +98,16 @@ def web(
 
         save_config(cfg)
     token = (cfg.get("token") or "").strip()
-    # 默认 0.0.0.0 供外部代理/预览访问；打印 127.0.0.1 地址便于本机浏览器直接打开
+    # 安全默认：无令牌时只允许回环地址，避免把命令执行能力免登录暴露给整个网络
+    if not token and not is_loopback_host(host):
+        typer.secho(
+            f"[web] 拒绝启动：监听 {host} 但未设置访问令牌，任何可达者都能让 Agent 执行命令。\n"
+            "  先设置令牌（配置文件 token 字段，或以 127.0.0.1 启动后在网页设置里开启），\n"
+            "  或去掉 --host 仅本机使用。",
+            fg=typer.colors.RED,
+        )
+        raise typer.Exit(2)
+    # 打印 127.0.0.1 地址便于本机浏览器直接打开
     display_host = "127.0.0.1" if host in ("0.0.0.0", "::") else host
     url = f"http://{display_host}:{port}/" + (f"?token={token}" if token else "")
     print(f"Spark {__version__} 已启动：")
@@ -106,12 +115,27 @@ def web(
     if token:
         print("  访问令牌已内嵌在地址中；换浏览器/设备时用它访问。")
     else:
-        hint = "（未设令牌：本机免登录）" if host == "127.0.0.1" else "（未设令牌：监听 0.0.0.0，任何可达者免登录，建议在网页设置里开启令牌）"
-        print(f"  未设置访问令牌：{hint}；可在网页设置里开启。")
+        print("  未设置访问令牌：仅本机可访问；可在网页设置里开启。")
     print(f"  工作目录：{cfg.get('workdir')}")
     import uvicorn
 
+    from spark.trace import configure_logging as _configure_trace_logging
+    _configure_trace_logging()
+
     uvicorn.run(fastapi_app, host=host, port=port, log_level=log_level)
+
+
+def is_loopback_host(host: str) -> bool:
+    """是否为仅本机可达的监听地址（localhost / 127.0.0.0/8 / ::1）。"""
+    import ipaddress
+
+    h = (host or "").strip().strip("[]")
+    if h.lower() == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(h).is_loopback
+    except ValueError:
+        return False
 
 
 class StdinGate(ApprovalGate):

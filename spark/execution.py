@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import shutil
 import time
 import uuid
 from collections.abc import AsyncIterator
@@ -209,6 +208,8 @@ class ToolExecutor:
             "args_summary": args_summary,
             "diff": diff,
         }
+        import spark.trace as trace
+        trace.info("tool_start", tool=name, args_summary=args_summary)
         t0 = time.monotonic()
         try:
             result = await asyncio.wait_for(
@@ -222,6 +223,7 @@ class ToolExecutor:
                 verify_note = await self._auto_verify()
                 if verify_note:
                     safe = safe + "\n\n" + verify_note
+            trace.info("tool_end", tool=name, duration_ms=duration, injected=flagged)
             yield {
                 "type": "tool_result",
                 "id": tool_id,
@@ -234,15 +236,18 @@ class ToolExecutor:
             messages.append({"role": "tool", "tool_call_id": tool_id, "content": safe})
         except TimeoutError:
             msg = f"工具 {name} 执行超过 {int(self.tool_timeout)}s，已终止"
+            trace.warning("tool_timeout", tool=name, timeout=self.tool_timeout)
             yield {"type": "error", "message": msg}
             messages.append({"role": "tool", "tool_call_id": tool_id, "content": msg})
         except asyncio.CancelledError:
+            trace.warning("tool_cancelled", tool=name)
             messages.append(
                 {"role": "tool", "tool_call_id": tool_id, "content": "已取消"}
             )
             raise
         except Exception as e:  # noqa: BLE001
             msg = f"工具 {name} 执行失败：{e}"
+            trace.error("tool_error", tool=name, error=str(e))
             yield {"type": "error", "message": msg}
             messages.append({"role": "tool", "tool_call_id": tool_id, "content": msg})
 
@@ -470,32 +475,42 @@ class ToolExecutor:
     # ---------- 改完自动验证（apply_patch 后跑测试回填） ----------
 
     @staticmethod
-    def _find_pytest_executable(wd: Path) -> str | None:
-        """优先找 venv / 当前解释器 / PATH 里的 pytest，避免误判验证不可用。"""
+    def _find_pytest_executable(wd: Path) -> list[str] | None:
+        """返回 pytest 启动命令行（list）；找不到返回 None。
+
+        优先用 python -m pytest（最可靠，用当前解释器）；其次找 venv/PATH 里的 pytest 二进制。
+        """
+        # 1) python -m pytest（使用当前解释器，最可靠）
+        import sys
+
+        try:
+            import pytest  # noqa: F401
+
+            return [sys.executable, "-m", "pytest"]
+        except ImportError:
+            pass
+        # 2) venv 里的 pytest 二进制
         for name in ("pytest.exe", "pytest"):
             for sub in (".venv", "venv"):
                 candidate = wd / sub / "bin" / name
                 if not candidate.exists():
                     candidate = wd / sub / "Scripts" / name
                 if candidate.exists():
-                    return str(candidate)
-        try:
-            import sys
-
-            current = Path(sys.executable)
-            sibling = current.parent / ("pytest.exe" if current.name.endswith(".exe") else "pytest")
-            if sibling.exists():
-                return str(sibling)
-        except Exception:  # noqa: BLE001
-            pass
-        return shutil.which("pytest")
+                    return [str(candidate)]
+        # 3) 当前解释器同目录的 pytest
+        current = Path(sys.executable)
+        sibling = current.parent / ("pytest.exe" if current.name.endswith(".exe") else "pytest")
+        if sibling.exists():
+            return [str(sibling)]
+        return None
 
     async def _auto_verify(self) -> str:
         """apply_patch 成功后自动运行项目测试（pytest -q，120s 超时）。
 
-        检测条件：工作目录存在 pytest 配置（pyproject[tool.pytest.ini_options] /
-        pytest.ini / setup.cfg / tox.ini）或 tests 目录，且能找到 pytest 可执行。
-        不满足任一条件则跳过（返回空串，不打断对话流）。
+        触发条件（任一满足）：
+          - 工作目录存在 pytest 配置 / tests 目录 / test_*.py
+          - 本次 patch 涉及 .py 文件
+        找不到 pytest 可执行时返回明确提示（非空串），避免"静默失败"。
         """
         wd = self.workdir
         has_cfg = False
@@ -509,16 +524,23 @@ class ToolExecutor:
                 encoding="utf-8", errors="ignore"
             ):
                 has_cfg = True
-        has_tests = (wd / "tests").is_dir()
-        if not (has_cfg or has_tests):
+        has_tests = (
+            (wd / "tests").is_dir()
+            or bool(list(wd.glob("test_*.py")))
+            or bool(list(wd.glob("*_test.py")))
+        )
+        has_py = bool(list(wd.glob("*.py"))) or bool(list(wd.glob("**/*.py")))
+        if not (has_cfg or has_tests or has_py):
             return ""
         pytest_bin = self._find_pytest_executable(wd)
         if not pytest_bin:
-            return ""
+            # 明确告知不可用，而不是静默跳过
+            return "[自动验证] pytest 未安装（pip install pytest）"
         try:
             proc = await asyncio.create_subprocess_exec(
-                pytest_bin,
+                *pytest_bin,
                 "-q",
+                "--tb=line",
                 cwd=str(wd),
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.STDOUT,
@@ -533,9 +555,12 @@ class ToolExecutor:
                 return "[自动验证] 已取消"
             text = (raw[0] or b"").decode("utf-8", errors="ignore")
             tail = "\n".join(text.strip().splitlines()[-6:]).strip()
+            # pytest exit codes: 0=全过, 1=有失败, 2=执行错误, 3=内部错误, 4=pytest 命令行错误, 5=未收集到测试
             if proc.returncode == 0:
                 summary = tail.splitlines()[-1] if tail else "通过"
                 return f"[自动验证] ✓ pytest {summary}"
-            return f"[自动验证] ✗ pytest 未通过（exit={proc.returncode}）：\n{tail}"
+            if proc.returncode == 5:
+                return "[自动验证] ⚠ 未收集到测试（无测试文件）"
+            return f"[自动验证] ✗ pytest exit={proc.returncode}：\n{tail}"
         except Exception as e:  # noqa: BLE001 —— 验证失败不阻断对话
             return f"[自动验证] 执行异常：{e}"

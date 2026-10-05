@@ -59,6 +59,23 @@ _strip_orphans = strip_orphans
 
 DEFAULT_TIMEOUT_S = 180.0
 
+# 事件类型白名单——yield 前做类型校验，防拼错 / 静默漏事件
+# 前端用字符串匹配消费事件；缺失/拼错 type 会静默忽略，难以排障。
+VALID_EVENT_TYPES = frozenset({
+    "status", "plan", "reasoning", "text", "usage",
+    "tool_start", "approval", "tool_result", "error", "done",
+})
+
+
+def _validate_event(ev: dict) -> dict:
+    """yield 前校验事件 type 字段是否合法；trace 级别日志提示，不破环产出——
+    前端消费流不做强制校验（向后兼容），但服务端日志可抓到 typo。"""
+    t = ev.get("type")
+    if t not in VALID_EVENT_TYPES:
+        import spark.trace as trace
+        trace.warning("unknown_event_type", event_type=t, keys=list(ev.keys()))
+    return ev
+
 
 class AgentLoop:
     def __init__(
@@ -219,10 +236,15 @@ class AgentLoop:
             pass
 
     async def stream(self, messages: list[dict]):
-        """按轮次驱动模型，产出事件流（每事件同时写入日志）。messages 会被就地追加。"""
+        """按轮次驱动模型，产出事件流（每事件同时写入日志 + 类型校验）。
+
+        事件产出前先过 _validate_event：不符合 VALID_EVENT_TYPES 白名单的
+        事件会打一条 trace.warning（不破环产出），便于在服务端日志里
+        发现 "typo" 类型的事件而不污染前端。
+        """
         async for ev in self._stream_inner(messages):
             self._log(ev)
-            yield ev
+            yield _validate_event(ev)
 
     async def _stream_inner(self, messages: list[dict]):
         """内部事件循环（不含日志包装）。"""

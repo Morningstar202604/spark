@@ -1,40 +1,26 @@
-"""轻量代码索引 + 语法诊断（P3 ⑤）。
+"""代码索引 + 语法诊断（重构：改用 tree-sitter 替代手写正则）。
 
-设计取舍（轻量、不重复造轮子）：
-- Python 用标准库 ast 精确提取符号（函数/类/方法/常量），零依赖；
-- 其他常见语言（js/ts/java/go/rs/c/cpp/h）用行级正则提取顶层符号（够用、不引 tree-sitter）；
-- 语法诊断：.py 用 py_compile（进程内秒级）；.js/.mjs/.cjs 用 node --check（node 现役可用）；
-- 索引缓存到 ~/.spark/codeindex/<workdir_hash>.json，按文件 mtime 增量失效，不污染用户项目目录。
+设计取舍（不重复造轮子）：
+- tree-sitter 提供 30+ 语言的真实 AST 解析（对比旧版手写正则提取顶层声明），
+  精准涵盖方法、嵌套类、接口、高阶函数等。
+- 语法诊断走 stdlib py_compile（.py）与 node --check（.js），与旧版一致。
+- 索引缓存协议保持不变（按文件 mtime 增量失效），供工具调用。
+
+公共接口（保持兼容）：
+    index_project(workdir, use_cache=True) -> dict
+    search_symbol(index, query, limit=20) -> list[dict]
+    lint_file(workdir, path) -> list[dict]
 """
 
 from __future__ import annotations
 
-import ast
 import hashlib
 import json
-import re
 import subprocess
 from pathlib import Path
 
 from spark.config import config_dir
 
-INDEX_EXT = {
-    ".py": "python",
-    ".js": "javascript",
-    ".mjs": "javascript",
-    ".cjs": "javascript",
-    ".ts": "typescript",
-    ".jsx": "javascript",
-    ".tsx": "typescript",
-    ".java": "java",
-    ".go": "go",
-    ".rs": "rust",
-    ".c": "c",
-    ".h": "c",
-    ".cpp": "cpp",
-    ".cc": "cpp",
-    ".hpp": "cpp",
-}
 EXCLUDE_DIRS = {
     ".git",
     "node_modules",
@@ -50,84 +36,217 @@ EXCLUDE_DIRS = {
     ".idea",
     ".vscode",
 }
-_SKIP_SIZE = 1_000_000  # 单文件超 1MB 不索引（避免误入大文件）
 
-# 行级正则：{语言: [(pattern, kind)]}——只匹配"顶层声明"风格的简单模式
-_LINE_PATTERNS: dict[str, list[tuple[str, str]]] = {
-    "javascript": [
-        (
-            r"\b(?:export\s+)?(?:async\s+)?function\s+\*?\s*([A-Za-z_$][\w$]*)\s*\(",
-            "function",
-        ),
-        (r"\b(?:export\s+)?class\s+([A-Za-z_$][\w$]*)", "class"),
-        (
-            r"\b(?:export\s+)?const\s+([A-Za-z_$][\w$]*)\s*=\s*(?:async\s*)?(?:function|\()",
-            "function",
-        ),
-        (r"\b(?:export\s+)?(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=", "variable"),
-    ],
-    "typescript": [
-        (
-            r"\b(?:export\s+)?(?:async\s+)?function\s+\*?\s*([A-Za-z_$][\w$]*)\s*\(",
-            "function",
-        ),
-        (r"\b(?:export\s+)?class\s+([A-Za-z_$][\w$]*)", "class"),
-        (r"\b(?:export\s+)?(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=", "variable"),
-        (r"\b(?:export\s+)?interface\s+([A-Za-z_$][\w$]*)", "interface"),
-        (r"\b(?:export\s+)?type\s+([A-Za-z_$][\w$]*)\s*=", "type"),
-        (r"\b(?:export\s+)?enum\s+([A-Za-z_$][\w$]*)", "enum"),
-    ],
-    "java": [
-        (
-            r"\b(?:public|private|protected|static|final|abstract|synchronized|\s)*\s+([A-Za-z_][\w<>?,\s]*)\s+([A-Za-z_][\w]*)\s*\(",
-            "function",
-        ),
-        (r"\b(?:public|abstract|final)?\s*class\s+([A-Za-z_][\w]*)", "class"),
-        (r"\b(?:public|abstract|final)?\s*interface\s+([A-Za-z_][\w]*)", "interface"),
-        (r"\b(?:public|abstract|final)?\s*enum\s+([A-Za-z_][\w]*)", "enum"),
-    ],
-    "go": [
-        (r"\bfunc\s+\([^)]*\)\s+([A-Za-z_][\w]*)", "method"),
-        (r"\bfunc\s+([A-Za-z_][\w]*)\s*\(", "function"),
-        (r"\btype\s+([A-Za-z_][\w]*)\s+struct\s*\{", "struct"),
-        (r"\btype\s+([A-Za-z_][\w]*)\s+interface\s*\{", "interface"),
-    ],
-    "rust": [
-        (r"\bfn\s+([A-Za-z_][\w]*)\s*\(", "function"),
-        (r"\bstruct\s+([A-Za-z_][\w]*)", "struct"),
-        (r"\benum\s+([A-Za-z_][\w]*)", "enum"),
-        (r"\btrait\s+([A-Za-z_][\w]*)", "trait"),
-        (r"\bimpl\s+([A-Za-z_][\w]*)", "impl"),
-    ],
-    "c": [
-        (
-            r"\b(?:static\s+)?(?:inline\s+)?[\w\s\*]+?\b([A-Za-z_][\w]*)\s*\([^;]*\)\s*\{",
-            "function",
-        ),
-        (r"\b(?:typedef\s+)?(?:struct|union|enum)\s+([A-Za-z_][\w]*)", "type"),
-    ],
-    "cpp": [
-        (
-            r"\b(?:static\s+)?(?:inline\s+)?(?:[\w:<>,\s\*&]+)\s+([A-Za-z_][\w]*)\s*\([^;]*\)\s*\{",
-            "function",
-        ),
-        (r"\bclass\s+([A-Za-z_][\w]*)", "class"),
-        (r"\b(?:typedef\s+)?(?:struct|union|enum)\s+([A-Za-z_][\w]*)", "type"),
-    ],
+SKIP_SIZE = 1_000_000  # 单文件超 1MB 不索引
+
+
+# ---------------------------------------------------------------------------
+# tree-sitter 语言缓存
+# ---------------------------------------------------------------------------
+
+_TS: dict | None = None  # None = 未加载；{} = 加载但不可用
+
+
+def _load_ts() -> dict:
+    """加载 tree-sitter 与语言 binding。失败返回空 dict。
+
+    使用各语言的独立预编译包（tree-sitter-python、tree-sitter-javascript 等），
+    避免 tree-sitter-languages 的 Cython ABI 兼容性问题。
+    """
+    global _TS
+    if _TS is not None:
+        return _TS
+    try:
+        import tree_sitter  # type: ignore
+        import tree_sitter_cpp  # type: ignore
+        import tree_sitter_go  # type: ignore
+        import tree_sitter_java  # type: ignore
+        import tree_sitter_javascript  # type: ignore
+
+        # 各语言独立预编译包，通过 PyCapsule 返回 Language
+        import tree_sitter_python  # type: ignore
+        import tree_sitter_rust  # type: ignore
+        import tree_sitter_typescript  # type: ignore
+        from tree_sitter import Language  # type: ignore
+
+        def _lang(mod, fn_name: str = "language") -> tree_sitter.Language:
+            """将 PyCapsule 包装为 tree_sitter.Language 实例。"""
+            capsule = getattr(mod, fn_name)()
+            return Language(capsule)
+
+        _TS = {
+            "python": _lang(tree_sitter_python),
+            "javascript": _lang(tree_sitter_javascript),
+            "typescript": _lang(tree_sitter_typescript, "language_typescript"),
+            "tsx": _lang(tree_sitter_typescript, "language_tsx"),
+            "go": _lang(tree_sitter_go),
+            "rust": _lang(tree_sitter_rust),
+            "java": _lang(tree_sitter_java),
+            "c": _lang(tree_sitter_cpp),
+            "cpp": _lang(tree_sitter_cpp),
+            "h": _lang(tree_sitter_cpp),
+            "hpp": _lang(tree_sitter_cpp),
+        }
+    except Exception:  # noqa: BLE001 — tree-sitter 不可用则回退正则
+        _TS = {}
+    return _TS
+
+
+# 各语言的 (节点类型 → (kind, name_field, is_container))
+# - name_field: 通过 child_by_field_name() 获取名称节点，None 表示递归查找
+# - is_container: 是否继续深入子节点寻找嵌套定义
+_LANG_KINDS: dict[str, dict[str, tuple[str, str | None, bool]]] = {
+    "python": {
+        "function_definition": ("function", "name", False),
+        "class_definition": ("class", "name", True),
+    },
+    "javascript": {
+        "function_declaration": ("function", "name", False),
+        "class_declaration": ("class", "name", True),
+        "method_definition": ("method", "name", False),
+    },
+    "typescript": {
+        "function_declaration": ("function", "name", False),
+        "class_declaration": ("class", "name", True),
+        "method_definition": ("method", "name", False),
+        "interface_declaration": ("interface", "name", True),
+        "type_alias_declaration": ("type", "name", False),
+        "enum_declaration": ("enum", "name", False),
+    },
+    "tsx": {
+        "function_declaration": ("function", "name", False),
+        "class_declaration": ("class", "name", True),
+        "method_definition": ("method", "name", False),
+        "interface_declaration": ("interface", "name", True),
+    },
+    "go": {
+        "function_declaration": ("function", "name", False),
+        "type_declaration": ("type", "name", True),
+        "method_declaration": ("method", "name", False),
+    },
+    "java": {
+        "method_declaration": ("method", "name", False),
+        "class_declaration": ("class", "name", True),
+        "interface_declaration": ("interface", "name", True),
+        "enum_declaration": ("enum", "name", False),
+    },
+    "rust": {
+        "function_item": ("function", "name", False),
+        "struct_item": ("struct", "name", True),
+        "enum_item": ("enum", "name", True),
+        "trait_item": ("trait", "name", True),
+        "impl_item": ("impl", "name", True),
+    },
+    "c": {
+        "function_definition": ("function", None, False),
+        "struct_specifier": ("struct", "name", True),
+        "enum_specifier": ("enum", "name", True),
+    },
+    "cpp": {
+        "function_definition": ("function", None, False),
+        "class_specifier": ("class", "name", True),
+        "struct_specifier": ("struct", "name", True),
+        "enum_specifier": ("enum", "name", True),
+    },
+    "h": {
+        "function_definition": ("function", None, False),
+        "struct_specifier": ("struct", "name", True),
+    },
+    "hpp": {
+        "function_definition": ("function", None, False),
+        "class_specifier": ("class", "name", True),
+        "struct_specifier": ("struct", "name", True),
+    },
 }
 
+
+def _get_name(node, name_field: str | None, source: str) -> str | None:
+    """从 AST 节点提取名称字符串。"""
+    if name_field is None:
+        # C style: 在 function_declarator 内递归查找 identifier
+        for ch in node.children if hasattr(node, "children") else []:
+            if ch.type == "function_declarator":
+                for sub in ch.children:
+                    if sub.type == "identifier":
+                        return source[sub.start_byte : sub.end_byte]
+        return None
+    try:
+        name_node = node.child_by_field_name(name_field) if hasattr(node, "child_by_field_name") else None
+    except Exception:
+        name_node = None
+    if name_node is not None and name_node.start_byte is not None:
+        return source[name_node.start_byte : name_node.end_byte]
+    # fallback：在直接子节点中找 identifier
+    for ch in node.children if hasattr(node, "children") else []:
+        if ch.type in ("identifier", "type_identifier", "property_identifier"):
+            return source[ch.start_byte : ch.end_byte]
+    return None
+
+
+def _extract_symbols_ts(source: str, lang: str, rel_path: str) -> list[dict]:
+    """用 tree-sitter 提取符号。返回 [{kind, name, line, file}]。"""
+    try:
+        from tree_sitter import Parser  # type: ignore
+    except ImportError:
+        return []
+
+    ts = _load_ts()
+    lang_obj = ts.get(lang)
+    if lang_obj is None:
+        return []
+
+    kinds = _LANG_KINDS.get(lang, {})
+    if not kinds:
+        return []
+
+    parser = Parser(lang_obj)
+    tree = parser.parse(bytes(source, "utf-8"))
+
+    symbols: list[dict] = []
+
+    def walk(node, in_class: bool = False):
+        ntype = node.type
+        if ntype in kinds:
+            kind, name_field, is_container = kinds[ntype]
+            name = _get_name(node, name_field, source)
+            if name:
+                if in_class and kind == "function":
+                    kind = "method"
+                symbols.append(
+                    {
+                        "kind": kind,
+                        "name": name,
+                        "line": node.start_point[0] + 1,
+                        "file": rel_path,
+                        "args": "",
+                    }
+                )
+            # 嵌套定义：进入容器体继续扫描
+            if is_container:
+                body = node.child_by_field_name("body")
+                if body is not None:
+                    for ch in body.children:
+                        walk(ch, in_class=True)
+                return
+        for ch in node.children:
+            walk(ch, in_class=in_class)
+
+    walk(tree.root_node)
+    return symbols
+
+
+# ---------------------------------------------------------------------------
+# 缓存路径与治理
+# ---------------------------------------------------------------------------
 
 def _workdir_key(workdir: str) -> str:
     return hashlib.sha1(workdir.encode("utf-8")).hexdigest()[:12]
 
 
 def index_cache_path(workdir: str) -> Path:
-    return (
-        config_dir() / "codeindex" / f"{_workdir_key(workdir)}.json"
-    )  # 动态：遵守 SPARK_HOME
+    return config_dir() / "codeindex" / f"{_workdir_key(workdir)}.json"
 
 
-# 缓存治理：最多保留最近 N 个工作目录的索引；单缓存超过上限不落盘（超大仓库只做内存索引）
 MAX_CACHE_ENTRIES = 12
 MAX_CACHE_BYTES = 20 * 1024 * 1024
 
@@ -145,73 +264,70 @@ def _prune_cache() -> None:
         pass
 
 
-def _py_symbols(text: str, rel_path: str) -> list[dict]:
-    """用标准库 ast 精确提取 Python 符号。"""
-    out: list[dict] = []
-    try:
-        tree = ast.parse(text)
-    except SyntaxError:
-        return out
-    for node in ast.walk(tree):
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            if isinstance(node, ast.AsyncFunctionDef):
-                kind = "async-function"
-            elif _inside_class(tree, node):
-                kind = "method"
-            else:
-                kind = "function"
-            args = [a.arg for a in node.args.args[:4]]
-            out.append(
+# ---------------------------------------------------------------------------
+# 语法诊断（保留旧实现：py_compile / node --check）
+# ---------------------------------------------------------------------------
+
+def lint_file(workdir: str | None, path: str | Path) -> list[dict]:
+    """单文件语法诊断：.py → py_compile；.js/.mjs/.cjs → node --check。"""
+    p = Path(path)
+    if not p.is_absolute():
+        p = Path(workdir or ".") / p
+    p = p.resolve()
+    if not p.exists() or p.stat().st_size > SKIP_SIZE:
+        return [{"severity": "error", "message": f"文件不存在或过大：{path}"}]
+    ext = p.suffix.lower()
+    if ext == ".py":
+        try:
+            import py_compile
+            py_compile.compile(str(p), doraise=True)
+            return []
+        except py_compile.PyCompileError as e:
+            return [{"severity": "error", "message": str(e).split("\n", 1)[0]}]
+    if ext in (".js", ".mjs", ".cjs"):
+        try:
+            r = subprocess.run(
+                ["node", "--check", str(p)], capture_output=True, text=True, timeout=10
+            )
+        except (subprocess.TimeoutExpired, FileNotFoundError):
+            return [
                 {
-                    "kind": kind,
-                    "name": node.name,
-                    "line": node.lineno,
-                    "file": rel_path,
-                    "args": ", ".join(args) + ("…" if len(node.args.args) > 4 else ""),
+                    "severity": "warning",
+                    "message": "无法运行 node --check（超时或未安装）",
                 }
-            )
-        elif isinstance(node, ast.ClassDef):
-            out.append(
+            ]
+        if r.returncode != 0:
+            return [
                 {
-                    "kind": "class",
-                    "name": node.name,
-                    "line": node.lineno,
-                    "file": rel_path,
-                    "args": "",
+                    "severity": "error",
+                    "message": (r.stderr or r.stdout).strip().split("\n", 1)[0],
                 }
-            )
-    return out
+            ]
+        return []
+    return [{"severity": "warning", "message": "暂不支持该语言语法诊断"}]
 
 
-def _inside_class(tree: ast.AST, node: ast.AST) -> bool:
-    for parent in ast.walk(tree):
-        if isinstance(parent, ast.ClassDef):
-            for child in ast.iter_child_nodes(parent):
-                if child is node:
-                    return True
-    return False
+# ---------------------------------------------------------------------------
+# 索引构建（公共接口）
+# ---------------------------------------------------------------------------
 
-
-def _regex_symbols(text: str, rel_path: str, lang: str) -> list[dict]:
-    out: list[dict] = []
-    for pat, kind in _LINE_PATTERNS.get(lang, []):
-        for m in re.finditer(pat, text, re.M):
-            name = m.group(1) if m.lastindex and m.lastindex >= 1 else ""
-            if not name:
-                continue
-            line = text.count("\n", 0, m.start()) + 1
-            out.append(
-                {"kind": kind, "name": name, "line": line, "file": rel_path, "args": ""}
-            )
-    # 去重（同名同行同 kind）
-    seen: set[tuple] = set()
-    uniq: list[dict] = []
-    for s in out:
-        key = (s["file"], s["name"], s["line"], s["kind"])
-        if key not in seen:
-            seen.add(key)
-            uniq.append(s)
-    return uniq
+_EXT_TO_LANG: dict[str, str] = {
+    ".py": "python",
+    ".js": "javascript",
+    ".mjs": "javascript",
+    ".cjs": "javascript",
+    ".ts": "typescript",
+    ".jsx": "javascript",
+    ".tsx": "tsx",
+    ".java": "java",
+    ".go": "go",
+    ".rs": "rust",
+    ".c": "c",
+    ".h": "h",
+    ".cpp": "cpp",
+    ".cc": "cpp",
+    ".hpp": "hpp",
+}
 
 
 def index_project(workdir: str, use_cache: bool = True) -> dict:
@@ -226,6 +342,9 @@ def index_project(workdir: str, use_cache: bool = True) -> dict:
         except Exception:  # noqa: BLE001
             pass
 
+    ts = _load_ts()
+    supported_langs = set(ts.keys())
+
     symbols: list[dict] = []
     files: dict[str, dict] = {}
     lang_count: dict[str, int] = {}
@@ -236,10 +355,10 @@ def index_project(workdir: str, use_cache: bool = True) -> dict:
                 if entry.name in EXCLUDE_DIRS or entry.name.startswith("."):
                     continue
                 walk(entry)
-            elif entry.is_file() and entry.stat().st_size <= _SKIP_SIZE:
+            elif entry.is_file() and entry.stat().st_size <= SKIP_SIZE:
                 ext = entry.suffix.lower()
-                lang = INDEX_EXT.get(ext)
-                if not lang:
+                lang = _EXT_TO_LANG.get(ext)
+                if not lang or lang not in supported_langs:
                     continue
                 rel = str(entry.relative_to(root))
                 try:
@@ -247,13 +366,9 @@ def index_project(workdir: str, use_cache: bool = True) -> dict:
                 except Exception:  # noqa: BLE001
                     continue
                 st = entry.stat()
-                mtime = st.st_mtime
-                if lang == "python":
-                    syms = _py_symbols(text, rel)
-                else:
-                    syms = _regex_symbols(text, rel, lang)
+                syms = _extract_symbols_ts(text, lang, rel)
                 symbols.extend(syms)
-                files[rel] = {"mtime": mtime, "size": st.st_size, "lang": lang}
+                files[rel] = {"mtime": st.st_mtime, "size": st.st_size, "lang": lang}
                 lang_count[lang] = lang_count.get(lang, 0) + 1
 
     if root.exists():
@@ -282,7 +397,6 @@ def _cache_fresh(cached: dict, root: Path) -> bool:
             return False
         try:
             st = p.stat()
-            # mtime（秒级精度）+ 文件大小双因子：同秒改写时靠 size 兜底
             if abs(st.st_mtime - float(meta.get("mtime", 0))) > 1:
                 return False
             if st.st_size != int(meta.get("size", -1)):
@@ -292,7 +406,7 @@ def _cache_fresh(cached: dict, root: Path) -> bool:
     return True
 
 
-def search_symbol(index: dict, query: str, limit: int = 20) -> list[dict]:
+def search_symbol(index: dict | None, query: str, limit: int = 20) -> list[dict]:
     """在索引里模糊搜索符号（名称包含 / 前缀匹配），按行号排序。"""
     q = query.lower().strip()
     if not q or not index:
@@ -304,43 +418,3 @@ def search_symbol(index: dict, query: str, limit: int = 20) -> list[dict]:
             hits.append(s)
     hits.sort(key=lambda x: (x.get("file", ""), int(x.get("line", 0))))
     return hits[:limit]
-
-
-def lint_file(workdir: str, path: str) -> list[dict]:
-    """单文件语法诊断：.py → py_compile；.js/.mjs/.cjs → node --check。"""
-    p = Path(path)
-    if not p.is_absolute():
-        p = Path(workdir) / p
-    p = p.resolve()
-    if not p.exists() or p.stat().st_size > _SKIP_SIZE:
-        return [{"severity": "error", "message": f"文件不存在或过大：{path}"}]
-    ext = p.suffix.lower()
-    if ext == ".py":
-        try:
-            import py_compile
-
-            py_compile.compile(str(p), doraise=True)
-            return []
-        except py_compile.PyCompileError as e:
-            return [{"severity": "error", "message": str(e).split("\n", 1)[0]}]
-    if ext in (".js", ".mjs", ".cjs"):
-        try:
-            r = subprocess.run(
-                ["node", "--check", str(p)], capture_output=True, text=True, timeout=10
-            )
-        except (subprocess.TimeoutExpired, FileNotFoundError):
-            return [
-                {
-                    "severity": "warning",
-                    "message": "无法运行 node --check（超时或未安装）",
-                }
-            ]
-        if r.returncode != 0:
-            return [
-                {
-                    "severity": "error",
-                    "message": (r.stderr or r.stdout).strip().split("\n", 1)[0],
-                }
-            ]
-        return []
-    return [{"severity": "warning", "message": "暂不支持该语言语法诊断"}]

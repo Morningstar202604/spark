@@ -14,6 +14,7 @@ import os
 import re
 import subprocess
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 import tomlkit
@@ -26,12 +27,6 @@ def config_dir() -> Path:
 
 def config_file() -> Path:
     return config_dir() / "config.toml"
-
-
-# 兼容引用（注意：这两个常量在 import 时固化，不随 SPARK_HOME 运行时变化；
-# 运行时代码一律用 config_dir() / config_file() 动态获取，常量仅供展示类旧引用）
-CONFIG_FILE = config_file()
-CONFIG_DIR = config_dir()
 
 # 国产模型预设（OpenAI 兼容协议，2026-09 现役型号，已剔除下线/弃用型号）。
 # 说明：DeepSeek 的 deepseek-chat/reasoner 已于 2026-07-24 弃用（现役 v4-pro/flash）；
@@ -305,3 +300,53 @@ def apply_preset(cfg: dict, preset: str) -> dict:
     if preset == "mock":
         cfg["api_key"] = ""
     return cfg
+
+
+# ---------------------------------------------------------------------------
+# 类型化 Provider 配置（消除 _build_provider_cfg 手动拼字段的脆弱性）
+# ---------------------------------------------------------------------------
+
+@dataclass
+class ProviderConfig:
+    """stream_chat / AgentLoop 的 provider 参数类型。
+
+    替代裸 dict：_old_build_provider_cfg 从 state.cfg 手动挑 9 个字段，
+    拼错字段名/漏传只在运行时暴露。ProviderConfig 字段带类型提示，
+    IDE 与 ruff 都能提前发现问题。
+    """
+    provider: str = "mock"
+    base_url: str = ""
+    model: str = "mock"
+    api_key: str = ""
+    model_fast: str = ""
+    fallback_model: str = ""
+    temperature: str | float = ""
+    max_tokens: str | int = ""
+    route_enabled: bool = True
+    route_keywords: str = ""
+    # 演示/测试脚本（不进配置文件）
+    mock_script: list | None = None
+    mock_subagent_script: list | None = None
+
+    @classmethod
+    def from_cfg(cls, cfg: dict, model_override: str = "") -> ProviderConfig:
+        """从完整配置构造 ProviderConfig（集中字段挑选逻辑）。"""
+        return cls(
+            provider=cfg.get("provider", "mock"),
+            base_url=cfg.get("base_url", ""),
+            model=model_override or cfg.get("model", "mock"),
+            api_key=cfg.get("api_key", ""),
+            model_fast=cfg.get("model_fast", ""),
+            fallback_model=cfg.get("fallback_model", ""),
+            temperature=cfg.get("temperature", ""),
+            max_tokens=cfg.get("max_tokens", ""),
+            route_enabled=cfg.get("route_enabled", True),
+            route_keywords=cfg.get("route_keywords", ""),
+            mock_script=cfg.get("mock_script"),
+            mock_subagent_script=cfg.get("mock_subagent_script"),
+        )
+
+    def to_dict(self) -> dict:
+        """下游 provider.py / compaction.py 仍吃 dict——提供显式转换。"""
+        d = {k: v for k, v in self.__dict__.items() if v is not None}
+        return d

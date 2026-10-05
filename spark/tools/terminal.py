@@ -17,6 +17,7 @@ import os
 import sys
 import uuid
 
+from spark.shell_env import build_clean_env
 from spark.tools.base import Tool, ToolContext
 
 _IS_WINDOWS = sys.platform == "win32"
@@ -65,7 +66,7 @@ def _spawn_pty(cwd: str, cols: int = 110, rows: int = 30) -> tuple[str, _PtyEntr
         shell_cmd,
         cwd=cwd or ".",
         dimensions=(rows, cols),
-        env=dict(os.environ),
+        env=build_clean_env(),
     )
     entry = _PtyEntry(proc, [], asyncio.Lock())
     _ptys[pty_id] = entry

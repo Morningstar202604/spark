@@ -13,6 +13,7 @@ import subprocess
 import sys
 from typing import Any
 
+from spark.shell_env import build_clean_env
 from spark.tools.base import Tool, ToolContext
 
 MAX_OUT = 60_000
@@ -74,7 +75,7 @@ async def run_shell(args: dict, ctx: ToolContext) -> str:
         timeout = 120  # 模型传了非数字超时 → 用默认值，不中断任务
     if timeout <= 0:
         timeout = 120
-    env = dict(os.environ)
+    env = build_clean_env(extra={"LANG": os.environ.get("LANG", "C.UTF-8")})
     proc = await asyncio.create_subprocess_shell(
         cmd,
         cwd=str(ctx.workdir),

@@ -249,8 +249,12 @@ class PtyManager:
 
 
 def _shell_env() -> dict:
-    env = dict(os.environ)
-    env.setdefault("TERM", "xterm-256color")
-    env.setdefault("COLORTERM", "truecolor")
-    env.setdefault("LANG", "C.UTF-8")
-    return env
+    from spark.shell_env import build_clean_env
+
+    return build_clean_env(
+        extra={
+            "TERM": os.environ.get("TERM", "xterm-256color"),
+            "COLORTERM": os.environ.get("COLORTERM", "truecolor"),
+            "LANG": os.environ.get("LANG", "C.UTF-8"),
+        }
+    )

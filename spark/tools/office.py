@@ -5,13 +5,12 @@
 """
 from __future__ import annotations
 
-import importlib.util
-
+from spark import capabilities
 from spark.tools.base import Tool, ToolContext, is_within, resolve_path
 
-_HAS_DOCX = importlib.util.find_spec("docx") is not None
-_HAS_XLSX = importlib.util.find_spec("openpyxl") is not None
-_HAS_PDF = importlib.util.find_spec("pypdf") is not None
+_HAS_DOCX = capabilities.docx_available
+_HAS_XLSX = capabilities.openpyxl_available
+_HAS_PDF = capabilities.pypdf_available
 
 
 def _need(lib: str) -> str:

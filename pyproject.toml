@@ -10,12 +10,23 @@ dependencies = [
     "httpx>=0.27",
     "typer>=0.12",
     "tomlkit>=0.12",
+    "openai>=1.40",              # 官方 OpenAI SDK：流式解析 + tool_call 拼装 + 重试
+    "tiktoken>=0.7",             # token 估算（精确）
+    "trafilatura>=1.8",          # 网页正文提取（替代正则 <! 清洗）
+    "tree-sitter>=0.25",         # AST 解析核心
+    "tree-sitter-python>=0.23",
+    "tree-sitter-javascript>=0.23",
+    "tree-sitter-typescript>=0.23",
+    "tree-sitter-go>=0.23",
+    "tree-sitter-rust>=0.23",
+    "tree-sitter-java>=0.23",
+    "tree-sitter-cpp>=0.23",    # C / C++ / ObjC 共享
     "ptyprocess>=0.7; sys_platform != 'win32'",
     "pywinpty>=2.0; sys_platform == 'win32'",
 ]
 
 [project.optional-dependencies]
-extras = ["tiktoken>=0.7", "trafilatura>=1.8", "mcp>=1.0,<2", "textual>=0.60"]
+extras = ["mcp>=1.0,<2", "textual>=0.60"]
 office = ["python-docx>=1.1", "openpyxl>=3.1", "pypdf>=4.0"]  # 办公文档工具（docx/xlsx/pdf）
 dev = ["pytest>=8", "pytest-asyncio>=0.23", "mcp>=1.0,<2", "textual>=0.60", "ruff>=0.8"]
 

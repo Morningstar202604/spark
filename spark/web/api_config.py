@@ -50,7 +50,7 @@ async def set_config(request: Request, state: AppState = Depends(get_app_state))
     v = body.get("max_context_tokens")
     if isinstance(v, int) and v > 0:
         state.cfg["max_context_tokens"] = v
-    if body.get("memory_embedding") in ("off", "api", "local"):
+    if body.get("memory_embedding") in ("off", "volcengine", "openai", "local"):
         state.cfg["memory_embedding"] = body["memory_embedding"]
     key = body.get("api_key")
     if isinstance(key, str) and key and not is_masked_key(key):

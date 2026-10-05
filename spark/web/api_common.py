@@ -80,13 +80,23 @@ def get_app_state(request: Request) -> AppState:
 
 
 def check_token(request: Request, state: AppState) -> None:
-    """令牌鉴权；未设置令牌 = 免登录（默认监听 0.0.0.0，公网可达时务必开启令牌；仅本机用可传 --host 127.0.0.1）。"""
+    """令牌鉴权；未设置令牌 = 免登录（默认监听回环地址；绑定非回环地址必须设置令牌）。"""
     expected = (state.cfg.get("token") or "").strip()
     if not expected:
         return
     token = request.headers.get("x-spark-token") or request.query_params.get("token")
-    if token != expected:
+    if not _safe_compare(token, expected):
         raise HTTPException(status_code=401, detail="未授权：访问令牌不正确")
+
+
+def _safe_compare(actual: str | None, expected: str) -> bool:
+    """恒定时间字符串比较——防止计时侧信道逐字节爆破令牌。"""
+    import secrets
+
+    if not actual or not isinstance(actual, str):
+        # 让空/类型错误走同样长度的比较路径，不短路
+        actual = ""
+    return secrets.compare_digest(actual, expected)
 
 
 def clamp_int(v, lo: int, hi: int, default: int) -> int:
@@ -122,6 +132,7 @@ def config_payload(state: AppState) -> dict:
     get_config 与 set_config 共用；set_config 设置令牌后直接返回本 payload，
     避免"从免登录状态设置令牌"时被新令牌二次校验打成 401。
     """
+    from spark.capabilities import describe
     return {
         "presets": {
             k: {"label": v["label"], "base_url": v["base_url"], "model": v["model"]}
@@ -186,6 +197,7 @@ def config_payload(state: AppState) -> dict:
             "memory_db": str(config_dir() / "memory.db"),
         },
         "version": __version__,
+        "capabilities": describe(),
     }
 
 
