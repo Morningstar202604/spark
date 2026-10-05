@@ -11,3 +11,4 @@ build/
 .aqg/
 node_modules/
 .temp/
+.coverage
