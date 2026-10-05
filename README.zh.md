@@ -8,8 +8,7 @@
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-14b8a6.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-0f766e.svg)]()
-[![CI](https://img.shields.io/github/actions/workflow/status/X33834/spark/ci.yml?branch=main&label=CI)](https://github.com/X33834/spark/actions/workflows/ci.yml)
-[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
+[![Tests](https://img.shields.io/badge/tests-227%20passed-0f766e.svg)](tests/)
 
 [English](README.md) · **中文** · [日本語](README.ja.md) · [Español](README.es.md)
 
@@ -17,11 +16,9 @@
 
 ---
 
-Spark 是一个**本地优先的 AI 编程助手**，从零重写：无 Electron 臃肿、无云端依赖、无隐性模型调用。**审批门**保护你的项目（写文件、执行命令一律先征求同意），内置 **Prompt Injection 防护**，记忆**全部存本地**，国产模型（DeepSeek / 通义 / 智谱 / Kimi / 豆包 / 云知声 / Ollama）开箱即用。
+Spark 是一个**本地优先的 AI 编程助手**，从零重写：无 Electron 臃肿、无云端依赖、无隐性模型调用。**审批门**保护你的项目（写文件、执行命令一律先征求同意），工具/文件输出作**非信任数据**处理（已知中英文注入模式会触发行内警示），记忆**全部存本地**，国产模型（DeepSeek / 通义 / 智谱 / Kimi / 豆包 / 云知声 / Ollama）开箱即用。
 
 单文件前端、单进程、一条 `pip install`，所有数据都在 `~/.spark/`。
-
-> ✨ **与 opencode / ZCode / Codex CLI 的差异**：这三者都没有内置的注入防护和跨会话语义记忆——Spark 两者都有，还带轻量插件点、本地代码索引和成本面板。
 
 ## 🚀 快速开始
 
