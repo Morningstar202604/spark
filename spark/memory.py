@@ -24,6 +24,17 @@ from pathlib import Path
 
 from spark.config import config_dir
 
+__all__ = [
+    "EmbeddingBackend",
+    "_HttpEmbedder",
+    "VolcengineEmbedder",  # 向后兼容别名
+    "OpenAIEmbedder",      # 向后兼容别名
+    "LocalEmbedder",
+    "MemoryStore",
+    "make_embedder",
+    "_tokens",
+]
+
 _SCHEMA_V1 = """
 CREATE TABLE IF NOT EXISTS memories (
   id INTEGER PRIMARY KEY AUTOINCREMENT,

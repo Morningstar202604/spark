@@ -15,6 +15,51 @@ from collections.abc import AsyncIterator
 
 import httpx  # 保留模块级引用，供测试 monkeypatch 用
 
+import spark.trace as trace
+
+# 公开常量
+# Retry 配置：指数退避 + jitter 防惊群
+MAX_RETRIES = 3
+RETRY_BASE_DELAY = 0.5  # 秒
+RETRY_BACKOFF_FACTOR = 2.0
+RETRY_JITTER = 0.5  # 随机抖动幅度
+RETRYABLE_STATUS_CODES = frozenset({429, 500, 502, 503, 504})
+
+
+def _extract_retry_after(exc: Exception) -> float | None:
+    """从 OpenAI SDK 异常中提取 Retry-After 值（秒）。
+
+    OpenAI SDK 在 429 异常里通过 .headers 透传 Retry-After。
+    读取路径兼容 attrs 与 dict 两种风格；失败返回 None 走默认退避。
+    """
+    # 路径 1：直接挂在异常上的 .headers
+    headers = getattr(exc, "headers", None)
+    if headers is not None:
+        if hasattr(headers, "get"):
+            ra = headers.get("Retry-After") or headers.get("retry-after")
+        else:
+            ra = getattr(headers, "Retry-After", None) or getattr(headers, "retry-after", None)
+        if ra:
+            try:
+                return float(ra)
+            except (ValueError, TypeError):
+                pass
+    # 路径 2：OpenAI SDK 把原始 response 挂在 .response 上，response.headers 是真实来源
+    resp = getattr(exc, "response", None)
+    if resp is not None:
+        resp_headers = getattr(resp, "headers", None)
+        if resp_headers is not None:
+            if hasattr(resp_headers, "get"):
+                ra = resp_headers.get("Retry-After") or resp_headers.get("retry-after")
+            else:
+                ra = getattr(resp_headers, "Retry-After", None) or getattr(resp_headers, "retry-after", None)
+            if ra:
+                try:
+                    return float(ra)
+                except (ValueError, TypeError):
+                    pass
+    return None
+
 # ---------------------------------------------------------------------------
 # tokenizer（tiktoken 提为首选，未装时回退启发式）
 # ---------------------------------------------------------------------------
@@ -247,7 +292,6 @@ async def stream_chat(
             yield ev
         return
 
-    client = _make_client(cfg)
     input_est = sum(estimate_tokens(str(m)) for m in messages)
     if tools:
         input_est += sum(estimate_tokens(str(t)) for t in tools)
@@ -265,12 +309,6 @@ async def stream_chat(
         params["max_tokens"] = mt
     if tools:
         params["tools"] = tools
-
-    # ---------- 重试配置 ----------
-    MAX_RETRIES = 3
-    RETRY_BASE_DELAY = 0.5  # 秒
-    RETRY_BACKOFF_FACTOR = 2.0
-    RETRY_JITTER = 0.5  # 随机抖动幅度（防多会话同时限流惊群）
 
     out_tokens = 0
     produced = False
@@ -349,22 +387,16 @@ async def stream_chat(
             return
         except Exception as e:
             status = getattr(e, "status_code", None)
-            retryable = status is None or status in (429, 500, 502, 503, 504)
+            retryable = status is None or status in RETRYABLE_STATUS_CODES
             if produced or not retryable:
                 raise ProviderError(str(e), status=status) from e
             last_err = e
-            # 尊重 Retry-After；否则用指数退避 + 随机 jitter
-            import spark.trace as trace
-            retry_after = getattr(e, "headers", {})
-            if hasattr(retry_after, "get"):
-                ra = retry_after.get("Retry-After")
-                if ra:
-                    try:
-                        trace.info("provider_retry_after", seconds=float(ra), attempt=attempt)
-                        await asyncio.sleep(float(ra))
-                        continue
-                    except (ValueError, TypeError):
-                        pass
+            # Retry-After 优先，否则指数退避 + jitter
+            retry_after = _extract_retry_after(e)
+            if retry_after is not None:
+                trace.info("provider_retry_after", seconds=retry_after, attempt=attempt)
+                await asyncio.sleep(retry_after)
+                continue
             delay = RETRY_BASE_DELAY * (
                 RETRY_BACKOFF_FACTOR**attempt
             ) + random.uniform(0, RETRY_JITTER)
