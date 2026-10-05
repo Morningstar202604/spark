@@ -170,7 +170,8 @@ class AgentLoop:
             hits = await asyncio.to_thread(
                 self.memory.search, str(self.workdir), user_text, limit=5
             )
-        except Exception:  # noqa: BLE001 —— 记忆库异常不阻断对话
+        except (OSError, RuntimeError):
+            # 记忆库异常不阻断对话：sqlite 锁竞争 / embedder RuntimeError（模型缺失）等
             return None
         if not hits:
             return None

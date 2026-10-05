@@ -149,6 +149,90 @@ def _defaults() -> dict:
     }
 
 
+# ---------------------------------------------------------------------------
+# Schema 校验：白名单字段 + 类型 / 取值约束
+# （运行时防御：用户手滑写了非法值时第一时间报出来，而不是静默用默认值跑飞）
+# ---------------------------------------------------------------------------
+
+_SCHEMA: dict[str, tuple[type | tuple[type, ...], set[str] | frozenset[str] | None]] = {
+    # field → (expected_type_or_tuple, validator_or_None)
+    "provider": (str, None),
+    "base_url": (str, None),
+    "model": (str, None),
+    "api_key": (str, None),
+    "workdir": (str, None),
+    "approval_mode": (str, set(APPROVAL_MODES)),
+    "max_context_tokens": (int, None),
+    "token": (str, None),
+    "model_fast": (str, None),
+    "fallback_model": (str, None),
+    "memory_embedding": (str, {"off", "api", "local"}),
+    "memory_embed_model": (str, None),
+    "embed_base_url": (str, None),
+    "embed_api_key": (str, None),
+    "mcp_servers": (list, None),
+    "compact_summary": (str, {"off", "llm"}),
+    "system_prompt": (str, None),
+    "protected_paths": (list, None),
+    "max_turns": (int, None),
+    "tool_timeout": ((int, float), None),
+    "auto_verify": (bool, None),
+    "temperature": (str, None),
+    "max_tokens": (str, None),
+    "route_enabled": (bool, None),
+    "route_keywords": (str, None),
+    "usage_pricing": (dict, None),
+    "proxy": (str, None),
+}
+
+
+def _validate_and_coerce(cfg: dict, source: str = "config") -> list[str]:
+    """校验并（尽可能）修正配置文件中的字段。
+
+    返回警告信息列表。不抛出 — 业务方决定是否阻断。
+    策略：未知 key → 警告 + 保留（向后兼容）；类型/取值错误 → 警告 + 回退到默认值。
+    """
+    import logging
+
+    log = logging.getLogger("spark.config")
+    warns: list[str] = []
+    defaults = _defaults()
+    for key, value in list(cfg.items()):
+        if key.startswith("_"):
+            continue
+        if key not in _SCHEMA:
+            warns.append(f"未知配置项 '{key}'（{source}），已忽略。请检查拼写或升级版本。")
+            continue
+        expected, valid_set = _SCHEMA[key]
+        if not isinstance(value, expected):
+            coerced: int | float | bool | str | None = None
+            # 轻微类型偏差尝试强转（int↔float / str↔bool）
+            try:
+                if expected is int:
+                    coerced = int(value)
+                elif expected is float:
+                    coerced = float(value)
+                elif expected is bool and isinstance(value, str):
+                    coerced = value.lower() in ("1", "true", "yes", "on")
+                elif expected is str:
+                    coerced = str(value)
+            except (ValueError, TypeError):
+                pass
+            if coerced is not None:
+                log.warning("配置项 ‘%s’ 类型不匹配：期望 %s、实际 %s，已强转为 %s", key, expected, type(value).__name__, coerced)
+                cfg[key] = coerced
+            else:
+                log.warning("配置项 ‘%s’ 类型错误：期望 %s、实际 %s，已回退为默认值", key, expected, type(value).__name__)
+                cfg[key] = defaults[key]
+                warns.append(f"配置项 ‘{key}’ 类型错误，已使用默认值")
+            continue
+        if valid_set is not None and value not in valid_set:
+            log.warning("配置项 ‘%s’ 取值 ‘%s’ 不在合法集合 %s 中，已回退为默认值", key, value, valid_set)
+            cfg[key] = defaults[key]
+            warns.append(f"配置项 ‘{key}’ 取值 ‘{value}’ 非法，已使用默认值")
+    return warns
+
+
 def load_config() -> dict:
     cfg = _defaults()
     f = config_file()
@@ -158,12 +242,21 @@ def load_config() -> dict:
             for k in cfg:
                 if k in data:
                     cfg[k] = data[k]
+            # 收集 tomlkit 阶段未报出的未知 key（用于 schema 校验）
+            unknown_keys = {k for k in data if k not in cfg}
             # tomlkit 的 Table/List 转成普通 dict/list（数组的表 → [[mcp_servers]] 等）
             for k in ("mcp_servers", "protected_paths"):
                 if isinstance(cfg.get(k), list):
                     cfg[k] = json.loads(json.dumps(cfg[k]))
             if isinstance(cfg.get("usage_pricing"), dict):
                 cfg["usage_pricing"] = json.loads(json.dumps(cfg["usage_pricing"]))
+            # Schema 校验：类型 / 取值 / 未知 key
+            if unknown_keys:
+                for k in unknown_keys:
+                    cfg[k] = data[k]  # 暂存（validate 会识别并警告未知）
+            warns = _validate_and_coerce(cfg, source=str(f))
+            if warns:
+                cfg["_config_warnings"] = warns
         except PermissionError as exc:
             # 权限不足时不静默回退 — 明确告知，避免"看起来启动了但读不到配置"
             import logging
@@ -200,8 +293,10 @@ def save_config(cfg: dict) -> None:
     doc = tomlkit.document()
     for k, v in cfg.items():
         # 仅持久化 TOML 基础类型与白名单容器（数组的表 / 表）；
-        # 运行时字段（如 mock_script、_env_api_key 标记）不写盘。
+        # 运行时字段（如 _config_warnings、_env_api_key 标记）与未知 key 不写盘。
         if k.startswith("_"):
+            continue
+        if k not in _SCHEMA and k != "mock_script":
             continue
         if v is None:
             continue

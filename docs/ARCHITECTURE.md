@@ -87,6 +87,4 @@ spark/
   - `lib/`：api（HTTP/SSE 客户端）、markdown、utils
   - `types.ts` 类型、`styles/global.css` 全局样式（Tailwind + 设计令牌）
 - 构建：`npm run build` 产出 `spark/web/dist/`（含哈希资源的 index.html），该目录**提交进 git**；后端 `STATIC_DIR` 优先指向 dist，缺失时回落到 `spark/web/`（旧版单文件 `index.html` 保留作兜底）
-- 能力：命令面板 Ctrl+K、消息编辑重发、语音输入（Web Speech）、上下文水位、全文搜索、MCP 市场一键安装、终端（PTY/WS）、多模态识图
-
-> AI生成
+- 能力：命令面板 Ctrl+K、消息编辑重发、语音输入（Web Speech）、上下文水位、全文搜索、MCP 市场一键安装、终端（PTY/WS）、多模态识图、模型路由（主/快速/备用）
