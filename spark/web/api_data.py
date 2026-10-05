@@ -27,7 +27,7 @@ async def list_memory(request: Request, state: AppState = Depends(get_app_state)
     return {
         "workdir": workdir,
         "count": state.memory.count(workdir),
-        "items": state.memory.list(workdir, limit=200),
+        "items": state.memory.list_memories(workdir, limit=200),
     }
 
 

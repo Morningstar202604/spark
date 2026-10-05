@@ -191,7 +191,7 @@ class SessionStore:
         except (json.JSONDecodeError, OSError):
             return None
 
-    def list(self, limit: int = 50) -> list[dict]:
+    def list_sessions(self, limit: int = 50) -> list[dict]:
         rows: list[dict] = []
         try:
             entries = list(self.root.iterdir())
@@ -222,7 +222,7 @@ class SessionStore:
         """
         ql = q.lower()
         out: list[dict] = []
-        for m in self.list(limit=200):
+        for m in self.list_sessions(limit=200):
             title = str(m.get("title") or "")
             wd = str(m.get("workdir") or "")
             if ql in title.lower() or ql in wd.lower():

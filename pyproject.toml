@@ -1,7 +1,7 @@
 [project]
 name = "spark-agent"
 version = "0.9.0"
-description = "Spark Agent —— 本地 AI 编程助手（单事件循环 / 审批门 / MCP / TUI / 单一前端）"
+description = "Local-first AI coding agent. Approval-gated writes and commands, local memory, MCP."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
@@ -28,7 +28,7 @@ dependencies = [
 [project.optional-dependencies]
 extras = ["mcp>=1.0,<2", "textual>=0.60"]
 office = ["python-docx>=1.1", "openpyxl>=3.1", "pypdf>=4.0"]  # 办公文档工具（docx/xlsx/pdf）
-dev = ["pytest>=8", "pytest-asyncio>=0.23", "mcp>=1.0,<2", "textual>=0.60", "ruff>=0.8"]
+dev = ["pytest>=8", "pytest-asyncio>=0.23", "pytest-cov>=5", "mypy>=1.10", "bandit>=1.7", "mcp>=1.0,<2", "textual>=0.60", "ruff>=0.8"]
 
 [project.scripts]
 spark = "spark.cli:main"
@@ -57,3 +57,19 @@ exclude = ["spark/web/vendor"]
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B"]
 ignore = ["E501", "B008"]  # E501 行宽已由 line-length 控制；B008 为 FastAPI Depends 惯例，非缺陷
+
+[tool.mypy]
+ignore_missing_imports = true
+# 针对 PTY/TUI/terminal 平台相关库缺少类型桩的已知噪音
+[[tool.mypy.overrides]]
+module = [
+    "ptyprocess.*",
+    "pywinpty.*",
+    "textual.*",
+    "tree_sitter.*",
+    "trafilatura.*",
+    "openpyxl.*",
+    "docx.*",
+    "pypdf.*",
+]
+ignore_errors = true

@@ -32,7 +32,7 @@ def _kill_group(proc: Any) -> None:
                 ["taskkill", "/F", "/T", "/PID", str(proc.pid)],
                 capture_output=True,
                 timeout=10,
-                creationflags=subprocess.CREATE_NO_WINDOW,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
             )
         except (OSError, subprocess.SubprocessError):
             pass
@@ -61,7 +61,7 @@ def _popen_group_kwargs() -> dict:
     start_new_session 仅 POSIX 有效；Windows 用 CREATE_NEW_PROCESS_GROUP。
     """
     if _IS_WINDOWS:
-        return {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
+        return {"creationflags": getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)}
     return {"start_new_session": True}
 
 

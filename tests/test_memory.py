@@ -20,7 +20,7 @@ async def test_remember_list_search(tmp_path: Path) -> None:
     store.remember(wd, "部署", "用 systemd 服务，端口 8080")
     store.remember(wd, "测试", "pytest，依赖装到 ~/.local")
     assert store.count(wd) == 2
-    rows = store.list(wd)
+    rows = store.list_memories(wd)
     assert {r["key"] for r in rows} == {"部署", "测试"}
 
     # 精确 key 命中
@@ -41,7 +41,7 @@ async def test_upsert_overwrites(tmp_path: Path) -> None:
     wd = str(tmp_path)
     store.remember(wd, "端口", "8080")
     store.remember(wd, "端口", "9090")
-    rows = store.list(wd)
+    rows = store.list_memories(wd)
     assert len(rows) == 1
     assert rows[0]["value"] == "9090"
 

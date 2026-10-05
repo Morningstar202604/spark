@@ -86,7 +86,7 @@ async def ensure_local_excludes(workdir: Path) -> tuple[list[str], list[str]]:
     return added, untracked
 
 
-async def _run_git(workdir: Path, *args: str, timeout: float = 30.0) -> tuple[int, str]:
+async def _run_git(workdir: Path, *args: str, timeout: float = 30.0) -> tuple[int | None, str]:
     try:
         proc = await asyncio.create_subprocess_exec(
             "git",

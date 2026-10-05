@@ -240,7 +240,7 @@ def _extract_symbols_ts(source: str, lang: str, rel_path: str) -> list[dict]:
 # ---------------------------------------------------------------------------
 
 def _workdir_key(workdir: str) -> str:
-    return hashlib.sha1(workdir.encode("utf-8")).hexdigest()[:12]
+    return hashlib.sha1(workdir.encode("utf-8"), usedforsecurity=False).hexdigest()[:12]
 
 
 def index_cache_path(workdir: str) -> Path:

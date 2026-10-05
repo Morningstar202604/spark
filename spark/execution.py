@@ -82,7 +82,8 @@ class ToolExecutor:
 
         # 计划工具：直接转为 plan 事件，不审批
         if name == "update_plan":
-            steps = args.get("steps") if isinstance(args.get("steps"), list) else []
+            raw_steps = args.get("steps")
+            steps: list = raw_steps if isinstance(raw_steps, list) else []
             yield {"type": "plan", "steps": steps}
             messages.append(
                 {
@@ -456,7 +457,7 @@ class ToolExecutor:
         parts = []
         for idx, res in enumerate(results):
             area = valid[idx].get("path") or "?"
-            if isinstance(res, Exception):
+            if isinstance(res, BaseException):
                 parts.append(f"## {area}\n（探索失败：{res}）")
             else:
                 parts.append(f"## {res[0]}\n{res[1]}")

@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import difflib
 import shutil
+from pathlib import Path
 
 from spark.patch_apply import detect_newline
 from spark.tools.base import Tool, ToolContext, is_within, resolve_path
@@ -76,10 +77,11 @@ async def list_dir(args: dict, ctx: ToolContext) -> str:
         return f"错误：路径不存在 {p}"
     if not p.is_dir():
         return f"错误：{p} 不是目录"
+    entries: list[Path] = []
     try:
-        entries = sorted(p.iterdir(), key=lambda e: (e.name.lower(),))
-    except OSError as e:
-        return f"错误：读取目录失败 {e}"
+        entries = sorted(p.iterdir(), key=lambda item: (item.name.lower(),))
+    except OSError as exc:
+        return f"错误：读取目录失败 {exc}"
     rows = []
     for e in entries[:MAX_LIST]:
         kind = "dir" if e.is_dir() else "file"

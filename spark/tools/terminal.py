@@ -17,6 +17,7 @@ import os
 import sys
 import uuid
 
+from spark.pty import PtyProcessProto  # type: ignore[attr-defined]
 from spark.shell_env import build_clean_env
 from spark.tools.base import Tool, ToolContext
 
@@ -41,7 +42,7 @@ MAX_READ = 8_000
 class _PtyEntry:
     __slots__ = ("pty", "buf", "lock")
 
-    def __init__(self, pty: object, buf: list[str], lock: asyncio.Lock):
+    def __init__(self, pty: PtyProcessProto, buf: list[str], lock: asyncio.Lock):
         self.pty = pty
         self.buf = buf
         self.lock = lock

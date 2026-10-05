@@ -179,7 +179,7 @@ def run(
     wd = Path(workdir).expanduser().resolve()
     if not wd.exists():
         typer.secho(f"工作目录不存在：{wd}", fg=typer.colors.RED)
-        raise typer.Exit(1) from None
+        raise typer.Exit(1)
     gate = StdinGate(mode=approval if approval in APPROVAL_MODES else "suggest")
     provider_cfg = {
         "base_url": cfg.get("base_url", ""),
@@ -270,7 +270,7 @@ def memory(
         rows = store.search(wd, query, limit=20)
         print(f"[搜索] {query}（{wd}）→ {len(rows)} 条")
     else:
-        rows = store.list(wd, limit=50)
+        rows = store.list_memories(wd, limit=50)
         print(f"[记忆] {wd} 共 {store.count(wd)} 条")
     for r in rows:
         print(f"  - {r['key']}：{r['value']}（{r['created_at']}）")

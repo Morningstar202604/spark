@@ -36,7 +36,7 @@ async def _kb_add(args: dict, ctx: ToolContext) -> str:
             return "错误：未安装 python-docx，无法解析 docx"
         from docx import Document  # noqa: PLC0415
 
-        text = "\n".join(p.text for p in Document(src).paragraphs)
+        text = "\n".join(p.text for p in Document(str(src)).paragraphs)
     elif ext == ".pdf":
         if not __import__("importlib").util.find_spec("pypdf"):
             return "错误：未安装 pypdf，无法解析 pdf"

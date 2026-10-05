@@ -56,7 +56,7 @@ def _bounded_name(s: str, limit: int) -> str:
     s = _safe_name(s)
     if len(s) <= limit:
         return s
-    digest = hashlib.sha1(s.encode("utf-8")).hexdigest()[:8]
+    digest = hashlib.sha1(s.encode("utf-8"), usedforsecurity=False).hexdigest()[:8]
     return s[: limit - 9] + digest
 
 
@@ -207,7 +207,7 @@ class McpManager:
             description=desc,
             parameters=schema,
             category="read" if readonly else "write",
-            handler=lambda args, ctx, _s=server_name, _t=t.name: self.call(_s, _t, args),
+            handler=lambda args, ctx, _s=server_name, _t=t.name: self.call(_s, _t, args),  # type: ignore[misc]
         )
 
     async def call(self, server_name: str, tool_name: str, args: dict) -> str:

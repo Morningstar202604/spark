@@ -132,6 +132,8 @@ def _defaults() -> dict:
         "embed_base_url": "",
         "embed_api_key": "",
         "mcp_servers": [],
+        # ---- LLM 摘要（opt-in）：compact_summary = off（默认零隐性调用）/ llm（更高质量） ----
+        "compact_summary": "off",
         # ---- 高级可调项（全部可从 Web 设置控制） ----
         "system_prompt": "",  # 自定义系统提示词；空 = 内置默认。支持 {workdir} {protected} 占位符
         "protected_paths": [],  # 额外保护路径（list[str]）：这些路径下永远拒绝写入
@@ -162,6 +164,12 @@ def load_config() -> dict:
                     cfg[k] = json.loads(json.dumps(cfg[k]))
             if isinstance(cfg.get("usage_pricing"), dict):
                 cfg["usage_pricing"] = json.loads(json.dumps(cfg["usage_pricing"]))
+        except PermissionError as exc:
+            # 权限不足时不静默回退 — 明确告知，避免"看起来启动了但读不到配置"
+            import logging
+            logging.getLogger("spark.config").error(
+                "配置文件权限不足（%s），使用默认配置。请检查：%s", exc, f
+            )
         except Exception:
             # 配置损坏时退回默认，并把坏文件改名留档，不覆盖用户数据。
             backup = f.with_suffix(".toml.bak")
@@ -248,7 +256,7 @@ def _win_user_sid() -> str | None:
                 capture_output=True,
                 text=True,
                 timeout=30,
-                creationflags=subprocess.CREATE_NO_WINDOW,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
             )
             m = re.search(r"S-1-\d[\d-]*\d", out.stdout or "")
             _WIN_SID = m.group(0) if m else ""

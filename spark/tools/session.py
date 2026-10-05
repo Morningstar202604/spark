@@ -78,8 +78,8 @@ async def _export_session(args: dict, ctx: ToolContext) -> str:
         path = out_dir / f"session_{ts}_{sid}.json"
         path.write_text(json.dumps(out, ensure_ascii=False, indent=2), encoding="utf-8")
         return f"已导出 JSON：{path}"
-    path = export_markdown(sid, ctx.workdir)
-    return f"已导出 Markdown：{path}"
+    md_path = export_markdown(sid, ctx.workdir)
+    return f"已导出 Markdown：{md_path}"
 
 
 def build_session_tools() -> list[Tool]:

@@ -122,7 +122,7 @@ class SessionListScreen(ModalScreen[None]):
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id and event.button.id.startswith("sl_"):
-            self.dismiss(event.button.id.replace("sl_", ""))
+            self.dismiss(event.button.id.replace("sl_", ""))  # type: ignore[arg-type]
 
 
 class ApprovalBar(Static):
@@ -171,7 +171,7 @@ class SparkTui(App[None]):
         yield Footer()
 
     def on_mount(self) -> None:
-        rows = self.store.list(limit=1)
+        rows = self.store.list_sessions(limit=1)
         if rows:
             self.sid = rows[0]["id"]
         else:
@@ -212,7 +212,7 @@ class SparkTui(App[None]):
         self.notify("已新建会话")
 
     def action_sessions(self) -> None:
-        rows = self.store.list(limit=20)
+        rows = self.store.list_sessions(limit=20)
         if not rows:
             self.notify("还没有其他会话", severity="warning")
             return

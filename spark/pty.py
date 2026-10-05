@@ -22,6 +22,7 @@ import tempfile
 import threading
 import uuid
 from pathlib import Path
+from typing import Protocol
 
 _IS_WINDOWS = sys.platform == "win32"
 
@@ -55,8 +56,23 @@ def safe_tab_id(raw: str) -> str:
     return cleaned or uuid.uuid4().hex[:12]
 
 
+class PtyProcessProto(Protocol):
+    """PTY 后端协议：ptyprocess 与 pywinpty 的共有接口子集。"""
+
+    def isalive(self) -> bool: ...
+    def read(self, size: int = ...) -> bytes | str: ...
+    def write(self, data: bytes | str) -> None: ...
+    def setwinsize(self, rows: int, cols: int) -> None: ...
+    def close(self, force: bool = ...) -> None: ...
+    def kill(self, signal: int = ...) -> None: ...
+    def terminate(self, force: bool = ...) -> None: ...
+
 class PtySession:
     """一个终端 tab：shell 子进程（POSIX bash / Windows cmd）+ 输出 reader 线程。"""
+
+    proc: PtyProcessProto
+    tab_id: str
+    _closed: bool
 
     def __init__(
         self,

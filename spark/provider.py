@@ -26,38 +26,53 @@ RETRY_JITTER = 0.5  # 随机抖动幅度
 RETRYABLE_STATUS_CODES = frozenset({429, 500, 502, 503, 504})
 
 
+MAX_RETRY_AFTER_SEC = 300  # 恶意 server 返回超大 Retry-After 时的上限（5 分钟）
+
+
 def _extract_retry_after(exc: Exception) -> float | None:
-    """从 OpenAI SDK 异常中提取 Retry-After 值（秒）。
+    """从 OpenAI SDK 异常中提取 Retry-After 值（秒），带 cap。
 
     OpenAI SDK 在 429 异常里通过 .headers 透传 Retry-After。
     读取路径兼容 attrs 与 dict 两种风格；失败返回 None 走默认退避。
+    返回值受 MAX_RETRY_AFTER_SEC 限制，防止恶意 server 用超时值拒绝服务。
     """
+    candidates: list[str] = []
     # 路径 1：直接挂在异常上的 .headers
     headers = getattr(exc, "headers", None)
     if headers is not None:
         if hasattr(headers, "get"):
-            ra = headers.get("Retry-After") or headers.get("retry-after")
+            candidates.append(headers.get("Retry-After") or headers.get("retry-after") or "")
         else:
-            ra = getattr(headers, "Retry-After", None) or getattr(headers, "retry-after", None)
-        if ra:
-            try:
-                return float(ra)
-            except (ValueError, TypeError):
-                pass
+            candidates.append(
+                getattr(headers, "Retry-After", None)
+                or getattr(headers, "retry-after", None)
+                or ""
+            )
     # 路径 2：OpenAI SDK 把原始 response 挂在 .response 上，response.headers 是真实来源
     resp = getattr(exc, "response", None)
     if resp is not None:
         resp_headers = getattr(resp, "headers", None)
         if resp_headers is not None:
             if hasattr(resp_headers, "get"):
-                ra = resp_headers.get("Retry-After") or resp_headers.get("retry-after")
+                candidates.append(resp_headers.get("Retry-After") or resp_headers.get("retry-after") or "")
             else:
-                ra = getattr(resp_headers, "Retry-After", None) or getattr(resp_headers, "retry-after", None)
-            if ra:
-                try:
-                    return float(ra)
-                except (ValueError, TypeError):
-                    pass
+                candidates.append(
+                    getattr(resp_headers, "Retry-After", None)
+                    or getattr(resp_headers, "retry-after", None)
+                    or ""
+                )
+    for ra in candidates:
+        if not ra:
+            continue
+        try:
+            val = float(ra)
+            if 0 <= val <= MAX_RETRY_AFTER_SEC:
+                return val
+            if val > MAX_RETRY_AFTER_SEC:
+                trace.warning("retry_after_capped", raw=val, cap=MAX_RETRY_AFTER_SEC)
+                return MAX_RETRY_AFTER_SEC
+        except (ValueError, TypeError):
+            continue
     return None
 
 # ---------------------------------------------------------------------------
@@ -155,7 +170,7 @@ def _make_client(cfg: dict):
     client = OpenAI(
         api_key=cfg.get("api_key", "sk-empty"),
         base_url=base,
-        http_client=httpx.AsyncClient(
+        http_client=httpx.Client(  # OpenAI SDK expects sync Client
             timeout=httpx.Timeout(300, connect=30),
             proxy=str(cfg.get("proxy") or "").strip() or None,
         ),
@@ -337,7 +352,7 @@ async def stream_chat(
                     yield {"type": "reasoning", "text": delta.reasoning_content}
                 if delta and delta.tool_calls:
                     produced = True
-                    calls = []
+                    calls: list[dict] = []
                     for tc in delta.tool_calls:
                         args_raw = tc.function.arguments or "{}"
                         try:
@@ -412,54 +427,86 @@ async def stream_chat(
 
 
 def _heuristic_summary(messages: list[dict], max_chars: int = 1200) -> str:
-    """无模型时的启发式摘要：拼接每条消息的角色与开头内容。"""
-    parts = []
+    """本地启发式摘要：提取关键信息（文件路径、命令、决定）+ 截断拼接。
+    纯字符串操作，零 LLM 调用。"""
+    import re
+
+    parts: list[str] = []
+    file_paths: list[str] = []
+    commands: list[str] = []
+    decisions: list[str] = []
+
     for m in messages[:80]:
+        content = str(m.get("content") or "")
+        # 提取文件路径
+        for fp in re.findall(r'[\w./\-_]+\.(?:py|js|ts|go|rs|java|cpp|c|h|toml|json|yaml|yml|md)', content):
+            if fp not in file_paths:
+                file_paths.append(fp)
+        # 提取 shell 命令
+        for cmd in re.findall(r'(?:运行|执行|命令|run|execute)[：:]\s*(.+)', content):
+            if cmd not in commands:
+                commands.append(cmd.strip()[:80])
+        # 提取决定/结论
+        for line in content.split("\n"):
+            if any(kw in line for kw in ("决定", "结论", "应该", "改为", "使用", "采用", "fixed", "decided")):
+                stripped = line.strip()
+                if stripped and stripped not in decisions:
+                    decisions.append(stripped[:100])
+
         role = m.get("role")
-        if role == "user":
-            tag = "用户"
-        elif role == "assistant":
-            tag = "助手"
-        elif role == "tool":
-            tag = "工具"
-        else:
-            tag = str(role)
-        content = str(m.get("content") or "").replace("\n", " ").strip()
+        tag = {"user": "用户", "assistant": "助手", "tool": "工具"}.get(str(role), str(role))
+        text = content.replace("\n", " ").strip()
         if m.get("tool_calls"):
-            content = (content + " [调用工具]").strip()
-        if not content:
-            continue
-        parts.append(f"{tag}：{content[:100]}")
-    text = "；".join(parts)
-    return text[:max_chars]
+            text = (text + " [调用工具]").strip()
+        if text:
+            parts.append(f"{tag}：{text[:100]}")
+
+    summary_parts: list[str] = []
+    if file_paths:
+        summary_parts.append("涉及文件：" + "、".join(file_paths[:10]))
+    if commands:
+        summary_parts.append("执行命令：" + "、".join(commands[:6]))
+    if decisions:
+        summary_parts.append("关键结论：" + "；".join(decisions[:6]))
+    if parts:
+        summary_parts.append("对话摘要：" + "；".join(parts[:15]))
+
+    text = "\n".join(summary_parts)
+    return text[:max_chars] if text else "（早期对话摘要）"
 
 
 async def summarize_messages(cfg: dict, messages: list[dict]) -> str:
-    """把一段旧对话压缩成要点摘要（用于上下文满窗时腾空间）。"""
-    if cfg.get("model") == "mock" or not cfg.get("api_key"):
-        return "（早期对话摘要）" + _heuristic_summary(messages)
+    """把一段旧对话压缩成要点摘要（用于上下文满窗时腾空间）。
 
-    try:
-        client = _make_client(cfg)
-        compact_text = _heuristic_summary(messages, max_chars=6000)
-        resp = await client.chat.completions.create(
-            model=cfg.get("model") or "deepseek-chat",
-            messages=[
-                {
-                    "role": "system",
-                    "content": "把下面的早期对话压缩成 200 字以内的中文要点摘要，保留：关键决定、涉及的文件路径、执行的命令、重要结论与未完成事项。只输出摘要本身。",
-                },
-                {"role": "user", "content": compact_text},
-            ],
-            stream=False,
-            max_tokens=300,
-        )
-        content = (resp.choices[0].message.content or "").strip() if resp.choices else ""
-        if content:
-            return "（早期对话摘要）" + content[:1500]
-    except Exception:  # noqa: BLE001  —— 摘要失败不阻断对话，退回启发式
-        pass
-    return "（早期对话摘要）" + _heuristic_summary(messages)
+    默认纯本地（启发式），绝不调用 LLM —— 保持"零隐性 LLM 调用"承诺。
+    需要更高质量摘要可在 config 中设置 compact_summary = "llm"（opt-in）。
+    """
+    summary = _heuristic_summary(messages)
+
+    if cfg.get("compact_summary") == "llm" and cfg.get("model") != "mock" and cfg.get("api_key"):
+        try:
+            client = _make_client(cfg)
+            compact_text = _heuristic_summary(messages, max_chars=6000)
+            resp = await client.chat.completions.create(
+                model=cfg.get("model") or "deepseek-chat",
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "把下面的早期对话压缩成 200 字以内的中文要点摘要，保留：关键决定、涉及的文件路径、执行的命令、重要结论与未完成事项。只输出摘要本身。",
+                    },
+                    {"role": "user", "content": compact_text},
+                ],
+                stream=False,
+                max_tokens=300,
+                timeout=15.0,
+            )
+            content = (resp.choices[0].message.content or "").strip() if resp.choices else ""
+            if content:
+                return "（LLM 摘要）" + content[:1500]
+        except Exception as exc:  # noqa: BLE001 —— 摘要失败不阻断对话，退回启发式
+            trace.warning("compact_llm_summary_failed", error=str(exc))
+
+    return "（早期对话摘要）" + summary
 
 
 # ---------------------------------------------------------------------------

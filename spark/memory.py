@@ -344,7 +344,7 @@ class MemoryStore:
 
     # ---------- 读 ----------
 
-    def list(self, workdir: str, limit: int = 50) -> list[dict]:
+    def list_memories(self, workdir: str, limit: int = 50) -> list[dict]:
         with self._connect() as conn:
             rows = conn.execute(
                 "SELECT id, key, value, level, created_at FROM memories WHERE workdir=? "

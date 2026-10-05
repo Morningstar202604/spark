@@ -1,0 +1,18 @@
+# Spark: local-first AI coding agent — bandit config
+# Skips are justified for a dev tool that intentionally shells out to
+# user-chosen commands via approval gates and process groups.
+
+skipped_tests:
+  # 标准的 subprocess / 开发工具误报
+  - B404  # subprocess module — 工具核心能力
+  - B603  # subprocess without shell=true — 不影响安全
+  - B607  # partial path — PATH 查找可执行文件
+  - B110  # try/except/pass — 有意为之的错误处理
+  - B112  # try/except/continue
+  - B101  # assert — 测试中使用
+  - B311  # pseudo-random — uuid 生成，非安全场景
+  - B105  # hardcoded_password_string — 空字符串默认值
+  # 业务设计相关
+  - B104  # bind all interfaces — 本地开发服务器设计
+  - B108  # hardcoded_tmp_directory — 隔离测试目录
+  - B608  # SQL injection — 所有查询使用 ? 参数化

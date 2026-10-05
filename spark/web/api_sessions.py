@@ -16,7 +16,7 @@ router = APIRouter()
 async def list_sessions(request: Request, state: AppState = Depends(get_app_state)) -> list[dict]:
     check_token(request, state)
     q = (request.query_params.get("q") or "").strip()
-    rows = state.store.search(q) if q else state.store.list()
+    rows = state.store.search(q) if q else state.store.list_sessions()
     for r in rows:
         r["running"] = r.get("id") in state.running
     return rows

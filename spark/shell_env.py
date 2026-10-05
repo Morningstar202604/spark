@@ -67,7 +67,11 @@ def build_clean_env(
     base: dict[str, str] | None = None,
     extra: dict[str, str] | None = None,
 ) -> dict[str, str]:
-    """构建子进程安全环境变量：白名单基础 + extra 覆盖。"""
+    """构建子进程安全环境变量：白名单基础 + extra 覆盖。
+
+    extra 中的键会被原样合并——调用方需对 extra 的内容负责；
+    建议使用 build_clean_env({"LANG": "C.UTF-8"}) 指明区域覆盖。
+    """
     src = base if base is not None else os.environ
     env: dict[str, str] = {k: v for k, v in src.items() if is_env_allowed(k)}
     if extra:

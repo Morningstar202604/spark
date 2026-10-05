@@ -122,14 +122,14 @@ async def _web_search(args: dict | None, ctx: ToolContext) -> str:
             return f"未找到结果（搜索：{q}）"
         return "\n\n".join(f"- {t}\n  {h}" for t, h in pairs)
 
-    out: list[str] = []
+    extracted: list[str] = []
     for b in blocks[:n]:
         pairs = _extract_links(b, 1)
         title, href = pairs[0] if pairs else ("?", "")
         sn = re.search(r"<p[^>]*>(.*?)</p>", b, re.S)
         snippet = _strip(sn.group(1)) if sn else ""
-        out.append(f"### {title}\nURL: {href}\n{snippet}")
-    return "\n\n".join(out)
+        extracted.append(f"### {title}\nURL: {href}\n{snippet}")
+    return "\n\n".join(extracted)
 
 
 async def _read_url(args: dict | None, ctx: ToolContext) -> str:

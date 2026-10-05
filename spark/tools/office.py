@@ -26,7 +26,7 @@ async def _read_docx(args: dict, ctx: ToolContext) -> str:
     try:
         from docx import Document  # noqa: PLC0415
 
-        doc = Document(path)
+        doc = Document(str(path))
         parts: list[str] = []
         for p in doc.paragraphs:
             t = p.text.strip()
@@ -68,7 +68,7 @@ async def _write_docx(args: dict, ctx: ToolContext) -> str:
             elif line.strip():
                 doc.add_paragraph(line)
         path.parent.mkdir(parents=True, exist_ok=True)
-        doc.save(path)
+        doc.save(str(path))
         return f"已生成 Word 文档：{path}（{content.count(chr(10)) + 1} 行）"
     except Exception as e:  # noqa: BLE001
         return f"生成 docx 失败：{e}"
@@ -190,7 +190,7 @@ async def _meeting_notes(args: dict, ctx: ToolContext) -> str:
                 row[1].text = str(t.get("owner", ""))
                 row[2].text = str(t.get("due", ""))
         path.parent.mkdir(parents=True, exist_ok=True)
-        doc.save(path)
+        doc.save(str(path))
         return f"已生成会议纪要：{path}（议程 {len(agenda)} 项 / 决议 {len(decisions)} 条 / 待办 {len(todos)} 条）"
     except Exception as e:  # noqa: BLE001
         return f"生成会议纪要失败：{e}"

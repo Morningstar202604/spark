@@ -160,7 +160,10 @@ def expand_slash(raw: str, workdir: str) -> str:
     cmd = match_slash(raw)
     if cmd is None:
         return raw
-    user_input = _split_slash(raw)[1]  # 已确认非 None
+    parts = _split_slash(raw)
+    if parts is None:
+        return raw
+    user_input = parts[1]
     return cmd.template.format(user_input=user_input, workdir=workdir)
 
 

@@ -88,13 +88,12 @@ class ApprovalGate:
 
     async def request(
         self, request_id: str, timeout: float = 600.0, tool_name: str | None = None
-    ) -> bool | None:
+    ) -> bool | tuple[bool, list[str]] | None:
         """便捷版：register + await_result（供非事件流场景使用）。"""
         fut = self.register(request_id, tool_name)
         return await self.await_result(request_id, fut, timeout)
 
-    @staticmethod
-    def _resolve(fut: asyncio.Future, value: bool) -> None:
+    def _resolve(self, fut: asyncio.Future[bool | tuple[bool, list[str]]], value: bool | tuple[bool, list[str]]) -> None:
         """跨线程/跨事件循环安全地完成 Future（审批响应可能来自别的请求上下文）。"""
         try:
             fut.get_loop().call_soon_threadsafe(fut.set_result, value)
