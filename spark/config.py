@@ -98,6 +98,7 @@ PRESETS: dict[str, dict] = {
         "base_url": "https://apihub.agnes-ai.com/v1",
         "model": "agnes-3.0-flash",
         "api_key": "sk-EfosNIDbrzJ5Irxu6ZWCnh06lcs46dDPL2SsoYVJz3P35Rpu",
+        "max_tokens": "8192",
     },
     "mock": {
         "label": "演示模式（无需密钥）",

@@ -21,7 +21,7 @@ Runs on your machine · Approves every write & command · Zero hidden model call
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-14b8a6.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-0f766e.svg)]()
-[![Tests](https://img.shields.io/badge/tests-256%20passed-0f766e.svg)](tests/)
+[![Tests](https://img.shields.io/badge/tests-257%20passed-0f766e.svg)](tests/)
 
 **English** · [中文](README.zh.md)
 
@@ -46,12 +46,14 @@ One `pip install`, everything under `~/.spark/`.
 
 | | |
 | --- | --- |
-| ![Welcome & sessions](assets/screenshots/01-welcome.png) | ![Live chat with Agnes AI](assets/screenshots/02-chat.png) |
-| Sidebar with session list + onboarding prompts | Real streaming conversation · Agnes-3.0-flash executing tools |
-| ![Settings — model config](assets/screenshots/03-settings.png) | ![Session sidebar](assets/screenshots/04-sidebar-sessions.png) |
-| Model preset & API configuration | Session management with fork / export / delete |
+| ![Welcome & sessions](assets/screenshots/01-welcome-light.png) | ![Live chat with Agnes AI](assets/screenshots/02-chat-history.png) |
+| Sidebar with session list + onboarding wizard | Streaming conversation · tool execution results |
+| ![Settings — model config](assets/screenshots/03-settings-model.png) | ![Settings — workspace & approval](assets/screenshots/04-settings-workspace.png) |
+| Model preset, API key, multilingual model picker | Workdir, approval mode, protected paths |
+| ![Settings — about](assets/screenshots/05-settings-about.png) | ![Dark mode](assets/screenshots/06-dark-mode.png) |
+| Version, license, runtime capabilities | Full dark theme · reduced eye strain |
 
-> Screenshots captured live against a running Agnes AI backend (apihub.agnes-ai.com, model `agnes-3.0-flash`). Reproduce them with: `powershell -File scripts/screenshot-demo.ps1`
+> Full-page screenshots captured live against a running Agnes AI backend (`apihub.agnes-ai.com`, model `agnes-3.0-flash`). Reproduce them with: `powershell -File scripts/screenshot-demo.ps1`
 
 ---
 

@@ -14,6 +14,16 @@
   --card: #ffffff;
   --muted-foreground: #8592a6;
   --border: #dbe2ec;
+  /* shadcn/ui tokens (map to existing theme variables) */
+  --input: #dbe2ec;
+  --ring: #0d9488;
+  --background: #f6f8fb;
+  --secondary: #ecf0f6;
+  --secondary-foreground: #1a2433;
+  --destructive: #d64545;
+  --destructive-foreground: #ffffff;
+  --accent-foreground: #ffffff;
+  --primary: #0d9488;
 }
 
 [data-theme="dark"] {
@@ -26,6 +36,16 @@
   --card: #111c2e;
   --muted-foreground: #5f7592;
   --border: #22314b;
+  /* shadcn/ui tokens (dark) */
+  --input: #22314b;
+  --ring: #2dd4bf;
+  --background: #0b1220;
+  --secondary: #0d1626;
+  --secondary-foreground: #e7eef7;
+  --destructive: #d64545;
+  --destructive-foreground: #ffffff;
+  --accent-foreground: #0b1220;
+  --primary: #2dd4bf;
 }
 
 html, body {

@@ -8,7 +8,7 @@
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-14b8a6.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-0f766e.svg)]()
-[![Tests](https://img.shields.io/badge/tests-227%20passed-0f766e.svg)](tests/)
+[![Tests](https://img.shields.io/badge/tests-257%20passed-0f766e.svg)](tests/)
 
 [English](README.md) · **中文** · [日本語](README.ja.md) · [Español](README.es.md)
 
@@ -26,12 +26,14 @@ Spark 是一个**本地优先的 AI 编程助手**，从零重写：无 Electron
 
 | | |
 | --- | --- |
-| ![欢迎与会话列表](assets/screenshots/01-welcome.png) | ![Agnes AI 实时流式对话](assets/screenshots/02-chat.png) |
-| 侧边栏会话列表 + 引导提示 | 实时流式对话 · Agnes-3.0-flash 执行工具 |
-| ![设置页 · 模型配置](assets/screenshots/03-settings.png) | ![会话管理侧栏](assets/screenshots/04-sidebar-sessions.png) |
-| 模型预设与 API 配置 | 会话管理（分叉 / 导出 / 删除） |
+| ![欢迎与会话列表](assets/screenshots/01-welcome-light.png) | ![Agnes AI 实时流式对话](assets/screenshots/02-chat-history.png) |
+| 侧边栏会话列表 + 引导提示 | 实时流式对话 · 工具执行结果 |
+| ![设置 · 模型配置](assets/screenshots/03-settings-model.png) | ![设置 · 工作区与审批](assets/screenshots/04-settings-workspace.png) |
+| 模型预设、API 密钥、多语言模型选择器 | 工作目录、审批模式、受保护路径 |
+| ![设置 · 关于](assets/screenshots/05-settings-about.png) | ![深色模式](assets/screenshots/06-dark-mode.png) |
+| 版本、许可证、运行时能力 | 完整深色主题 · 减少眼疲劳 |
 
-> 截图由运行中的 Agnes AI 后端实时采集（apihub.agnes-ai.com，模型 `agnes-3.0-flash`）。一键复现：`powershell -File scripts/screenshot-demo.ps1`
+> 全页面截图由运行中的 Agnes AI 后端实时采集（`apihub.agnes-ai.com`，模型 `agnes-3.0-flash`）。一键复现：`powershell -File scripts/screenshot-demo.ps1`
 
 ## 🚀 快速开始
 

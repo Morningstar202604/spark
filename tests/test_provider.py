@@ -172,6 +172,107 @@ async def test_stream_chat_tool_call_arguments_are_parsed(monkeypatch: pytest.Mo
     assert tc["calls"][0]["arguments"] == {"cmd": "ls"}
 
 
+async def test_stream_chat_multichunk_tool_call_arguments_assembled(monkeypatch: pytest.MonkeyPatch) -> None:
+    """模拟多 chunk 碎片拼接：arguments 被拆成 3 个片段，最终应组装为完整 dict。
+
+    这是 OpenAI 兼容 API 流式传输的真实行为：每个 chunk 只包含一部分 arguments 字符串。
+    """
+
+    class _FakeFn:
+        def __init__(self, name: str, arguments: str):
+            self.name = name
+            self.arguments = arguments
+
+    class _FakeTC:
+        def __init__(self, tc_id: str, fn: _FakeFn):
+            self.id = tc_id
+            self.function = fn
+
+    class _FakeDelta:
+        def __init__(self, content=None, tool_calls=None):
+            self.content = content
+            self.reasoning_content = None
+            self.tool_calls = tool_calls
+
+    class _Chunk:
+        def __init__(self, delta, usage=None):
+            self.choices = [type("C", (), {"delta": delta, "finish_reason": None})()]
+            self.usage = usage
+            self.model = "test"
+
+    usage_obj = type("Usage", (), {"prompt_tokens": 50, "completion_tokens": 30})()
+
+    # 三个 chunk：arguments 被拆成 '{"pa' + 'th": "."' + '}'
+    chunks = [
+        _Chunk(_FakeDelta(tool_calls=[_FakeTC("call_1", _FakeFn("list_dir", '{"pa'))])),
+        _Chunk(_FakeDelta(tool_calls=[_FakeTC("call_1", _FakeFn("", 'th": "."'))])),
+        _Chunk(_FakeDelta(tool_calls=[_FakeTC("call_1", _FakeFn("", "}"))])),
+        _Chunk(_FakeDelta(), usage=usage_obj),
+    ]
+
+    def _fake_make_client(cfg):
+        return FakeChatClient([FakeStream(chunks)])
+
+    monkeypatch.setattr(provider, "_make_client", _fake_make_client)
+    got = [ev async for ev in provider.stream_chat(_cfg(), [{"role": "user", "content": "列出文件"}])]
+    tc_evs = [ev for ev in got if ev["type"] == "tool_calls"]
+    assert len(tc_evs) == 1, f"应只有 1 个 tool_calls 事件，实际 {len(tc_evs)}"
+    call = tc_evs[0]["calls"][0]
+    assert call["name"] == "list_dir"
+    assert call["arguments"] == {"path": "."}, f"实际 arguments: {call['arguments']}"
+    assert "invalid_arguments" not in call, "多 chunk 组装后不应标记为无效"
+
+
+async def test_stream_chat_agnes_style_index_continuation(monkeypatch: pytest.MonkeyPatch) -> None:
+    """精确模拟 Agnes 流式格式：首 chunk 带 id+name，后续 chunk 仅 index+arguments。"""
+
+    class _FakeFn:
+        def __init__(self, name=None, arguments=None):
+            self.name = name
+            self.arguments = arguments
+
+    class _FakeTC:
+        def __init__(self, index, tc_id=None, fn=None):
+            self.index = index
+            self.id = tc_id
+            self.function = fn
+
+    class _FakeDelta:
+        def __init__(self, content=None, tool_calls=None):
+            self.content = content
+            self.reasoning_content = None
+            self.tool_calls = tool_calls
+
+    class _Chunk:
+        def __init__(self, delta, usage=None):
+            self.choices = [type("C", (), {"delta": delta, "finish_reason": None})()]
+            self.usage = usage
+            self.model = "test"
+
+    usage_obj = type("Usage", (), {"prompt_tokens": 269, "completion_tokens": 25})()
+    chunks = [
+        _Chunk(_FakeDelta(content="", tool_calls=[_FakeTC(0, "call_ad6aedb59c2f42069b16cfa6", _FakeFn("list_dir", ""))])),
+        _Chunk(_FakeDelta(tool_calls=[_FakeTC(0, None, _FakeFn(None, "{"))])),
+        _Chunk(_FakeDelta(tool_calls=[_FakeTC(0, None, _FakeFn(None, '"path": "."'))])),
+        _Chunk(_FakeDelta(tool_calls=[_FakeTC(0, None, _FakeFn(None, "}"))])),
+        _Chunk(_FakeDelta(), usage=usage_obj),
+    ]
+
+    def _fake_make_client(cfg):
+        return FakeChatClient([FakeStream(chunks)])
+
+    monkeypatch.setattr(provider, "_make_client", _fake_make_client)
+    got = [ev async for ev in provider.stream_chat(_cfg(), [{"role": "user", "content": "列出当前目录"}])]
+
+    tc_evs = [ev for ev in got if ev["type"] == "tool_calls"]
+    assert len(tc_evs) == 1
+    call = tc_evs[0]["calls"][0]
+    assert call["id"] == "call_ad6aedb59c2f42069b16cfa6"
+    assert call["name"] == "list_dir"
+    assert call["arguments"] == {"path": "."}
+    assert "invalid_arguments" not in call
+
+
 def test_estimate_tokens_fallback_without_tiktoken(monkeypatch: pytest.MonkeyPatch) -> None:
     """无 tiktoken 时应回退估算，不抛异常。"""
     monkeypatch.setattr(provider, "_ENCODER", None)

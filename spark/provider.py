@@ -274,11 +274,44 @@ async def stream_chat(
     out_tokens = 0
     client = _make_client(cfg)
 
+    # 流式传输时 tool_call.arguments 被拆成多个 chunk 发送（如 '{"path":' + ' ".""}'），
+    # 每块不是完整 JSON。用 pending 累积每段参数，等流结束再一次性解析。
+    # key = f"i{index}"：OpenAI 兼容流的后续 chunk 常省略 id 但 index 连续不变。
+    pending: dict[str, dict] = {}
+
+    def _flush_pending() -> list[dict]:
+        """解析累积后的工具调用列表（按 index 排序），返回标准化 dict 列表。"""
+        result: list[dict] = []
+        for key in sorted(pending.keys()):
+            info = pending[key]
+            args_raw = info["arguments"]
+            try:
+                parsed = json.loads(args_raw)
+            except json.JSONDecodeError:
+                parsed = None
+            if isinstance(parsed, dict):
+                result.append(
+                    {"id": info["id"], "name": info["name"], "arguments": parsed}
+                )
+            else:
+                result.append(
+                    {
+                        "id": info["id"],
+                        "name": info["name"],
+                        "arguments": {},
+                        "invalid_arguments": True,
+                        "arguments_tail": args_raw[-200:],
+                    }
+                )
+        pending.clear()
+        return result
+
     # 应用层重试：只重试"未产出任何内容前的瞬态错误"（5xx/429/连接错误）；
     # 已流出一部分内容后失败不重试（避免重复输出）。SDK 侧 max_retries=0 避免双层重试。
     last_err: Exception | None = None
     for attempt in range(MAX_RETRIES):
         out_tokens = 0
+        pending.clear()
         try:
             stream = await client.chat.completions.create(**params)
             async for chunk in stream:
@@ -300,35 +333,35 @@ async def stream_chat(
                 if reasoning:
                     yield {"type": "reasoning", "text": reasoning}
                 if delta.tool_calls:
-                    calls: list[dict] = []
                     for tc in delta.tool_calls:
-                        args_raw = tc.function.arguments or "{}"
-                        try:
-                            parsed = json.loads(args_raw)
-                        except json.JSONDecodeError:
-                            parsed = None
-                        if not isinstance(parsed, dict):
-                            calls.append(
-                                {
-                                    "id": tc.id or "",
-                                    "name": tc.function.name or "",
-                                    "arguments": {},
-                                    "invalid_arguments": True,
-                                    "arguments_tail": args_raw[-200:],
-                                }
-                            )
-                        else:
-                            calls.append(
-                                {
-                                    "id": getattr(tc, "id", "") or "",
-                                    "name": getattr(getattr(tc, "function", None), "name", "") or "",
-                                    "arguments": parsed,
-                                }
-                            )
-                    if calls:
-                        yield {"type": "tool_calls", "calls": calls}
+                        tc_index = getattr(tc, "index", 0) or 0
+                        tc_id = getattr(tc, "id", "") or ""
+                        tc_fn = getattr(tc, "function", None)
+                        tc_name = getattr(tc_fn, "name", "") if tc_fn else ""
+                        tc_name = tc_name or ""
+                        args_raw = getattr(tc_fn, "arguments", None) if tc_fn else ""
+                        args_raw = args_raw or ""
+                        # 以 index 为累积 key：OpenAI 兼容流的后续 chunk 常带 id=None，
+                        # 但 index 保证是同一工具调用的连续片段。
+                        key = f"i{tc_index}"
+                        if key not in pending:
+                            pending[key] = {
+                                "id": tc_id,
+                                "name": tc_name,
+                                "arguments": "",
+                                "index": tc_index,
+                            }
+                        pending[key]["arguments"] += args_raw
+                        if tc_id:
+                            pending[key]["id"] = tc_id
+                        if tc_name:
+                            pending[key]["name"] = tc_name
                 usage = getattr(chunk, "usage", None)
                 if usage:
+                    # 流结束：一次性 flush 所有累积的工具调用
+                    calls = _flush_pending()
+                    if calls:
+                        yield {"type": "tool_calls", "calls": calls}
                     yield {
                         "type": "usage",
                         "estimated": input_est + out_tokens,
@@ -338,7 +371,10 @@ async def stream_chat(
                         "finish_reason": getattr(ch, "finish_reason", None),
                     }
                     return
-            # 无 usage chunk：走本地估算
+            # 无 usage chunk：流结束，flush 并走本地估算
+            calls = _flush_pending()
+            if calls:
+                yield {"type": "tool_calls", "calls": calls}
             yield {
                 "type": "usage",
                 "estimated": input_est + out_tokens,
