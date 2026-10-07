@@ -16,9 +16,22 @@
 
 ---
 
-Spark 是一个**本地优先的 AI 编程助手**，从零重写：无 Electron 臃肿、无云端依赖、无隐性模型调用。**审批门**保护你的项目（写文件、执行命令一律先征求同意），工具/文件输出作**非信任数据**处理（已知中英文注入模式会触发行内警示），记忆**全部存本地**，国产模型（DeepSeek / 通义 / 智谱 / Kimi / 豆包 / 云知声 / Ollama）开箱即用。
+Spark 是一个**本地优先的 AI 编程助手**，从零重写：无 Electron 臃肿、无云端依赖、无隐性模型调用。**审批门**保护你的项目（写文件、执行命令一律先征求同意），工具/文件输出作**非信任数据**处理（已知中英文注入模式会触发行内警示），记忆**全部存本地**，国产模型 + Agnes AI 开箱即用。
 
 单文件前端、单进程、一条 `pip install`，所有数据都在 `~/.spark/`。
+
+---
+
+## 🎬 运行效果
+
+| | |
+| --- | --- |
+| ![欢迎与会话列表](assets/screenshots/01-welcome.png) | ![Agnes AI 实时流式对话](assets/screenshots/02-chat.png) |
+| 侧边栏会话列表 + 引导提示 | 实时流式对话 · Agnes-3.0-flash 执行工具 |
+| ![设置页 · 模型配置](assets/screenshots/03-settings.png) | ![会话管理侧栏](assets/screenshots/04-sidebar-sessions.png) |
+| 模型预设与 API 配置 | 会话管理（分叉 / 导出 / 删除） |
+
+> 截图由运行中的 Agnes AI 后端实时采集（apihub.agnes-ai.com，模型 `agnes-3.0-flash`）。一键复现：`powershell -File scripts/screenshot-demo.ps1`
 
 ## 🚀 快速开始
 
@@ -137,10 +150,10 @@ python3 tests/e2e_manual.py  # 真实 uvicorn 端到端（流内审批 / 409 / �
 
 ## 📄 许可证
 
-MIT。站在开源巨人肩上——ripgrep、difflib、SQLite FTS5、官方 mcp SDK、Textual、FastAPI。不重复造轮子，无 SaaS 锁定。
+MIT。站在开源巨人肩上——ripgrep、difflib、SQLite FTS5、官方 mcp SDK、Textual、FastAPI、
+React、Zustand、shadcn/ui、assistant-ui、marked、LangGraph、mem0、ChromaDB、pydantic-settings、semantic-router、AsyncOpenAI。
+不重复造轮子，无 SaaS 锁定。
 
 ---
 
 **为喜欢"先问再动手、本地运行、不烧钱"的人而做。** 点 Star、Fork、插上你自己的工具——Spark 是你的。
-
-> AI生成

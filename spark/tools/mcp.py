@@ -131,6 +131,10 @@ class McpManager:
     async def _start_one(self, server: McpServer) -> None:
         holder: dict[str, Any] = {"session": None, "tools": [], "error": None}
         stop = asyncio.Event()
+        # 初始化就绪信号：在后台任务完成 initialize + list_tools 后置位，
+        # 无论是否有工具或出错都触发——避免用 tools 列表的真假判断就绪导致
+        # "零工具服务器"被误判为超时。
+        ready = asyncio.Event()
 
         async def run() -> None:
             try:
@@ -152,6 +156,7 @@ class McpManager:
                                 result = await session.list_tools()
                                 holder["session"] = session
                                 holder["tools"] = list(result.tools)
+                                ready.set()
                                 await stop.wait()
                     finally:
                         if http_client is not None:
@@ -166,25 +171,25 @@ class McpManager:
                             result = await session.list_tools()
                             holder["session"] = session
                             holder["tools"] = list(result.tools)
+                            ready.set()
                             await stop.wait()
             except Exception as e:  # noqa: BLE001
                 holder["error"] = f"{type(e).__name__}: {e}"
             finally:
+                ready.set()
                 stop.set()
 
         task = asyncio.create_task(run())
         self._tasks.append(task)
         self._stops[server.name] = stop
 
-        # 等待初始化完成（最多 10s）
-        for _ in range(500):
-            await asyncio.sleep(0.02)
-            if holder["tools"] or holder["error"]:
-                break
+        # 等待初始化完成（最多 10s）——用 Event + wait_for，无忙等待
+        try:
+            await asyncio.wait_for(ready.wait(), timeout=10.0)
+        except TimeoutError:
+            raise RuntimeError(f"服务器 {server.name} 初始化超时") from None
         if holder["error"]:
             raise RuntimeError(f"服务器 {server.name} 启动失败：{holder['error']}")
-        if not holder["tools"]:
-            raise RuntimeError(f"服务器 {server.name} 初始化超时")
         self._sessions[server.name] = holder["session"]
         for t in holder["tools"]:
             self._tools.append(self._make_tool(server.name, t))

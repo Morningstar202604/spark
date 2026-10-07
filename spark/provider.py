@@ -10,70 +10,14 @@ from __future__ import annotations
 
 import asyncio
 import json
-import random
 from collections.abc import AsyncIterator
 
 import httpx  # 保留模块级引用，供测试 monkeypatch 用
 
 import spark.trace as trace
 
-# 公开常量
-# Retry 配置：指数退避 + jitter 防惊群
+# 公开常量（保留供测试/兼容引用）
 MAX_RETRIES = 3
-RETRY_BASE_DELAY = 0.5  # 秒
-RETRY_BACKOFF_FACTOR = 2.0
-RETRY_JITTER = 0.5  # 随机抖动幅度
-RETRYABLE_STATUS_CODES = frozenset({429, 500, 502, 503, 504})
-
-
-MAX_RETRY_AFTER_SEC = 300  # 恶意 server 返回超大 Retry-After 时的上限（5 分钟）
-
-
-def _extract_retry_after(exc: Exception) -> float | None:
-    """从 OpenAI SDK 异常中提取 Retry-After 值（秒），带 cap。
-
-    OpenAI SDK 在 429 异常里通过 .headers 透传 Retry-After。
-    读取路径兼容 attrs 与 dict 两种风格；失败返回 None 走默认退避。
-    返回值受 MAX_RETRY_AFTER_SEC 限制，防止恶意 server 用超时值拒绝服务。
-    """
-    candidates: list[str] = []
-    # 路径 1：直接挂在异常上的 .headers
-    headers = getattr(exc, "headers", None)
-    if headers is not None:
-        if hasattr(headers, "get"):
-            candidates.append(headers.get("Retry-After") or headers.get("retry-after") or "")
-        else:
-            candidates.append(
-                getattr(headers, "Retry-After", None)
-                or getattr(headers, "retry-after", None)
-                or ""
-            )
-    # 路径 2：OpenAI SDK 把原始 response 挂在 .response 上，response.headers 是真实来源
-    resp = getattr(exc, "response", None)
-    if resp is not None:
-        resp_headers = getattr(resp, "headers", None)
-        if resp_headers is not None:
-            if hasattr(resp_headers, "get"):
-                candidates.append(resp_headers.get("Retry-After") or resp_headers.get("retry-after") or "")
-            else:
-                candidates.append(
-                    getattr(resp_headers, "Retry-After", None)
-                    or getattr(resp_headers, "retry-after", None)
-                    or ""
-                )
-    for ra in candidates:
-        if not ra:
-            continue
-        try:
-            val = float(ra)
-            if 0 <= val <= MAX_RETRY_AFTER_SEC:
-                return val
-            if val > MAX_RETRY_AFTER_SEC:
-                trace.warning("retry_after_capped", raw=val, cap=MAX_RETRY_AFTER_SEC)
-                return MAX_RETRY_AFTER_SEC
-        except (ValueError, TypeError):
-            continue
-    return None
 
 # ---------------------------------------------------------------------------
 # tokenizer（tiktoken 提为首选，未装时回退启发式）
@@ -146,10 +90,11 @@ def _client_cache_key(cfg: dict) -> tuple[str, str, str]:
 
 
 def _make_client(cfg: dict):
-    """从配置构建 OpenAI SDK 客户端；同配置多次调用复用同一实例（连接池共享）。
+    """从配置构建 OpenAI SDK 异步客户端；同配置多次调用复用同一实例（连接池共享）。
 
-    过去每次调用都 new 一个 OpenAI → 新 httpx.AsyncClient → 新连接池，
-    工具循环密集调用时大量 TIME_WAIT 与 TLS 手豉；现按 (base_url, api_key, proxy) 缓存客户端。
+    - 使用 AsyncOpenAI（异步原生），消除 sync-over-async 运行时异常
+    - 应用层自行按业务语义重试（"无产出才重试"），SDK max_retries=0 避免双层重试
+    - 连接池按 (base_url, api_key, proxy) 缓存，密集工具调用时复用
     """
     key = _client_cache_key(cfg)
     client = _client_cache.get(key)
@@ -157,7 +102,7 @@ def _make_client(cfg: dict):
         return client
 
     try:
-        from openai import OpenAI  # type: ignore
+        from openai import AsyncOpenAI  # type: ignore
     except ImportError as e:
         raise ProviderError(
             "未安装 openai SDK：pip install openai（推荐）或自行实现 Provider。"
@@ -167,11 +112,12 @@ def _make_client(cfg: dict):
     if not base:
         raise ProviderError("未配置模型接口地址")
 
-    client = OpenAI(
+    client = AsyncOpenAI(
         api_key=cfg.get("api_key", "sk-empty"),
         base_url=base,
-        http_client=httpx.Client(  # OpenAI SDK expects sync Client
-            timeout=httpx.Timeout(300, connect=30),
+        max_retries=0,  # 应用层 stream_chat() 自行按业务语义重试，避免与 SDK 双层重试
+        timeout=httpx.Timeout(300, connect=30),
+        http_client=httpx.AsyncClient(
             proxy=str(cfg.get("proxy") or "").strip() or None,
         ),
     )
@@ -326,12 +272,13 @@ async def stream_chat(
         params["tools"] = tools
 
     out_tokens = 0
-    produced = False
-    last_err: Exception | None = None
     client = _make_client(cfg)
 
+    # 应用层重试：只重试"未产出任何内容前的瞬态错误"（5xx/429/连接错误）；
+    # 已流出一部分内容后失败不重试（避免重复输出）。SDK 侧 max_retries=0 避免双层重试。
+    last_err: Exception | None = None
     for attempt in range(MAX_RETRIES):
-        produced = False
+        out_tokens = 0
         try:
             stream = await client.chat.completions.create(**params)
             async for chunk in stream:
@@ -340,18 +287,19 @@ async def stream_chat(
                     continue
                 ch = choices[0]
                 delta = ch.delta
-                if delta and delta.content:
-                    text = delta.content
-                    produced = True
+                if delta is None:
+                    continue
+                content = getattr(delta, "content", None)
+                if content:
+                    text = content
                     out_tokens += estimate_tokens(text)
                     yield {"type": "text", "text": text}
                     if max_delta is not None and out_tokens > max_delta:
                         return
-                if delta and delta.reasoning_content:
-                    produced = True
-                    yield {"type": "reasoning", "text": delta.reasoning_content}
-                if delta and delta.tool_calls:
-                    produced = True
+                reasoning = getattr(delta, "reasoning_content", None)
+                if reasoning:
+                    yield {"type": "reasoning", "text": reasoning}
+                if delta.tool_calls:
                     calls: list[dict] = []
                     for tc in delta.tool_calls:
                         args_raw = tc.function.arguments or "{}"
@@ -372,8 +320,8 @@ async def stream_chat(
                         else:
                             calls.append(
                                 {
-                                    "id": tc.id or "",
-                                    "name": tc.function.name or "",
+                                    "id": getattr(tc, "id", "") or "",
+                                    "name": getattr(getattr(tc, "function", None), "name", "") or "",
                                     "arguments": parsed,
                                 }
                             )
@@ -402,23 +350,13 @@ async def stream_chat(
             return
         except Exception as e:
             status = getattr(e, "status_code", None)
-            retryable = status is None or status in RETRYABLE_STATUS_CODES
-            if produced or not retryable:
+            retryable = status is None or status in (429, 500, 502, 503, 504)
+            if not retryable:
                 raise ProviderError(str(e), status=status) from e
             last_err = e
-            # Retry-After 优先，否则指数退避 + jitter
-            retry_after = _extract_retry_after(e)
-            if retry_after is not None:
-                trace.info("provider_retry_after", seconds=retry_after, attempt=attempt)
-                await asyncio.sleep(retry_after)
-                continue
-            delay = RETRY_BASE_DELAY * (
-                RETRY_BACKOFF_FACTOR**attempt
-            ) + random.uniform(0, RETRY_JITTER)
-            trace.warning("provider_retry", attempt=attempt, delay=delay, error=str(e))
-            await asyncio.sleep(delay)
-        if attempt == MAX_RETRIES - 1:
-            raise ProviderError(str(last_err), status=getattr(last_err, "status_code", None))
+            if attempt < MAX_RETRIES - 1:
+                await asyncio.sleep(0.5 * (2 ** attempt))
+    raise ProviderError(str(last_err), status=getattr(last_err, "status_code", None))
 
 
 # ---------------------------------------------------------------------------

@@ -1,14 +1,6 @@
-import React, {
-  createContext,
-  useContext,
-  useState,
-  useEffect,
-  useCallback,
-  useRef,
-  type Dispatch,
-  type SetStateAction,
-} from "react";
+import { create } from "zustand";
 import type {
+  ChatMsg,
   Cfg,
   Preset,
   McpServer,
@@ -26,18 +18,24 @@ import {
   listSessions,
   setToken as apiSetToken,
   streamChat,
-  truncateSession,
 } from "./lib/api";
 import { mdToHtml } from "./lib/markdown";
 
-export interface ChatMsg {
-  role: "user" | "assistant" | "error";
-  content: string;
-  raw?: string;
-  id?: string;
-  isStreaming?: boolean;
-  meta?: { images?: number };
-}
+// ---------------------------------------------------------------------------
+// Module-level mutable instances (not reactive state)
+// ---------------------------------------------------------------------------
+let streamCtrl: AbortController | null = null;
+let sendTarget: {
+  sid: string;
+  prompt: string;
+  images: { data: string; mime: string }[];
+} | null = null;
+let toastSeq = 0;
+
+// ---------------------------------------------------------------------------
+// Exported types
+// ---------------------------------------------------------------------------
+export type { ChatMsg };
 
 export interface ToastMsg {
   id: string;
@@ -50,17 +48,17 @@ export interface AppState {
   setToken: (t: string) => void;
 
   cfg: Cfg | null;
-  setCfg: Dispatch<SetStateAction<Cfg | null>>;
+  setCfg: (c: Cfg | null) => void;
   presets: Record<string, Preset>;
   approvalModes: { value: string; label: string }[];
   mcpServers: McpServer[];
-  setMcpServers: Dispatch<SetStateAction<McpServer[]>>;
+  setMcpServers: (s: McpServer[] | ((prev: McpServer[]) => McpServer[])) => void;
   usage: UsageResponse | null;
-  setUsage: Dispatch<SetStateAction<UsageResponse | null>>;
+  setUsage: (u: UsageResponse | null | ((prev: UsageResponse | null) => UsageResponse | null)) => void;
   dirs: Record<string, string>;
 
   sessions: SessionMeta[];
-  setSessions: Dispatch<SetStateAction<SessionMeta[]>>;
+  setSessions: (s: SessionMeta[] | ((prev: SessionMeta[]) => SessionMeta[])) => void;
   sid: string | null;
   setSid: (s: string | null) => void;
   runningSids: Record<string, boolean>;
@@ -83,16 +81,30 @@ export interface AppState {
   dismissToast: (id: string) => void;
 
   pendingImages: { data: string; mime: string; name?: string }[];
-  setPendingImages: Dispatch<
-    SetStateAction<{ data: string; mime: string; name?: string }[]>
-  >;
+  setPendingImages: (
+    s:
+      | { data: string; mime: string; name?: string }[]
+      | ((
+          prev: { data: string; mime: string; name?: string }[]
+        ) => { data: string; mime: string; name?: string }[])
+  ) => void;
 
   messages: ChatMsg[];
+  setMessages: (
+    fn: ChatMsg[] | ((prev: ChatMsg[]) => ChatMsg[])
+  ) => void;
   ctxUsed: number;
+  setCtxUsed: (n: number) => void;
   ctxMax: number;
+  setCtxMax: (n: number) => void;
   pendingPrompt: string;
   setPending: (v: string) => void;
   requestSend: (prompt: string) => void;
+  _startStream: (
+    targetSid: string,
+    prompt: string,
+    images: { data: string; mime: string }[]
+  ) => void;
 
   loadConfig: () => Promise<boolean>;
   refreshSessions: (q?: string) => Promise<void>;
@@ -106,298 +118,258 @@ export interface AppState {
   ) => Promise<void>;
 }
 
-const Ctx = createContext<AppState>(null!);
+// ---------------------------------------------------------------------------
+// Store creation
+// ---------------------------------------------------------------------------
+export const useApp = create<AppState>((set, get) => ({
+  // --- token ---
+  token:
+    new URLSearchParams(location.search).get("token") ||
+    localStorage.getItem("spark_token") ||
+    "",
+  setToken: (t: string) => {
+    apiSetToken(t);
+    set({ token: t });
+  },
 
-export function useApp(): AppState {
-  return useContext(Ctx);
-}
+  // --- config ---
+  cfg: null,
+  setCfg: (c) => set({ cfg: c }),
+  presets: {},
+  approvalModes: [],
+  mcpServers: [],
+  setMcpServers: (s) =>
+    set((prev) => ({
+      mcpServers: typeof s === "function" ? s(prev.mcpServers) : s,
+    })),
+  usage: null,
+  setUsage: (u) =>
+    set((prev) => ({
+      usage: typeof u === "function" ? u(prev.usage) : u,
+    })),
+  dirs: {},
 
-export function AppProvider({ children }: { children: React.ReactNode }) {
-  const [token, setTokState] = useState(
-    () =>
-      new URLSearchParams(location.search).get("token") ||
-      localStorage.getItem("spark_token") ||
-      ""
-  );
-  const [cfg, setCfg] = useState<Cfg | null>(null);
-  const [presets, setPresets] = useState<Record<string, Preset>>({});
-  const [approvalModes, setApprovalModes] = useState<AppState["approvalModes"]>(
-    []
-  );
-  const [mcpServers, setMcpServers] = useState<McpServer[]>([]);
-  const [usage, setUsage] = useState<UsageResponse | null>(null);
-  const [dirs, setDirs] = useState<Record<string, string>>({});
+  // --- sessions ---
+  sessions: [],
+  setSessions: (s) =>
+    set((prev) => ({
+      sessions: typeof s === "function" ? s(prev.sessions) : s,
+    })),
+  sid: null,
+  setSid: (s) => set({ sid: s }),
+  runningSids: {},
+  setRunning: (sid, on) =>
+    set((prev) => {
+      const next = { ...prev.runningSids };
+      if (on) next[sid] = true;
+      else delete next[sid];
+      return { runningSids: next };
+    }),
 
-  const [sessions, setSessions] = useState<SessionMeta[]>([]);
-  const [sid, setSidState] = useState<string | null>(null);
-  const [runningSids, setRunningSids] = useState<Record<string, boolean>>({});
-  const [approval, setApproval] = useState<AppState["approval"]>(null);
-  const [messages, setMessages] = useState<ChatMsg[]>([]);
-  const [ctxUsed, setCtxUsed] = useState(0);
-  const [ctxMax, setCtxMax] = useState(32000);
-  const [pendingPrompt, setPendingPrompt] = useState("");
+  // --- approval ---
+  approval: null,
+  setApproval: (a) => set({ approval: a }),
 
-  const [theme, setThemeState] = useState<ThemeMode>(() => {
+  // --- theme ---
+  theme: (() => {
     const saved = localStorage.getItem("spark_theme");
     if (saved === "light" || saved === "dark") return saved;
     return window.matchMedia("(prefers-color-scheme: dark)").matches
       ? "dark"
       : "light";
-  });
-
-  const [toasts, setToasts] = useState<ToastMsg[]>([]);
-  const toastIdRef = useRef(0);
-
-  const [pendingImages, setPendingImages] = useState<AppState["pendingImages"]>(
-    []
-  );
-  const streamCtrlRef = useRef<AbortController | null>(null);
-  const sendTargetRef = useRef<{
-    sid: string;
-    prompt: string;
-    images: { data: string; mime: string }[];
-  } | null>(null);
-  const sidRef = useRef<string | null>(null);
-  const runningSidsRef = useRef<Record<string, boolean>>({});
-  const cfgRef = useRef<Cfg | null>(null);
-  const pendingPromptRef = useRef("");
-
-  sidRef.current = sid;
-  runningSidsRef.current = runningSids;
-  cfgRef.current = cfg;
-  pendingPromptRef.current = pendingPrompt;
-
-  const setToken = useCallback((t: string) => {
-    apiSetToken(t);
-    setTokState(t);
-  }, []);
-
-  const setSid = useCallback((s: string | null) => setSidState(s), []);
-
-  const setTheme = useCallback((t: ThemeMode) => {
-    setThemeState(t);
+  })(),
+  setTheme: (t: ThemeMode) => {
     localStorage.setItem("spark_theme", t);
     document.documentElement.dataset.theme = t;
-  }, []);
+    set({ theme: t });
+  },
 
-  const toast = useCallback((text: string, type?: ToastMsg["type"]) => {
-    const id = `t${++toastIdRef.current}`;
-    setToasts((prev) => [...prev, { id, text, type }]);
+  // --- toasts ---
+  toasts: [],
+  toast: (text, type) => {
+    const id = `t${++toastSeq}`;
+    set((prev) => ({ toasts: [...prev.toasts, { id, text, type }] }));
     setTimeout(
-      () => setToasts((prev) => prev.filter((x) => x.id !== id)),
+      () => set((prev) => ({ toasts: prev.toasts.filter((x) => x.id !== id) })),
       2600
     );
-  }, []);
+  },
+  dismissToast: (id) =>
+    set((prev) => ({ toasts: prev.toasts.filter((x) => x.id !== id) })),
 
-  const dismissToast = useCallback((id: string) => {
-    setToasts((prev) => prev.filter((x) => x.id !== id));
-  }, []);
+  // --- composer ---
+  pendingImages: [],
+  setPendingImages: (s) =>
+    set((prev) => ({
+      pendingImages:
+        typeof s === "function" ? s(prev.pendingImages) : s,
+    })),
 
-  const setRunning = useCallback((s: string, on: boolean) => {
-    setRunningSids((prev) => {
-      const next = { ...prev };
-      if (on) next[s] = true;
-      else delete next[s];
-      return next;
-    });
-  }, []);
+  // --- messages / context usage ---
+  messages: [],
+  setMessages: (fn) =>
+    set((prev) => ({
+      messages: typeof fn === "function" ? fn(prev.messages) : fn,
+    })),
+  ctxUsed: 0,
+  setCtxUsed: (n) => set({ ctxUsed: n }),
+  ctxMax: 32000,
+  setCtxMax: (n) => set({ ctxMax: n }),
+  pendingPrompt: "",
 
-  const loadConfig = useCallback(async () => {
+  // --- derived / async actions ---
+  setPending: (v) => set({ pendingPrompt: v }),
+
+  loadConfig: async () => {
     try {
       const data = await getConfig();
-      setCfg(data.current);
-      setPresets(data.presets);
-      setApprovalModes(data.approval_modes);
-      setMcpServers(data.mcp?.servers || []);
-      setDirs(data.dirs || {});
+      set({
+        cfg: data.current,
+        presets: data.presets,
+        approvalModes: data.approval_modes,
+        mcpServers: data.mcp?.servers || [],
+        dirs: data.dirs || {},
+      });
       return true;
     } catch {
       return false;
     }
-  }, []);
+  },
 
-  const refreshSessions = useCallback(async (q?: string) => {
+  refreshSessions: async (q) => {
     try {
       const rows = await listSessions(q);
-      setSessions(rows);
+      set({ sessions: rows });
     } catch {
       /* ignore */
     }
-  }, []);
+  },
 
-  const startStream = useCallback(
-    (
-      targetSid: string,
-      prompt: string,
-      images: { data: string; mime: string }[]
-    ) => {
-      streamCtrlRef.current?.abort();
-      const ctrl = streamChat(targetSid, prompt, images, {
-        onEvent: (ev: any) => {
-          if (ev.type === "text" || ev.type === "reasoning") {
-            const delta = ev.type === "reasoning" ? `\n[thinking] ${ev.delta || ""}\n` : ev.delta || "";
-            setMessages((prev) => {
-              const next = [...prev];
-              const last = next[next.length - 1];
-              if (last && last.isStreaming) {
-                last.raw = (last.raw || "") + delta;
-                last.content = mdToHtml(last.raw || "");
-              }
-              return next;
-            });
-          } else if (ev.type === "error") {
-            setMessages((prev) => [
-              ...prev,
-              {
-                role: "error",
-                content: ev.message || "出错了",
-                raw: ev.message || "",
-              },
-            ]);
-          } else if (ev.type === "usage" && ev.estimated) {
-            setCtxUsed(ev.estimated);
-          } else if (ev.type === "done") {
-            setMessages((prev) => {
-              const next = [...prev];
-              const last = next[next.length - 1];
-              if (last && last.isStreaming) {
-                last.isStreaming = false;
-                last.id = ev.assistant_msg_id || last.id;
-              }
-              if (ev.reason === "max_turns") {
-                next.push({
-                  role: "error",
-                  content: "已达到最大轮次，请分步提问。",
-                  raw: "",
-                });
-              }
-              return next;
-            });
-          } else if (ev.type === "approval") {
-            setApproval({
-              request_id: ev.request_id,
-              tool: ev.tool,
-              summary: ev.summary,
-              reason: ev.reason,
-              diff: ev.diff,
-            });
-          }
-        },
-        onError: (err: Error) => {
-          setMessages((prev) => [
-            ...prev,
-            {
-              role: "error",
-              content: `连接中断：${err.message}`,
-              raw: "",
-            },
-          ]);
-        },
-        onDone: async () => {
-          setRunning(targetSid, false);
-          await refreshSessions();
-          try {
-            const ctx = await getSessionContext(targetSid);
-            setCtxUsed(ctx.used);
-            setCtxMax(ctx.max);
-          } catch {
-            /* ignore */
-          }
-        },
-      });
-      streamCtrlRef.current = ctrl;
-    },
-    [refreshSessions, setRunning]
-  );
-
-  const openSession = useCallback(
-    async (targetSid: string) => {
-      setSidState(targetSid);
-      setMessages([]);
-      setCtxUsed(0);
-      setCtxMax(32000);
-      try {
-        const data = await getSession(targetSid);
-        const msgs: ChatMsg[] = data.messages.map((m) => {
-          if (m.role === "user") {
-            const c = m.content;
-            const text = Array.isArray(c)
-              ? (c as any[])
-                  .filter((p) => p.type === "text")
-                  .map((p) => p.text)
-                  .join("\n")
-              : (c as string);
-            const imgCount = Array.isArray(c)
-              ? (c as any[]).filter((p) => p.type === "image_url").length
-              : 0;
-            return {
-              role: "user" as const,
-              content: text,
-              id: m.id,
-              raw: text,
-              meta: imgCount ? { images: imgCount } : undefined,
-            };
-          }
+  openSession: async (targetSid) => {
+    const { toast } = get();
+    set({ sid: targetSid, messages: [], ctxUsed: 0, ctxMax: 32000 });
+    try {
+      const data = await getSession(targetSid);
+      const msgs: ChatMsg[] = data.messages.map((m) => {
+        if (m.role === "user") {
+          const c = m.content;
+          const text = Array.isArray(c)
+            ? (c as unknown[])
+                .filter((p) => (p as Record<string, string>).type === "text")
+                .map((p) => (p as Record<string, string>).text)
+                .join("\n")
+            : (c as string);
+          const imgCount = Array.isArray(c)
+            ? (c as unknown[]).filter(
+                (p) => (p as Record<string, string>).type === "image_url"
+              ).length
+            : 0;
           return {
-            role: "assistant" as const,
-            content: mdToHtml((m.content as string) || ""),
+            role: "user" as const,
+            content: text,
             id: m.id,
-            raw: (m.content as string) || "",
+            raw: text,
+            meta: imgCount ? { images: imgCount } : undefined,
           };
-        });
-        setMessages(msgs);
-        try {
-          const ctx = await getSessionContext(targetSid);
-          setCtxUsed(ctx.used);
-          setCtxMax(ctx.max);
-        } catch {
-          /* ignore */
         }
+        return {
+          role: "assistant" as const,
+          content: mdToHtml((m.content as string) || ""),
+          id: m.id,
+          raw: (m.content as string) || "",
+        };
+      });
+      set({ messages: msgs });
+      try {
+        const ctx = await getSessionContext(targetSid);
+        set({ ctxUsed: ctx.used, ctxMax: ctx.max });
       } catch {
-        toast("加载会话失败");
+        /* ignore */
       }
-    },
-    [toast]
-  );
+    } catch {
+      toast("加载会话失败");
+    }
+  },
 
-  const sendCurrentSession = useCallback(
-    (prompt: string) => {
-      const targetSid = sidRef.current;
-      if (!targetSid) {
-        toast("请先新建或选择一个会话");
-        return;
-      }
-      if (runningSidsRef.current[targetSid]) return;
+  sendCurrentSession: (prompt) => {
+    const { sid, runningSids, pendingImages, setRunning, toast } = get();
+    const targetSid = sid;
+    if (!targetSid) {
+      toast("请先新建或选择一个会话");
+      return;
+    }
+    if (runningSids[targetSid]) return;
 
-      const finalPrompt = prompt || "（图片）请分析这张图片。";
-      setRunning(targetSid, true);
-      setPendingPrompt("");
+    const finalPrompt = prompt || "（图片）请分析这张图片。";
+    setRunning(targetSid, true);
+    set({ pendingPrompt: "" });
 
-      const userMsg: ChatMsg = {
-        role: "user",
-        content: finalPrompt,
-        raw: finalPrompt,
-      };
-      setMessages((prev) => [...prev, userMsg, {
-        role: "assistant",
-        content: "",
-        raw: "",
-        id: `stream-${Date.now()}`,
-        isStreaming: true,
-      }]);
+    set((prev) => ({
+      messages: [
+        ...prev.messages,
+        {
+          role: "user",
+          content: finalPrompt,
+          raw: finalPrompt,
+        },
+        {
+          role: "assistant",
+          content: "",
+          raw: "",
+          id: `stream-${Date.now()}`,
+          isStreaming: true,
+        },
+      ],
+    }));
 
-      const images = pendingImages.length
-        ? pendingImages.map((img) => ({ data: img.data, mime: img.mime }))
-        : [];
-      setPendingImages([]);
-      sendTargetRef.current = { sid: targetSid, prompt: finalPrompt, images };
-      startStream(targetSid, finalPrompt, images);
-    },
-    [pendingImages, setPendingImages, setRunning, startStream, toast]
-  );
+    const images = pendingImages.length
+      ? pendingImages.map((img) => ({ data: img.data, mime: img.mime }))
+      : [];
+    set({ pendingImages: [] });
+    sendTarget = { sid: targetSid, prompt: finalPrompt, images };
+    get()._startStream(targetSid, finalPrompt, images);
+  },
 
-  const newSession = useCallback(async () => {
-    const currentCfg = cfgRef.current;
+  cancelCurrentSession: () => {
+    streamCtrl?.abort();
+    const { sid, setRunning } = get();
+    if (sid) setRunning(sid, false);
+  },
+
+  clearCurrentSession: async () => {
+    const { sid, toast, refreshSessions } = get();
+    if (!sid) {
+      toast("请先选择或新建一个会话");
+      return;
+    }
+    try {
+      await clearSession(sid);
+      set({ messages: [], ctxUsed: 0, ctxMax: 32000, pendingPrompt: "" });
+      toast("已清空当前会话");
+      await refreshSessions();
+    } catch {
+      toast("清空会话失败");
+    }
+  },
+
+  respondApproval: async (action) => {
+    const { approval, toast } = get();
+    if (!approval) return;
+    set({ approval: null });
+    try {
+      await answerApproval({
+        request_id: approval.request_id,
+        action,
+        tool: approval.tool,
+      });
+    } catch {
+      toast("审批提交失败");
+    }
+  },
+
+  newSession: async () => {
+    const { cfg, refreshSessions, openSession, sendCurrentSession, toast, pendingPrompt } = get();
+    const currentCfg = cfg;
     if (!currentCfg) {
       toast("配置尚未加载，稍后再试");
       return;
@@ -420,132 +392,138 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       const meta = await createSession(currentCfg.workdir, currentCfg.model);
       await refreshSessions();
       await openSession(meta.id);
-      if (pendingPromptRef.current) {
-        sendCurrentSession(pendingPromptRef.current);
+      if (pendingPrompt) {
+        sendCurrentSession(pendingPrompt);
       }
-    } catch (e: any) {
-      toast(e.message || "创建会话失败");
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "创建会话失败";
+      toast(msg);
     }
-  }, [openSession, refreshSessions, sendCurrentSession, toast]);
+  },
 
-  const requestSend = useCallback(
-    (prompt: string) => {
-      if (sidRef.current) {
-        setPendingPrompt(prompt);
-        sendCurrentSession(prompt);
-      } else {
-        setPendingPrompt(prompt);
-        newSession();
-      }
-    },
-    [newSession, sendCurrentSession]
-  );
-
-  const cancelCurrentSession = useCallback(() => {
-    streamCtrlRef.current?.abort();
-    const targetSid = sidRef.current;
-    if (targetSid) setRunning(targetSid, false);
-  }, [setRunning]);
-
-  const clearCurrentSession = useCallback(async () => {
-    const targetSid = sidRef.current;
-    if (!targetSid) {
-      toast("请先选择或新建一个会话");
-      return;
+  requestSend: (prompt) => {
+    const { sid, sendCurrentSession, newSession, setPending } = get();
+    if (sid) {
+      setPending(prompt);
+      sendCurrentSession(prompt);
+    } else {
+      setPending(prompt);
+      newSession();
     }
-    try {
-      await clearSession(targetSid);
-      setMessages([]);
-      setCtxUsed(0);
-      setCtxMax(32000);
-      setPendingPrompt("");
-      toast("已清空当前会话");
-      await refreshSessions();
-    } catch {
-      toast("清空会话失败");
-    }
-  }, [refreshSessions, toast]);
+  },
 
-  const respondApproval = useCallback(
-    async (action: "allow" | "deny" | "always") => {
-      const current = approval;
-      if (!current) return;
-      setApproval(null);
-      try {
-        await answerApproval({
-          request_id: current.request_id,
-          action,
-          tool: current.tool,
-        });
-      } catch {
-        toast("审批提交失败");
-      }
-    },
-    [approval, toast]
-  );
-
-  useEffect(() => {
-    loadConfig().then((ok) => {
-      if (!ok) return;
-      refreshSessions();
+  // --- internal helpers (not part of public AppState) ---
+  _startStream: (
+    targetSid: string,
+    prompt: string,
+    images: { data: string; mime: string }[]
+  ) => {
+    const { refreshSessions, setRunning, setMessages, setCtxUsed, setCtxMax, toast, setApproval } =
+      get();
+    streamCtrl?.abort();
+    const ctrl = streamChat(targetSid, prompt, images, {
+      onEvent: (ev: any) => {
+        if (ev.type === "text" || ev.type === "reasoning") {
+          const delta =
+            ev.type === "reasoning"
+              ? `\n[thinking] ${ev.delta || ""}\n`
+              : ev.delta || "";
+          setMessages((prev) => {
+            const next = [...prev];
+            const last = next[next.length - 1];
+            if (last && last.isStreaming) {
+              next[next.length - 1] = {
+                ...last,
+                raw: (last.raw || "") + delta,
+                content: mdToHtml((last.raw || "") + delta),
+              };
+            }
+            return next;
+          });
+        } else if (ev.type === "error") {
+          setMessages((prev) => [
+            ...prev,
+            {
+              role: "error",
+              content: ev.message || "出错了",
+              raw: ev.message || "",
+            },
+          ]);
+        } else if (ev.type === "usage" && ev.estimated) {
+          setCtxUsed(ev.estimated);
+        } else if (ev.type === "done") {
+          setMessages((prev) => {
+            const next = [...prev];
+            const last = next[next.length - 1];
+            if (last && last.isStreaming) {
+              next[next.length - 1] = {
+                ...last,
+                isStreaming: false,
+                id: ev.assistant_msg_id || last.id,
+              };
+            }
+            if (ev.reason === "max_turns") {
+              next.push({
+                role: "error",
+                content: "已达到最大轮次，请分步提问。",
+                raw: "",
+              });
+            }
+            return next;
+          });
+        } else if (ev.type === "approval") {
+          setApproval({
+            request_id: ev.request_id,
+            tool: ev.tool,
+            summary: ev.summary,
+            reason: ev.reason,
+            diff: ev.diff,
+          });
+        }
+      },
+      onError: (err: Error) => {
+        setMessages((prev) => [
+          ...prev,
+          {
+            role: "error",
+            content: `连接中断：${err.message}`,
+            raw: "",
+          },
+        ]);
+      },
+      onDone: async () => {
+        setRunning(targetSid, false);
+        await refreshSessions();
+        try {
+          const ctx = await getSessionContext(targetSid);
+          setCtxUsed(ctx.used);
+          setCtxMax(ctx.max);
+        } catch {
+          /* ignore */
+        }
+      },
     });
-    document.documentElement.dataset.theme = theme;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    streamCtrl = ctrl;
+  },
+}));
 
-  useEffect(() => {
-    const handler = () => {
-      window.dispatchEvent(new CustomEvent("spark:show-token-modal"));
-    };
-    window.addEventListener("spark:auth-required", handler);
-    return () =>
-      window.removeEventListener("spark:auth-required", handler);
-  }, []);
+// ---------------------------------------------------------------------------
+// Bootstrap effect (runs once on module load)
+// ---------------------------------------------------------------------------
+if (typeof window !== "undefined") {
+  const store = useApp.getState();
+  // Apply initial theme to document
+  document.documentElement.dataset.theme = store.theme;
 
-  const setPending = useCallback((v: string) => setPendingPrompt(v), []);
+  // Initial data load
+  store.loadConfig().then((ok) => {
+    if (!ok) return;
+    store.refreshSessions();
+  });
 
-  const value: AppState = {
-    token,
-    setToken,
-    cfg,
-    setCfg,
-    presets,
-    approvalModes,
-    mcpServers,
-    setMcpServers,
-    usage,
-    setUsage,
-    dirs,
-    sessions,
-    setSessions,
-    sid,
-    setSid,
-    runningSids,
-    setRunning,
-    approval,
-    setApproval,
-    theme,
-    setTheme,
-    toasts,
-    toast,
-    dismissToast,
-    pendingImages,
-    setPendingImages,
-    messages,
-    ctxUsed,
-    ctxMax,
-    pendingPrompt,
-    setPending,
-    requestSend,
-    loadConfig,
-    refreshSessions,
-    newSession,
-    openSession,
-    sendCurrentSession,
-    cancelCurrentSession,
-    clearCurrentSession,
-    respondApproval,
+  // Auth-required event listener
+  const authHandler = () => {
+    window.dispatchEvent(new CustomEvent("spark:show-token-modal"));
   };
-
-  return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
+  window.addEventListener("spark:auth-required", authHandler);
 }

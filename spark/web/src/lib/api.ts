@@ -7,7 +7,7 @@ import type {
   MemoryItem,
   PluginItem,
   GitStatus,
-} from "./types";
+} from "../types";
 
 const TOKEN_KEY = "spark_token";
 

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { AppProvider, useApp } from "./state";
+import { useApp } from "./state";
 import { Sidebar } from "./components/Sidebar";
 import { WelcomeView } from "./components/WelcomeView";
 import { MessageList } from "./components/MessageList";
@@ -449,11 +449,9 @@ export function App() {
   }, []);
 
   return (
-    <AppProvider>
-      <div className="h-screen w-screen overflow-hidden">
-        <Shell />
-        <Toasts />
-      </div>
-    </AppProvider>
+    <div className="h-screen w-screen overflow-hidden">
+      <Shell />
+      <Toasts />
+    </div>
   );
 }

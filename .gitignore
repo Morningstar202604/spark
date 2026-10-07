@@ -12,3 +12,5 @@ build/
 node_modules/
 .temp/
 .coverage
+trim_src.txt
+*.tmp.json

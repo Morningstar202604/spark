@@ -1,11 +1,67 @@
+/**
+ * UI primitives — shadcn/ui backed.
+ *
+ * Public API preserved for downstream consumers:
+ *   cn, Section, EmptyState, Button, Input, Textarea, Select, Badge, Modal, Drawer
+ *
+ * shadcn component files live in ./ui/* and use the same clsx+tailwind-merge `cn`
+ * utility defined in ../lib/utils.
+ */
 import { useId, type ReactNode } from "react";
-import { clsx, type ClassValue } from "clsx";
-import { twMerge } from "tailwind-merge";
+import { Button as ShadcnButton } from "./ui/button";
+import { Badge as ShadcnBadge } from "./ui/badge";
+import { Card } from "./ui/card";
+import { Input as ShadcnInput } from "./ui/input";
+import { Textarea as ShadcnTextarea } from "./ui/textarea";
+import {
+  Select as ShadcnSelect,
+  SelectGroup,
+  SelectValue,
+  SelectTrigger,
+  SelectContent,
+  SelectLabel,
+  SelectItem,
+  SelectSeparator,
+  SelectScrollUpButton,
+  SelectScrollDownButton,
+} from "./ui/select";
+import {
+  Modal as ShadcnModal,
+  ModalPortal,
+  ModalOverlay,
+  ModalClose,
+  ModalTrigger,
+  ModalContent,
+  ModalHeader,
+  ModalFooter,
+  ModalTitle,
+  ModalDescription,
+} from "./ui/modal";
+import {
+  Drawer as ShadcnDrawer,
+  DrawerPortal,
+  DrawerOverlay,
+  DrawerTrigger,
+  DrawerClose,
+  DrawerContent,
+  DrawerHeader,
+  DrawerFooter,
+  DrawerTitle,
+  DrawerDescription,
+} from "./ui/drawer";
+import { cn } from "../lib/utils";
 
-export function cn(...inputs: ClassValue[]) {
-  return twMerge(clsx(inputs));
-}
+// Re-export cn (defined in lib/utils as clsx+tailwind-merge)
+export { cn };
 
+// ---------------------------------------------------------------------------
+// Card re-export (shadcn Card component)
+// ---------------------------------------------------------------------------
+export { Card, CardHeader, CardFooter, CardTitle, CardDescription, CardContent } from "./ui/card";
+
+// ---------------------------------------------------------------------------
+// Section — card wrapper with optional header
+// ---------------------------------------------------------------------------
 export function Section({
   title,
   description,
@@ -19,29 +75,28 @@ export function Section({
 }) {
   const id = useId();
   return (
-    <section
+    <Card
       id={id}
-      className={cn(
-        "rounded-2xl border bg-card p-4 shadow-sm",
-        className
-      )}
-      style={{ borderColor: "var(--border)" }}
+      className={cn("rounded-2xl p-4", className)}
     >
       {(title || description) && (
-        <header className="mb-4 space-y-1">
+        <div className="mb-4 space-y-1">
           {title && <h2 className="text-sm font-semibold">{title}</h2>}
           {description && (
-            <p className="text-xs" style={{ color: "var(--ink-muted)" }}>
+            <p className="text-xs text-ink-muted">
               {description}
             </p>
           )}
-        </header>
+        </div>
       )}
       {children}
-    </section>
+    </Card>
   );
 }
 
+// ---------------------------------------------------------------------------
+// EmptyState — dashed placeholder panel
+// ---------------------------------------------------------------------------
 export function EmptyState({
   title,
   description,
@@ -53,19 +108,16 @@ export function EmptyState({
   children?: ReactNode;
   className?: string;
 }) {
-  const id = useId();
   return (
     <div
-      id={`empty-${id}`}
       className={cn(
-        "flex h-full min-h-[280px] flex-col items-center justify-center rounded-2xl border border-dashed p-8 text-center",
+        "flex h-full min-h-[280px] flex-col items-center justify-center rounded-2xl border border-dashed border-border bg-surface p-8 text-center",
         className
       )}
-      style={{ borderColor: "var(--border)", background: "var(--surface)" }}
     >
       <div className="text-lg font-semibold">{title}</div>
       {description && (
-        <p className="mt-2 max-w-md text-sm" style={{ color: "var(--ink-muted)" }}>
+        <p className="mt-2 max-w-md text-sm text-ink-muted">
           {description}
         </p>
       )}
@@ -78,127 +130,124 @@ export function EmptyState({
   );
 }
 
+// ---------------------------------------------------------------------------
+// Button — thin wrapper around shadcn Button that maps legacy variant names.
+//
+// Legacy variants:  "default" | "primary" | "ghost" | "danger" | "outline"
+// shadcn variants:  "default" | "secondary" | "ghost" | "destructive" | "outline"
+//
+// Mapping:
+//   "default" (legacy gray)  -> "secondary"
+//   "primary" (legacy accent) -> "default" (shadcn uses accent bg for default)
+//   "ghost"                  -> "ghost"
+//   "danger"                 -> "destructive"
+//   "outline"                -> "outline"
+// ---------------------------------------------------------------------------
+type LegacyButtonVariant = "default" | "primary" | "ghost" | "danger" | "outline";
+
+const variantMap: Record<LegacyButtonVariant, "secondary" | "default" | "ghost" | "destructive" | "outline"> = {
+  default: "secondary",
+  primary: "default",
+  ghost: "ghost",
+  danger: "destructive",
+  outline: "outline",
+};
+
+const sizeMap: Record<string, "default" | "sm" | "lg" | "icon"> = {
+  md: "default",
+  sm: "sm",
+  lg: "lg",
+  icon: "icon",
+};
+
 export function Button({
   variant = "default",
   size = "md",
   className,
   ...props
 }: React.ButtonHTMLAttributes<HTMLButtonElement> & {
-  variant?: "default" | "primary" | "ghost" | "danger" | "outline";
+  variant?: LegacyButtonVariant;
   size?: "sm" | "md" | "lg" | "icon";
 }) {
-  const base =
-    "inline-flex items-center justify-center font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 disabled:opacity-50 disabled:pointer-events-none";
-
-  const sizes: Record<string, string> = {
-    sm: "h-7 px-2.5 text-xs rounded-md",
-    md: "h-9 px-4 text-sm rounded-lg",
-    lg: "h-10 px-5 text-sm rounded-lg",
-    icon: "h-9 w-9 rounded-lg",
-  };
-
-  const variants: Record<string, React.CSSProperties> = {
-    default: {
-      background: "var(--surface-2)",
-      border: "1px solid var(--border)",
-      color: "var(--ink)",
-    },
-    primary: {
-      background: "var(--accent)",
-      color: "var(--on-accent, #fff)",
-      border: "1px solid var(--accent)",
-    },
-    ghost: {
-      background: "transparent",
-      border: "1px solid var(--border)",
-      color: "var(--ink-muted)",
-    },
-    danger: {
-      background: "transparent",
-      border: "1px solid rgba(214, 69, 69, 0.35)",
-      color: "var(--red, #d64545)",
-    },
-    outline: {
-      background: "var(--surface)",
-      border: "1px solid var(--border)",
-      color: "var(--ink)",
-    },
-  };
+  const shadcnVariant = variantMap[variant] ?? "default";
+  const shadcnSize = sizeMap[size] ?? "default";
 
   return (
-    <button
-      className={cn(base, sizes[size], className)}
-      style={variants[variant]}
+    <ShadcnButton
+      variant={shadcnVariant}
+      size={shadcnSize}
+      className={className}
       {...props}
     />
   );
 }
 
+// ---------------------------------------------------------------------------
+// Input — shadcn Input (forwardRef + standard HTML input props)
+// ---------------------------------------------------------------------------
 export function Input({
   className,
   ...props
 }: React.InputHTMLAttributes<HTMLInputElement>) {
-  return (
-    <input
-      className={cn(
-        "w-full rounded-lg border px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-1",
-        className
-      )}
-      style={{
-        border: "1px solid var(--border)",
-        background: "var(--surface)",
-        color: "var(--ink)",
-        ["--tw-ring-color" as string]: "var(--accent)",
-      }}
-      {...props}
-    />
-  );
+  return <ShadcnInput className={className} {...props} />;
 }
 
+// ---------------------------------------------------------------------------
+// Textarea — shadcn Textarea
+// ---------------------------------------------------------------------------
 export function Textarea({
   className,
   ...props
 }: React.TextareaHTMLAttributes<HTMLTextAreaElement>) {
-  return (
-    <textarea
-      className={cn(
-        "w-full rounded-lg border px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-1",
-        className
-      )}
-      style={{
-        border: "1px solid var(--border)",
-        background: "var(--surface)",
-        color: "var(--ink)",
-        ["--tw-ring-color" as string]: "var(--accent)",
-      }}
-      {...props}
-    />
-  );
+  return <ShadcnTextarea className={className} {...props} />;
 }
 
-export function Select({
-  className,
-  children,
-  ...props
-}: React.SelectHTMLAttributes<HTMLSelectElement>) {
-  return (
-    <select
-      className={cn(
-        "w-full rounded-lg border px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-1",
-        className
-      )}
-      style={{
-        border: "1px solid var(--border)",
-        background: "var(--surface)",
-        color: "var(--ink)",
-        ["--tw-ring-color" as string]: "var(--accent)",
-      }}
-      {...props}
-    >
-      {children}
-    </select>
-  );
-}
+// ---------------------------------------------------------------------------
+// Select — shadcn Radix UI Select (compound component API).
+//
+// Usage matches the shadcn Select convention:
+//   <Select value={val} onValueChange={setVal}>
+//     <SelectTrigger><SelectValue placeholder="Pick" /></SelectTrigger>
+//     <SelectContent>
+//       <SelectItem value="a">A</SelectItem>
+//     </SelectContent>
+//   </Select>
+// ---------------------------------------------------------------------------
+export const Select = ShadcnSelect;
+export {
+  SelectGroup,
+  SelectValue,
+  SelectTrigger,
+  SelectContent,
+  SelectLabel,
+  SelectItem,
+  SelectSeparator,
+  SelectScrollUpButton,
+  SelectScrollDownButton,
+};
+
+// ---------------------------------------------------------------------------
+// Badge — thin wrapper around shadcn Badge mapping legacy variant names.
+//
+// Legacy variants: "default" | "success" | "warning" | "danger" | "accent"
+// shadcn variants: "default" | "secondary" | "destructive" | "outline"
+//
+// Mapping:
+//   "default" (legacy gray)  -> "secondary"
+//   "success" (legacy green) -> custom green classes
+//   "warning" (legacy amber) -> custom amber classes
+//   "danger" (legacy red)    -> "destructive"
+//   "accent"                 -> "default" (accent bg)
+// ---------------------------------------------------------------------------
+type LegacyBadgeVariant = "default" | "success" | "warning" | "danger" | "accent";
+
+const badgeVariantClasses: Record<LegacyBadgeVariant, string> = {
+  default: "bg-surface-2 text-ink-muted border border-border",
+  success: "bg-emerald-100 text-emerald-700 border border-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-400 dark:border-emerald-800",
+  warning: "bg-amber-100 text-amber-700 border border-amber-200 dark:bg-amber-900/30 dark:text-amber-400 dark:border-amber-800",
+  danger: "bg-red-100 text-red-700 border border-red-200 dark:bg-red-900/30 dark:text-red-400 dark:border-red-800",
+  accent: "bg-accent/10 text-accent border border-accent/20",
+};
 
 export function Badge({
   children,
@@ -206,55 +255,21 @@ export function Badge({
   className,
 }: {
   children: ReactNode;
-  variant?: "default" | "success" | "warning" | "danger" | "accent";
+  variant?: LegacyBadgeVariant;
   className?: string;
 }) {
-  const colors: Record<string, { bg: string; color: string; border?: string }> = {
-    default: {
-      bg: "var(--surface-2)",
-      color: "var(--ink-muted)",
-      border: "1px solid var(--border)",
-    },
-    success: {
-      bg: "rgba(14, 157, 110, 0.1)",
-      color: "var(--green, #0e9d6e)",
-      border: "1px solid rgba(14, 157, 110, 0.3)",
-    },
-    warning: {
-      bg: "rgba(178, 106, 0, 0.1)",
-      color: "var(--amber, #b26a00)",
-      border: "1px solid rgba(178, 106, 0, 0.3)",
-    },
-    danger: {
-      bg: "rgba(214, 69, 69, 0.1)",
-      color: "var(--red, #d64545)",
-      border: "1px solid rgba(214, 69, 69, 0.3)",
-    },
-    accent: {
-      bg: "color-mix(in srgb, var(--accent) 10%, transparent)",
-      color: "var(--accent)",
-      border: "1px solid color-mix(in srgb, var(--accent) 40%, transparent)",
-    },
-  };
-
-  const c = colors[variant];
   return (
-    <span
-      className={cn(
-        "inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium",
-        className
-      )}
-      style={{
-        background: c.bg,
-        color: c.color,
-        border: c.border,
-      }}
+    <ShadcnBadge
+      className={cn(badgeVariantClasses[variant], className)}
     >
       {children}
-    </span>
+    </ShadcnBadge>
   );
 }
 
+// ---------------------------------------------------------------------------
+// Modal — shadcn Dialog-based, preserving legacy API { open, onClose, title, children }
+// ---------------------------------------------------------------------------
 export function Modal({
   open,
   onClose,
@@ -266,42 +281,26 @@ export function Modal({
   children: ReactNode;
   title?: string;
 }) {
-  if (!open) return null;
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center"
-      style={{ background: "color-mix(in srgb, #101828 42%, transparent)" }}
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose?.();
-      }}
-    >
-      <div
-        className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-2xl border p-6 shadow-2xl"
-        style={{
-          background: "var(--surface)",
-          borderColor: "var(--border)",
-        }}
-      >
-        {title && (
-          <div className="mb-4 flex items-center justify-between">
-            <h3 className="text-base font-semibold">{title}</h3>
-            {onClose && (
-              <button
-                onClick={onClose}
-                className="rounded-md p-1 text-sm hover:opacity-70"
-                style={{ color: "var(--ink-muted)" }}
-              >
-                ✕
-              </button>
-            )}
-          </div>
-        )}
+    <ShadcnModal open={open} onOpenChange={(o) => { if (!o) onClose?.(); }}>
+      <ModalContent className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-2xl">
+        <ModalHeader>
+          <ModalTitle>{title}</ModalTitle>
+          <ModalClose className="absolute right-4 top-4 rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none">
+            <span className="text-xs text-ink-muted">✕</span>
+            <span className="sr-only">Close</span>
+          </ModalClose>
+        </ModalHeader>
         {children}
-      </div>
-    </div>
+      </ModalContent>
+    </ShadcnModal>
   );
 }
 
+// ---------------------------------------------------------------------------
+// Drawer — shadcn Vaul-based (bottom drawer on mobile, also supports side drawers).
+// Legacy API: { open, onClose, title, children, side?, width? }
+// ---------------------------------------------------------------------------
 export function Drawer({
   open,
   onClose,
@@ -317,47 +316,22 @@ export function Drawer({
   side?: "left" | "right";
   width?: number;
 }) {
-  if (!open) return null;
   return (
-    <>
-      <div
-        className="fixed inset-0 z-40"
-        style={{ background: "color-mix(in srgb, #101828 42%, transparent)" }}
-        onClick={(e) => {
-          if (e.target === e.currentTarget) onClose?.();
-        }}
-      />
-      <div
-        className="fixed z-50 flex h-full flex-col shadow-2xl"
-        style={{
-          top: 0,
-          [side]: 0,
-          width,
-          maxWidth: "94vw",
-          background: "var(--surface)",
-          borderLeft: side === "right" ? "1px solid var(--border)" : undefined,
-          borderRight: side === "left" ? "1px solid var(--border)" : undefined,
-        }}
-      >
+    <ShadcnDrawer open={open} onOpenChange={(o) => { if (!o) onClose?.(); }}>
+      <DrawerContent className="fixed inset-x-0 bottom-0 z-50 mt-24 flex h-auto flex-col rounded-t-[10px] border border-border bg-card">
+        {/* Drag handle */}
+        <div className="mx-auto mt-4 h-2 w-[100px] rounded-full bg-ink-muted/30" />
         {title && (
-          <div
-            className="flex flex-none items-center justify-between border-b p-4"
-            style={{ borderColor: "var(--border)" }}
-          >
-            <h3 className="text-sm font-semibold">{title}</h3>
-            {onClose && (
-              <button
-                onClick={onClose}
-                className="rounded-md p-1 text-sm hover:opacity-70"
-                style={{ color: "var(--ink-muted)" }}
-              >
-                ✕
-              </button>
-            )}
-          </div>
+          <DrawerHeader>
+            <DrawerTitle>{title}</DrawerTitle>
+            <DrawerClose className="absolute right-4 top-4 rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none">
+              <span className="text-xs text-ink-muted">✕</span>
+              <span className="sr-only">Close</span>
+            </DrawerClose>
+          </DrawerHeader>
         )}
-        <div className="flex-1 overflow-y-auto p-4">{children}</div>
-      </div>
-    </>
+        <div className="flex-1 overflow-y-auto px-4">{children}</div>
+      </DrawerContent>
+    </ShadcnDrawer>
   );
 }

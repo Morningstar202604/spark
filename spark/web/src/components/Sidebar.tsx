@@ -43,7 +43,6 @@ export function Sidebar({
     () => window.innerWidth <= 700
   );
   const [searchQ, setSearchQ] = useState("");
-  const searchTimer = useRef<ReturnType<typeof setTimeout>>(0);
 
   useEffect(() => {
     const t = setTimeout(() => {

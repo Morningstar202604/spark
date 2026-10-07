@@ -10,6 +10,7 @@ dependencies = [
     "httpx>=0.27",
     "typer>=0.12",
     "tomlkit>=0.12",
+    "pydantic-settings>=2.0",
     "openai>=1.40",              # 官方 OpenAI SDK：流式解析 + tool_call 拼装 + 重试
     "tiktoken>=0.7",             # token 估算（精确）
     "trafilatura>=1.8",          # 网页正文提取（替代正则 <! 清洗）
@@ -23,12 +24,15 @@ dependencies = [
     "tree-sitter-cpp>=0.23",    # C / C++ / ObjC 共享
     "ptyprocess>=0.7; sys_platform != 'win32'",
     "pywinpty>=2.0; sys_platform == 'win32'",
+    "langgraph>=1.0",           # StateGraph 编排引擎（AgentLoop 内部节点图）
+    "semantic-router>=0.1.0",   # 嵌入向量语义路由（快/强模型智能选择）；未安装时退回关键词匹配
 ]
 
 [project.optional-dependencies]
 extras = ["mcp>=1.0,<2", "textual>=0.60"]
 office = ["python-docx>=1.1", "openpyxl>=3.1", "pypdf>=4.0"]  # 办公文档工具（docx/xlsx/pdf）
-dev = ["pytest>=8", "pytest-asyncio>=0.23", "pytest-cov>=5", "mypy>=1.10", "bandit>=1.7", "mcp>=1.0,<2", "textual>=0.60", "ruff>=0.8"]
+memory = ["jieba>=0.42", "mem0ai>=2.0", "chromadb>=0.5"]  # 中文分词 + mem0 向量记忆后端
+dev = ["pytest>=8", "pytest-asyncio>=0.23", "pytest-cov>=5", "mypy>=1.10", "bandit>=1.7", "mcp>=1.0,<2", "textual>=0.60", "ruff>=0.8", "jieba>=0.42"]
 
 [project.scripts]
 spark = "spark.cli:main"

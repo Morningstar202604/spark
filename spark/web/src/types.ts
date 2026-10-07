@@ -68,6 +68,15 @@ export interface Msg {
   id?: string;
 }
 
+export interface ChatMsg {
+  role: "user" | "assistant" | "error";
+  content: string;
+  raw?: string;
+  id?: string;
+  isStreaming?: boolean;
+  meta?: { images?: number };
+}
+
 export interface UsageResponse {
   totals: {
     total_tokens?: number;
@@ -85,6 +94,8 @@ export interface GitCheckpoint {
   hash?: string;
   time?: string;
   message?: string;
+  short_sha?: string;
+  subject?: string;
 }
 
 export interface GitStatus {
@@ -99,6 +110,7 @@ export interface MemoryItem {
   id: string;
   key: string;
   value: string;
+  level?: string;
   created_at?: string;
 }
 

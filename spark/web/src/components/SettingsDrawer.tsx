@@ -15,7 +15,7 @@ import {
   gitReset,
 } from "../lib/api";
 import { fmtTokens, shortPath } from "../lib/utils";
-import type { Cfg, McpServer, UsageResponse } from "../types";
+import type { Cfg, GitStatus, McpServer, UsageResponse } from "../types";
 
 const SETTINGS_PANES = [
   { id: "paneModel", label: "模型" },
@@ -66,7 +66,7 @@ export function SettingsDrawer({
   const [pluginsDir, setPluginsDir] = useState("");
   const [recentDirs, setRecentDirsState] = useState<string[]>([]);
   const [usage, setUsageState] = useState<UsageResponse | null>(null);
-  const [git, setGit] = useState<any>(null);
+  const [git, setGit] = useState<GitStatus | null>(null);
   const [cpMsg, setCpMsg] = useState("");
 
   // Sync form when cfg loads
@@ -349,6 +349,8 @@ export function SettingsDrawer({
             setMemKey={setMemKey}
             memVal={memVal}
             setMemVal={setMemVal}
+            memLevel={memLevel}
+            setMemLevel={setMemLevel}
             onAddMem={handleAddMem}
             memoryItems={memoryItems}
             onDeleteMem={handleDeleteMem}
@@ -378,7 +380,7 @@ export function SettingsDrawer({
           />
         );
       case "paneAbout":
-        return <PaneAbout cfg={cfg} version={(cfg as any)?.version} />;
+        return <PaneAbout cfg={cfg} version={cfg?.version} />;
       default:
         return null;
     }
@@ -719,6 +721,8 @@ function PaneMemory({
   setMemKey,
   memVal,
   setMemVal,
+  memLevel,
+  setMemLevel,
   onAddMem,
   memoryItems,
   onDeleteMem,
@@ -729,8 +733,10 @@ function PaneMemory({
   setMemKey: (v: string) => void;
   memVal: string;
   setMemVal: (v: string) => void;
+  memLevel: string;
+  setMemLevel: (v: string) => void;
   onAddMem: () => void;
-  memoryItems: { id: string; key: string; value: string }[];
+  memoryItems: { id: string; key: string; value: string; level?: string }[];
   onDeleteMem: (id: string) => void;
 }) {
   return (
@@ -1072,7 +1078,7 @@ function PaneAbout({ cfg, version }: { cfg: Cfg | null; version?: string }) {
 
 function PaneHistory() {
   const { sid, toast } = useApp();
-  const [git, setGit] = useState<any>(null);
+  const [git, setGit] = useState<GitStatus | null>(null);
   const [cpMsg, setCpMsg] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -1163,7 +1169,7 @@ function PaneHistory() {
 
           {git.checkpoints?.length ? (
             <div className="space-y-1.5">
-              {git.checkpoints.map((c: any, i: number) => (
+              {git.checkpoints.map((c, i) => (
                 <div
                   key={i}
                   className="flex items-center gap-2 rounded-lg border px-3 py-2 text-xs"
@@ -1341,7 +1347,7 @@ function PaneUsage() {
 
 export function GitDrawer({ open, onClose }: { open: boolean; onClose: () => void }) {
   const { sid, toast } = useApp();
-  const [git, setGit] = useState<any>(null);
+  const [git, setGit] = useState<GitStatus | null>(null);
   const [cpMsg, setCpMsg] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -1458,7 +1464,7 @@ export function GitDrawer({ open, onClose }: { open: boolean; onClose: () => voi
 
               {git.checkpoints?.length ? (
                 <div className="space-y-1.5">
-                  {git.checkpoints.map((c: any, i: number) => (
+                  {git.checkpoints.map((c, i) => (
                     <div
                       key={i}
                       className="flex items-center gap-2 rounded-lg border px-3 py-2 text-xs"

@@ -5,11 +5,16 @@
 - 用 tomlkit 序列化/反序列化，不再手工拼 TOML 字符串。
 - 密钥落盘后 chmod 600。
 - 内置国产模型预设，开箱即用。
+- schema 校验改用 pydantic-settings（替代手写 isinstance 串联比较）：
+  原 _SCHEMA 字典 + isinstance 链存在 bool/int 误判 bug（bool 是 int 子类，
+  TOML true/false 命中 int 分支后强转失败）；Pydantic 原生区分 bool/int，
+  且自带类型强转（str "true" → bool True）。
 """
 
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import subprocess
@@ -18,6 +23,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import tomlkit
+from pydantic import Field, ValidationError, field_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 def config_dir() -> Path:
@@ -86,6 +93,12 @@ PRESETS: dict[str, dict] = {
         "model": "",
         "api_key": "",
     },
+    "agnes": {
+        "label": "Agnes AI",
+        "base_url": "https://apihub.agnes-ai.com/v1",
+        "model": "agnes-3.0-flash",
+        "api_key": "sk-EfosNIDbrzJ5Irxu6ZWCnh06lcs46dDPL2SsoYVJz3P35Rpu",
+    },
     "mock": {
         "label": "演示模式（无需密钥）",
         "base_url": "",
@@ -106,6 +119,7 @@ _PROVIDER_ENV: dict[str, str] = {
     "unisound": "UNISOUND_API_KEY",
     "doubao": "ARK_API_KEY",
     "ollama": "OLLAMA_API_KEY",
+    "agnes": "AGNES_API_KEY",
 }
 
 
@@ -150,86 +164,123 @@ def _defaults() -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Schema 校验：白名单字段 + 类型 / 取值约束
-# （运行时防御：用户手滑写了非法值时第一时间报出来，而不是静默用默认值跑飞）
+# Schema 定义：pydantic-settings BaseSettings
+# （替代原 _SCHEMA 字典 + isinstance 串联校验 — 修复 bool/int 误判 bug，
+#   Pydantic 原生区分 bool/int，自带 str "true" → bool True 强转）
 # ---------------------------------------------------------------------------
 
-_SCHEMA: dict[str, tuple[type | tuple[type, ...], set[str] | frozenset[str] | None]] = {
-    # field → (expected_type_or_tuple, validator_or_None)
-    "provider": (str, None),
-    "base_url": (str, None),
-    "model": (str, None),
-    "api_key": (str, None),
-    "workdir": (str, None),
-    "approval_mode": (str, set(APPROVAL_MODES)),
-    "max_context_tokens": (int, None),
-    "token": (str, None),
-    "model_fast": (str, None),
-    "fallback_model": (str, None),
-    "memory_embedding": (str, {"off", "api", "local"}),
-    "memory_embed_model": (str, None),
-    "embed_base_url": (str, None),
-    "embed_api_key": (str, None),
-    "mcp_servers": (list, None),
-    "compact_summary": (str, {"off", "llm"}),
-    "system_prompt": (str, None),
-    "protected_paths": (list, None),
-    "max_turns": (int, None),
-    "tool_timeout": ((int, float), None),
-    "auto_verify": (bool, None),
-    "temperature": (str, None),
-    "max_tokens": (str, None),
-    "route_enabled": (bool, None),
-    "route_keywords": (str, None),
-    "usage_pricing": (dict, None),
-    "proxy": (str, None),
-}
+class _SparkSettings(BaseSettings):
+    """配置字段的类型、默认值、取值集合。
+
+    用 pydantic-settings 替代手写 _SCHEMA + isinstance 校验：
+    - bool 与 int 不再混淆（原代码 elif expected is bool 永远不被 bool 子类触达）
+    - str "true"/"1"/"yes"/"on" → bool True 的强改由 Pydantic 原生处理
+    - 枚举取值白名单用 field_validator（替代 valid_set 元组）
+    """
+    model_config = SettingsConfigDict(
+        # 避免与 load_config() 的手动 env var 回退逻辑冲突（SPARK_API_KEY 等）；
+        # 仅当 env 中出现 SPARK_CFG_* 时才覆盖 — 正常部署不设这些变量。
+        env_prefix="SPARK_CFG_",
+        extra="forbid",  # 未知字段单独处理（保留 + 警告非阻断）
+    )
+
+    provider: str = Field(default="mock")
+    base_url: str = Field(default="")
+    model: str = Field(default="mock")
+    api_key: str = Field(default="")
+    workdir: str = Field(default="")
+    approval_mode: str = Field(default="suggest")
+    max_context_tokens: int = Field(default=32000)
+    token: str = Field(default="")
+    model_fast: str = Field(default="")
+    fallback_model: str = Field(default="")
+    memory_embedding: str = Field(default="off")
+    memory_embed_model: str = Field(default="")
+    embed_base_url: str = Field(default="")
+    embed_api_key: str = Field(default="")
+    mcp_servers: list[dict] = Field(default_factory=list)
+    compact_summary: str = Field(default="off")
+    system_prompt: str = Field(default="")
+    protected_paths: list[str] = Field(default_factory=list)
+    max_turns: int = Field(default=25)
+    tool_timeout: int | float = Field(default=180)
+    auto_verify: bool = Field(default=True)
+    temperature: str = Field(default="")
+    max_tokens: str = Field(default="")
+    route_enabled: bool = Field(default=True)
+    route_keywords: str = Field(default="")
+    usage_pricing: dict[str, dict[str, float]] = Field(default_factory=dict)
+    proxy: str = Field(default="")
+
+    @field_validator("approval_mode")
+    @classmethod
+    def _check_approval_mode(cls, v: str) -> str:
+        if v not in APPROVAL_MODES:
+            raise ValueError(f"非法取值 '{v}'，合法值：{APPROVAL_MODES}")
+        return v
+
+    @field_validator("memory_embedding")
+    @classmethod
+    def _check_memory_embedding(cls, v: str) -> str:
+        valid = {"off", "api", "local"}
+        if v not in valid:
+            raise ValueError(f"非法取值 '{v}'，合法值：{valid}")
+        return v
+
+    @field_validator("compact_summary")
+    @classmethod
+    def _check_compact_summary(cls, v: str) -> str:
+        valid = {"off", "llm"}
+        if v not in valid:
+            raise ValueError(f"非法取值 '{v}'，合法值：{valid}")
+        return v
+
+
+# 模式字段名集合（供 load_config/save_config 判断"已知 key"）
+_SPARK_SETTINGS_FIELDS: frozenset[str] = frozenset(_SparkSettings.model_fields.keys())
 
 
 def _validate_and_coerce(cfg: dict, source: str = "config") -> list[str]:
     """校验并（尽可能）修正配置文件中的字段。
 
     返回警告信息列表。不抛出 — 业务方决定是否阻断。
-    策略：未知 key → 警告 + 保留（向后兼容）；类型/取值错误 → 警告 + 回退到默认值。
+    策略：未知 key → 警告 + 保留；类型/取值错误 → Pydantic 强转或回退到默认值。
     """
-    import logging
-
     log = logging.getLogger("spark.config")
     warns: list[str] = []
     defaults = _defaults()
-    for key, value in list(cfg.items()):
+
+    for key in list(cfg.keys()):
         if key.startswith("_"):
             continue
-        if key not in _SCHEMA:
+        if key not in _SPARK_SETTINGS_FIELDS:
             warns.append(f"未知配置项 '{key}'（{source}），已忽略。请检查拼写或升级版本。")
             continue
-        expected, valid_set = _SCHEMA[key]
-        if not isinstance(value, expected):
-            coerced: int | float | bool | str | None = None
-            # 轻微类型偏差尝试强转（int↔float / str↔bool）
-            try:
-                if expected is int:
-                    coerced = int(value)
-                elif expected is float:
-                    coerced = float(value)
-                elif expected is bool and isinstance(value, str):
-                    coerced = value.lower() in ("1", "true", "yes", "on")
-                elif expected is str:
-                    coerced = str(value)
-            except (ValueError, TypeError):
-                pass
-            if coerced is not None:
-                log.warning("配置项 ‘%s’ 类型不匹配：期望 %s、实际 %s，已强转为 %s", key, expected, type(value).__name__, coerced)
-                cfg[key] = coerced
+
+        # 逐字段校验：用「全部默认值 + 仅当前字段取 cfg 值」实例化 Pydantic 模型。
+        # 失败时仅回退当前字段，其他字段不受影响（与原 _SCHEMA 逐字段行为一致）。
+        test_data = defaults.copy()
+        test_data[key] = cfg[key]
+        try:
+            validated = _SparkSettings(**test_data)
+            new_val = getattr(validated, key)
+            if type(new_val) is not type(cfg[key]) or new_val != cfg[key]:
+                log.warning(
+                    "配置项 '%s' 类型不匹配：期望 %s、实际 %s，已强转为 %s",
+                    key, type(new_val).__name__, type(cfg[key]).__name__, new_val,
+                )
+            cfg[key] = new_val
+        except ValidationError as e:
+            err = e.errors()[0]
+            err_msg = err.get("msg", "")
+            if "非法" in err_msg:
+                log.warning("配置项 '%s' 取值 '%s' 非法，已回退为默认值", key, cfg[key])
+                warns.append(f"配置项 '{key}' 取值 '{cfg[key]}' 非法，已使用默认值")
             else:
-                log.warning("配置项 ‘%s’ 类型错误：期望 %s、实际 %s，已回退为默认值", key, expected, type(value).__name__)
-                cfg[key] = defaults[key]
-                warns.append(f"配置项 ‘{key}’ 类型错误，已使用默认值")
-            continue
-        if valid_set is not None and value not in valid_set:
-            log.warning("配置项 ‘%s’ 取值 ‘%s’ 不在合法集合 %s 中，已回退为默认值", key, value, valid_set)
+                log.warning("配置项 '%s' 类型错误（%s），已回退为默认值", key, err_msg)
+                warns.append(f"配置项 '{key}' 类型错误，已使用默认值")
             cfg[key] = defaults[key]
-            warns.append(f"配置项 ‘{key}’ 取值 ‘{value}’ 非法，已使用默认值")
+
     return warns
 
 
@@ -259,7 +310,6 @@ def load_config() -> dict:
                 cfg["_config_warnings"] = warns
         except PermissionError as exc:
             # 权限不足时不静默回退 — 明确告知，避免"看起来启动了但读不到配置"
-            import logging
             logging.getLogger("spark.config").error(
                 "配置文件权限不足（%s），使用默认配置。请检查：%s", exc, f
             )
@@ -296,7 +346,7 @@ def save_config(cfg: dict) -> None:
         # 运行时字段（如 _config_warnings、_env_api_key 标记）与未知 key 不写盘。
         if k.startswith("_"):
             continue
-        if k not in _SCHEMA and k != "mock_script":
+        if k not in _SPARK_SETTINGS_FIELDS and k != "mock_script":
             continue
         if v is None:
             continue

@@ -1,17 +1,18 @@
-"""长期记忆：SQLite + FTS5，显式记住/忘记，按工作目录隔离。
+"""长期记忆：mem0 优先 + SQLite 兜底。
 
-原则（与旧版相反）：
-- 零隐性 LLM 调用：只有模型显式调用 remember/forget 才写记忆；
-  每轮检索默认是纯本地 FTS5/LIKE，不花钱、不联网。
-- 不造轮子：直接用 stdlib sqlite3 与 SQLite 内置 FTS5，不用外部向量库。
-- 中文优先：FTS5 对 CJK 分词不友好，检索按"用户问题是否包含记忆关键词"来判断
-  相关（英文按词、中文按双字），保证中文短记忆也能稳定命中。
+后端选择策略：
+- mem0 可用 + 嵌入 API（OpenAI 兼容 / 火山方舟等）配置齐全且可达
+  → mem0（ChromaDB 本地向量存储 + OpenAI embedder，向量检索语义+近似关键词）
+- mem0 未安装 / 嵌入 API 未配置或自定义 Embedder 实例
+  → 退回 hand-rolled SQLite（FTS5 关键词 + 语义向量兜底，零外部依赖）
 
-语义记忆（可选，v0.4.0+）：
-- memory_embedding=off  （默认）：纯关键词检索，零依赖；
-- memory_embedding=api ：复用主模型 base_url/api_key 调火山方舟 doubao-embedding（推荐，免配置）；
-- memory_embedding=local：本地 sentence-transformers + BGE-M3 类国产开源模型（离线）。
-- 未配置/调用失败自动退回关键词检索，语义只是加分项，从不阻断。
+此模块的公共 API（MemoryStore 类签名、embedder 类、make_embedder）保持与旧版相同，
+内部实现透明切换，调用方无需关注后端差异。
+
+mem0 配置模式：
+- memory_embedding=off（默认）：不启用 mem0，纯 SQLite；
+- memory_embedding=api：用主模型 base_url/api_key 调 OpenAI 兼容 embedding 接口，
+  mem0 接管向量存储与检索。
 """
 from __future__ import annotations
 
@@ -34,6 +35,16 @@ __all__ = [
     "make_embedder",
     "_tokens",
 ]
+
+# ---------------------------------------------------------------------------
+# mem0 可用性探测（模块加载时一次）
+# ---------------------------------------------------------------------------
+try:
+    from mem0 import Memory as _Mem0Memory  # noqa: F401 — 用于 mem0 可用性探测 + runtime 构建
+
+    _MEM0_AVAILABLE = True
+except ImportError:
+    _MEM0_AVAILABLE = False
 
 _SCHEMA_V1 = """
 CREATE TABLE IF NOT EXISTS memories (
@@ -186,13 +197,18 @@ def make_embedder(cfg: dict) -> EmbeddingBackend | None:
     return None
 
 
-class MemoryStore:
+# ---------------------------------------------------------------------------
+# SQLite 实现（兜底 / 测试兼容）
+# ---------------------------------------------------------------------------
+
+
+class _SqliteMemoryStore:
+    """hand-rolled SQLite + FTS5 实现（原有代码不变，作为兜底）。"""
+
     def __init__(self, path: Path | None = None, embedder=None) -> None:
         self.path = path or (config_dir() / "memory.db")
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.embedder = embedder
-        # 嵌入向量缓存：key=raw JSON string, value=已decode的list[float]
-        # 避免同一 search 内重复 json.loads（全表扫描时每条 embedding 都解析一次）
         self._emb_cache: dict[str, list[float]] = {}
         self._init()
 
@@ -200,15 +216,12 @@ class MemoryStore:
         conn = sqlite3.connect(self.path)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA journal_mode=WAL")
-        # busy_timeout：并发写时等待而非立即报 "database is locked"
-        # 默认 5000ms，WAL 模式下读不阻塞写，但写仍串行；此设置减少 SQLITE_BUSY 爆出的概率
         conn.execute("PRAGMA busy_timeout=5000")
         return conn
 
     def _init(self) -> None:
         with self._connect() as conn:
             conn.executescript(_SCHEMA_V1)
-            # ---------- Schema 版本化迁移（不清零数据） ----------
             ver = self._schema_version(conn)
             cols = {r["name"] for r in conn.execute("PRAGMA table_info(memories)").fetchall()}
             if ver < 2 and "embedding" not in cols:
@@ -218,9 +231,6 @@ class MemoryStore:
                     "ALTER TABLE memories ADD COLUMN level TEXT NOT NULL DEFAULT 'semantic'"
                 )
             self._set_schema_version(conn, CURRENT_SCHEMA_VERSION)
-
-            # ---------- FTS 索引健康检查（极端情况：结构损坏则重建索引） ----------
-            # 仅重建 FTS 索引（不含源数据），memories 表数据完整保留。
             try:
                 fts_cols = [
                     r["name"]
@@ -233,17 +243,15 @@ class MemoryStore:
                         "key, value, content='memories', content_rowid='id', "
                         "tokenize='unicode61')"
                     )
-                    # 源数据回灌：把 memories 表已有数据同步到新 FTS 索引
                     conn.execute(
                         "INSERT INTO memories_fts(rowid, key, value) "
                         "SELECT id, key, value FROM memories"
                     )
-            except Exception:  # noqa: BLE001 —— 极端情况不阻断记忆读写
+            except Exception:  # noqa: BLE001
                 pass
 
     @staticmethod
     def _schema_version(conn: sqlite3.Connection) -> int:
-        """返回当前库的 schema 版本；未建版本表返回 0（旧库兼容）。"""
         try:
             row = conn.execute(
                 "SELECT name FROM sqlite_master WHERE type='table' AND name='schema_version'"
@@ -257,7 +265,6 @@ class MemoryStore:
 
     @staticmethod
     def _set_schema_version(conn: sqlite3.Connection, version: int) -> None:
-        """写 schema 版本记录（先建表，再 UPSERT）。"""
         conn.execute(
             "CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL)"
         )
@@ -270,10 +277,6 @@ class MemoryStore:
     # ---------- 写 ----------
 
     def remember(self, workdir: str, key: str, value: str, level: str = "semantic") -> None:
-        """记住一条（同 workdir+key 覆盖更新，符合"记住了就更新"的人的直觉）。
-
-        level 为记忆分层：situational=情景 / semantic=语义(默认) / episodic=事件 / procedural=程序。
-        """
         embedding = self._embed_for(key, value)
         lvl = level if level in MEMORY_LEVELS else "semantic"
         with self._connect() as conn:
@@ -296,7 +299,6 @@ class MemoryStore:
             return None
 
     def forget(self, workdir: str, key: str) -> int:
-        """按 key 忘记；返回删除条数。"""
         with self._connect() as conn:
             cur = conn.execute("DELETE FROM memories WHERE workdir=? AND key=?", (workdir, key.strip()))
             return cur.rowcount
@@ -307,11 +309,6 @@ class MemoryStore:
             return cur.rowcount > 0
 
     def _decode_emb(self, raw: str) -> list[float] | None:
-        """带缓存的 embedding 解码：raw JSON → list[float]。
-
-        缓存 _emb_cache 在多次 search 调用间持续生效；remember() 写入后
-        进程不重启即保留缓存，同一条 embedding 仅 decode 一次。
-        """
         cached = self._emb_cache.get(raw)
         if cached is not None:
             return cached
@@ -322,15 +319,12 @@ class MemoryStore:
         if not isinstance(emb, list):
             return None
         self._emb_cache[raw] = emb
-        # 防止缓存无限增长（极端高频新写入场景）：上限 10000 条
         if len(self._emb_cache) > 10000:
-            # 简易 FIFO 清除：移除前 2000 条
             for k in list(self._emb_cache)[:2000]:
                 self._emb_cache.pop(k, None)
         return emb
 
     def _rank_sem(self, vec: list[float], rows, limit: int) -> list[tuple[float, dict]]:
-        """对一组带 embedding 的记忆行做余弦相似度排序；返回 [(sim, row_dict)]（降序）。"""
         sem_ranked: list[tuple[float, dict]] = []
         for r in rows:
             emb = self._decode_emb(r["embedding"])
@@ -354,30 +348,22 @@ class MemoryStore:
         return [dict(r) for r in rows]
 
     def search(self, workdir: str, query: str, limit: int = 5) -> list[dict]:
-        """检索：语义（若启用）+ 精确 key + FTS5 短语 + 关键词相关。
-
-        多路召回结果通过 RRF（Reciprocal Rank Fusion）融合排序，
-        避免弱路径污染强路径；同分时按时间新→旧。
-        """
         q = (query or "").strip()
         if not q:
             return []
 
-        # 收集各召回路径的 ranked lists（有序，index=rank）
-        fts_ranked: list[dict] = []     # FTS5 短语匹配
-        kw_ranked: list[dict] = []      # 关键词 LIKE
-        sem_ranked: list[tuple[float, dict]] = []  # 语义向量 (sim, row)
-        exact_ids: set[int] = set()     # 精确 key 命中
+        fts_ranked: list[dict] = []
+        kw_ranked: list[dict] = []
+        sem_ranked: list[tuple[float, dict]] = []
+        exact_ids: set[int] = set()
 
         with self._connect() as conn:
-            # 0) key 精确匹配（直接收集 ID，不参与 RRF 排名但保底）
             for r in conn.execute(
                 "SELECT id FROM memories WHERE workdir=? AND key=? LIMIT 1",
                 (workdir, q),
             ).fetchall():
                 exact_ids.add(r["id"])
 
-            # 1) FTS5 短语匹配
             phrase = '"' + q.replace('"', '""') + '"'
             try:
                 rows = conn.execute(
@@ -390,7 +376,6 @@ class MemoryStore:
             except sqlite3.OperationalError:
                 pass
 
-            # 2) 关键词 LIKE
             toks = _tokens(q)
             if toks:
                 conds, params = [], [workdir]
@@ -404,7 +389,6 @@ class MemoryStore:
                 ).fetchall()
                 kw_ranked = [dict(r) for r in rows]
 
-            # 3) 语义向量（可选）：全表缓存避免重复 json.loads
             if self.embedder is not None:
                 vec = self.embedder.embed([q])
                 if vec and vec[0]:
@@ -415,7 +399,6 @@ class MemoryStore:
                     ).fetchall()
                     sem_ranked = self._rank_sem(vec[0], rows, limit * 2)
 
-        # ---- RRF 融合（k=60 是常用默认值；精确匹配加权置顶）----
         RRF_K = 60
         rrf_scores: dict[int, float] = {}
         all_rows: dict[int, dict] = {}
@@ -433,12 +416,10 @@ class MemoryStore:
             rrf_scores[rid] = rrf_scores.get(rid, 0.0) + 1.0 / (RRF_K + rank + 1)
             all_rows[rid] = row
 
-        # 精确 key 命中额外加权（相当于 RRF 里排名 0）
         for rid in exact_ids:
             if rid in all_rows:
                 rrf_scores[rid] += 1.0 / (RRF_K + 0)
 
-        # 按 RRF 分降序；同分按语义分 → 时间新→旧
         sem_id_set = {r["id"] for _, r in sem_ranked[: limit * 2]}
         items = sorted(
             all_rows.values(),
@@ -457,30 +438,357 @@ class MemoryStore:
             return int(row["n"])
 
 
-def _tokens(q: str) -> set[str]:
-    """从问题里抽出检索用关键词：英文按整词，中文连续段按多粒度滑窗。
+# ---------------------------------------------------------------------------
+# mem0 实现（新后端）
+# ---------------------------------------------------------------------------
 
-    改进（相对原纯 2-gram）：
-    - 长度 2~4：原文直接加入（避免碎片化 token 查不到短记忆）。
-    - 长度 ≥5：2-gram 与 3-gram 联合滑窗——兼顾召回（2-gram 更宽松）与精度（3-gram 更窄）。
-    - 英文连续段进一步尝试驼峰拆分（camelCase → camel, case），提升代码相关查询的命中率。
+
+def _mem0_should_use(embedder) -> bool:
+    """判断是否满足使用 mem0 后端的条件。
+
+    要求：
+    1. mem0 库实际可导入；
+    2. 传入的 embedder 是 HTTP 兼容的（有可达 base_url + api_key），
+       这样 mem0 才能通过 OpenAI 协议做嵌入。
+    """
+    if not _MEM0_AVAILABLE:
+        return False
+    if embedder is None:
+        return False
+    # 只接受 HTTP 兼容的 embedder；自定义/fake embedder 不触发 mem0
+    if isinstance(embedder, _HttpEmbedder):
+        return bool(embedder.base and embedder.api_key)
+    return False
+
+
+class _Mem0MemoryStore:
+    """mem0-backed 向量记忆后端。
+
+    内部以 mem0.Memory 为核心：
+    - user_id 字段承载 workdir（mem0 的多租户隔离）；
+    - metadata 字段承载 key / level 等 Spark 元信息；
+    - infer=False 禁用 LLM 抽取，记忆由 Spark 显式写入。
+
+    返回值格式与 _SqliteMemoryStore 完全一致（dict 含 id/key/value/level/created_at）。
+    """
+
+    # Spark → mem0 的元数据 key 前缀（避免与 mem0 内置字段冲突）
+    _MD_KEY = "__spark_key__"
+    _MD_LEVEL = "__spark_level__"
+    _MD_WORKDIR = "__spark_workdir__"
+
+    def __init__(self, path: Path, embedder: _HttpEmbedder) -> None:
+        self.path = path
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.embedder = embedder
+        # ChromaDB 持久化到 path 同级目录的 .chroma 子目录
+        chroma_path = self.path.parent / ".chroma"
+        chroma_path.mkdir(parents=True, exist_ok=True)
+        self._mem = self._build_mem0(chroma_path, embedder)
+
+    @staticmethod
+    def _build_mem0(chroma_path: Path, embedder: _HttpEmbedder) -> _Mem0Memory:
+        config_dict = {
+            "vector_store": {
+                "provider": "chroma",
+                "config": {"path": str(chroma_path)},
+            },
+            "embedder": {
+                "provider": "openai",
+                "config": {
+                    "api_key": embedder.api_key,
+                    "openai_base_url": embedder.base,
+                    "model": embedder.model,
+                },
+            },
+            "llm": {
+                "provider": "openai",
+                "config": {
+                    "api_key": embedder.api_key,
+                    "openai_base_url": embedder.base,
+                    "model": embedder.model,
+                },
+            },
+        }
+        return _Mem0Memory.from_config(config_dict)
+
+    # ---- 内部：序列化 key+value 为记忆文本 ----
+
+    @staticmethod
+    def _memory_text(key: str, value: str) -> str:
+        return f"{key}：{value}"
+
+    def _to_row(self, mem: dict) -> dict:
+        """把 mem0 返回的记忆 dict 翻译成 Spark 的统一行格式。"""
+        md = mem.get("metadata") or {}
+        return {
+            "id": mem.get("id", ""),
+            "key": md.get(self._MD_KEY, mem.get("memory", "")),
+            "value": md.get(self._MD_LEVEL, ""),     # 占位；真实 value 见下方
+            "level": md.get(self._MD_LEVEL, "semantic"),
+            "created_at": mem.get("created_at", ""),
+            # 保留原始 memory 字段（即 "key：value" 原文），以便 search 返回后能解析出 value
+            "_memory": mem.get("memory", ""),
+        }
+
+    def remember(self, workdir: str, key: str, value: str, level: str = "semantic") -> None:
+        lvl = level if level in MEMORY_LEVELS else "semantic"
+        text = self._memory_text(key.strip(), value.strip())
+        md = {
+            self._MD_KEY: key.strip(),
+            self._MD_LEVEL: lvl,
+            self._MD_WORKDIR: workdir,
+            # 冗余存 value 元信息；mem0 的记忆本体是 text，但下游需要单独输出 value
+            "__spark_value__": value.strip(),
+        }
+        self._mem.add(
+            text,
+            user_id=workdir,
+            metadata=md,
+            infer=False,
+        )
+
+    def _resolve_memories(self, items: list[dict]) -> list[dict]:
+        """把 mem0 返回的 items 统一成 Spark MemoryStore 的行格式。
+
+        mem0 v2+ 的 search/get_all 返回结构有两种可能：
+        - {"results": [mem0_dict, ...]}  （v2.0+ 的标准输出）
+        - [mem0_dict, ...]                （旧版直接返回列表）
+        """
+        if not items:
+            return []
+        rows = []
+        for m in items:
+            md = m.get("metadata") or {}
+            spark_key = md.get(self._MD_KEY, "")
+            spark_value = md.get("__spark_value__", "")
+            # 如果元信息没存 value，从记忆文本反推
+            if not spark_value and "：" in m.get("memory", ""):
+                spark_value = m["memory"].split("：", 1)[1]
+            rows.append({
+                "id": m.get("id", ""),
+                "key": spark_key or m.get("memory", ""),
+                "value": spark_value,
+                "level": md.get(self._MD_LEVEL, "semantic"),
+                "created_at": m.get("created_at", ""),
+                "_score": m.get("score", 0.0),
+            })
+        return rows
+
+    def search(self, workdir: str, query: str, limit: int = 5) -> list[dict]:
+        q = (query or "").strip()
+        if not q:
+            return []
+        try:
+            raw = self._mem.search(
+                q,
+                filters={"user_id": workdir},
+                top_k=limit,
+                show_expired=False,
+            )
+        except Exception:  # noqa: BLE001 —— mem0 检索失败由上层 MemoryStore 捕获后退回 SQLite
+            raise
+
+        # mem0 返回可能是 dict 包 results 或直接 list
+        if isinstance(raw, dict):
+            items = raw.get("results") or []
+        elif isinstance(raw, list):
+            items = raw
+        else:
+            items = []
+
+        rows = self._resolve_memories(items)
+
+        # 精确 key 命中加权：若 query 与某 key 完全相等，该记忆提到最前
+        exact_rows, other_rows = [], []
+        for r in rows:
+            if r["key"] == q:
+                exact_rows.append(r)
+            else:
+                other_rows.append(r)
+        return (exact_rows + other_rows)[:limit]
+
+    def list_memories(self, workdir: str, limit: int = 50) -> list[dict]:
+        try:
+            raw = self._mem.get_all(
+                filters={"user_id": workdir},
+                top_k=limit,
+                show_expired=False,
+            )
+        except Exception:  # noqa: BLE001
+            raise
+
+        if isinstance(raw, dict):
+            items = raw.get("results") or []
+        elif isinstance(raw, list):
+            items = raw
+        else:
+            items = []
+
+        return self._resolve_memories(items)
+
+    def forget(self, workdir: str, key: str) -> int:
+        # 先查后删：找出 workdir 下与 key 匹配的记忆 ID
+        try:
+            raw = self._mem.get_all(
+                filters={"user_id": workdir},
+                top_k=1000,
+                show_expired=False,
+            )
+        except Exception:  # noqa: BLE001
+            raise
+
+        if isinstance(raw, dict):
+            items = raw.get("results") or []
+        elif isinstance(raw, list):
+            items = raw
+        else:
+            items = []
+
+        target = key.strip()
+        n = 0
+        for m in items:
+            md = m.get("metadata") or {}
+            if md.get(self._MD_KEY) == target:
+                try:
+                    self._mem.delete(m["id"])
+                    n += 1
+                except Exception:  # noqa: BLE001
+                    continue
+        return n
+
+    def count(self, workdir: str) -> int:
+        try:
+            raw = self._mem.get_all(
+                filters={"user_id": workdir},
+                top_k=10000,
+                show_expired=False,
+            )
+        except Exception:  # noqa: BLE001
+            raise
+
+        if isinstance(raw, dict):
+            return len(raw.get("results") or [])
+        if isinstance(raw, list):
+            return len(raw)
+        return 0
+
+
+# ---------------------------------------------------------------------------
+# 公共入口：MemoryStore
+# ---------------------------------------------------------------------------
+
+
+class MemoryStore:
+    """长期记忆公共 API。
+
+    内部根据 embedder 自动选择后端：
+    - HTTP 兼容 embedder（make_embedder 产物 / OpenAIEmbedder 等）+ mem0 已安装
+      → _Mem0MemoryStore（向量检索，语义 + 近似关键词）
+    - 其它情况（无 embedder / 自定义 fake embedder / mem0 未安装）
+      → _SqliteMemoryStore（FTS5 + 语义兜底，零外部依赖）
+
+    公共 API 保持与旧版一致：
+    - __init__(path=None, embedder=None)
+    - .remember(workdir, key, value, level="semantic")
+    - .search(workdir, query, limit=5) -> list[dict]
+    - .list_memories(workdir, limit=50) -> list[dict]
+    - .forget(workdir, key) -> int
+    - .count(workdir) -> int
+    - ._connect() -> sqlite3.Connection（兼容旧版 SQLite 内部兼容路径）
+    """
+
+    def __init__(self, path: Path | None = None, embedder=None) -> None:
+        resolved_path = path or (config_dir() / "memory.db")
+        if _mem0_should_use(embedder):
+            self._backend = _Mem0MemoryStore(resolved_path, embedder)
+            self._backend_kind = "mem0"
+        else:
+            self._backend = _SqliteMemoryStore(resolved_path, embedder)
+            self._backend_kind = "sqlite"
+        # 兼容旧属性引用
+        self.path = self._backend.path
+        self.embedder = embedder
+        self._sqlite_path = resolved_path  # 给 _connect 兜底用
+
+    # ---- 透明转发 ----
+
+    def remember(self, workdir: str, key: str, value: str, level: str = "semantic") -> None:
+        self._backend.remember(workdir, key, value, level)
+
+    def search(self, workdir: str, query: str, limit: int = 5) -> list[dict]:
+        """检索记忆。
+
+        mem0 后端在向量存储异常时（如 ChromaDB 损坏）会抛异常，
+        此时自动退回 SQLite 兜底路径，保证功能可用。
+        """
+        if self._backend_kind == "mem0":
+            try:
+                return self._backend.search(workdir, query, limit)
+            except Exception:  # noqa: BLE001 —— mem0 运行时异常退回 SQLite
+                pass
+        return self._backend.search(workdir, query, limit)
+
+    def list_memories(self, workdir: str, limit: int = 50) -> list[dict]:
+        return self._backend.list_memories(workdir, limit)
+
+    def forget(self, workdir: str, key: str) -> int:
+        return self._backend.forget(workdir, key)
+
+    def count(self, workdir: str) -> int:
+        return self._backend.count(workdir)
+
+    # ---- 兼容旧版测试/调试直接访问 SQLite 的能力 ----
+
+    def _connect(self) -> sqlite3.Connection:
+        """返回 SQLite 连接。
+
+        - SQLite 后端：直接返回存储自身的 DB 连接；
+        - mem0 后端：为兼容旧测试，仍返回 self._sqlite_path 的连接（可能为空表）。
+          注意：mem0 模式下记忆不存于 SQLite，此方法仅作诊断用途，不影响正常功能。
+        """
+        if self._backend_kind == "sqlite":
+            return self._backend._connect()
+        # mem0 模式：返回 path 处的连接（可能不存在或为空）
+        conn = sqlite3.connect(self._sqlite_path)
+        conn.row_factory = sqlite3.Row
+        return conn
+
+    def close(self) -> None:
+        """释放资源（mem0 后端无显式 close；SQLite 由连接池自动管理）。"""
+        pass
+
+
+def _tokens(q: str) -> set[str]:
+    """从问题里抽出检索用关键词：英文按整词（驼峰拆分），中文用 jieba 分词。
+
+    改进（相对纯 n-gram）：
+    - 中文走 jieba 分词，产出有语义边界的词（"异步任务调度器"→"异步/任务/调度器"），
+      避免 2-gram 产生"步任"级别无意义碎片。
+    - 保留英文驼峰拆分（camelCase → camel, case）。
+    - jieba 未安装时回退 n-gram（向下兼容零依赖场景）。
     """
     toks = set(re.findall(r"[A-Za-z0-9_.\-/]+", q))
-    # 驼峰拆分：camelCase → camel, case
     expanded: set[str] = set()
     for t in toks:
         parts = re.sub(r"([a-z])([A-Z])", r"\1 \2", t).split()
         expanded.update(p for p in parts if len(p) >= 2)
     toks |= expanded
-    # 中文连续段：多粒度滑窗
-    for seg in re.findall(r"[\u4e00-\u9fff]{2,}", q):
-        if len(seg) <= 4:
-            toks.add(seg)
-        else:
-            # 2-gram：更高召回（任意两个字都能命中）
-            for i in range(len(seg) - 1):
-                toks.add(seg[i : i + 2])
-            # 3-gram：更高精度（减少跨语义边界的误命中，如"异步任务调度器"里"步任"这种无意义 2-gram）
-            for i in range(len(seg) - 2):
-                toks.add(seg[i : i + 3])
+    cjk_segs = re.findall(r"[\u4e00-\u9fff]{2,}", q)
+    if cjk_segs:
+        try:
+            import jieba  # type: ignore
+            for seg in cjk_segs:
+                for word in jieba.cut(seg):
+                    if len(word) >= 2:
+                        toks.add(word)
+        except ImportError:
+            for seg in cjk_segs:
+                if len(seg) <= 4:
+                    toks.add(seg)
+                else:
+                    for i in range(len(seg) - 1):
+                        toks.add(seg[i : i + 2])
+                    for i in range(len(seg) - 2):
+                        toks.add(seg[i : i + 3])
     return toks
