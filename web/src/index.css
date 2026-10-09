@@ -147,6 +147,16 @@ html, body, #root {
   border-radius: 4px;
 }
 
+/* highlight.js — warm Ember palette for light mode */
+[data-theme="light"] .hljs { background: #f6f1ea; color: #3b352e; }
+[data-theme="light"] .hljs-keyword { color: #c2410c; }
+[data-theme="light"] .hljs-string { color: #5fb37a; }
+[data-theme="light"] .hljs-number { color: #d8a657; }
+
+/* theme transition */
+* { transition: background-color 0.2s, border-color 0.2s, color 0.15s; }
+.transitioning * { transition-duration: 0.2s; }
+
 /* reduced motion */
 @media (prefers-reduced-motion: reduce) {
   .animate-in, .animate-fade { animation: none; }

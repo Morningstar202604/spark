@@ -1,15 +1,8 @@
 from __future__ import annotations
 
-import json
-import socket
-import threading
-import time
-import urllib.error
-import urllib.request
 from pathlib import Path
 
 import pytest
-
 from spark.config import SparkConfig, load_config
 from spark.tools import gitops
 from spark.tools.registry import ToolContext, ToolRegistry

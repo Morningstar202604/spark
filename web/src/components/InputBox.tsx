@@ -1,4 +1,6 @@
 import { useRef, useState, type KeyboardEvent } from "react"
+import { t } from "../i18n"
+import { useUiStore } from "../store/uiStore"
 
 interface Props {
   value: string
@@ -13,6 +15,7 @@ interface Props {
 const MAX_H = 180
 
 export default function InputBox({ value, onChange, onSubmit, onStop, streaming, model, onOpenSettings }: Props) {
+  const lang = useUiStore((s) => s.lang)
   const ref = useRef<HTMLTextAreaElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
   const [images, setImages] = useState<string[]>([])
@@ -75,7 +78,7 @@ export default function InputBox({ value, onChange, onSubmit, onStop, streaming,
                   type="button"
                   onClick={() => setImages((prev) => prev.filter((u) => u !== dataUrl))}
                   className="absolute -top-1.5 -right-1.5 flex h-6 w-6 items-center justify-center rounded-full bg-spark-err text-xs font-bold text-spark-on-accent shadow transition-transform hover:scale-110"
-                  title="移除图片"
+                  title={t("common.removeImage", lang)}
                 >
                   ×
                 </button>
@@ -93,14 +96,14 @@ export default function InputBox({ value, onChange, onSubmit, onStop, streaming,
               autoGrow()
             }}
             onKeyDown={onKey}
-            placeholder={streaming ? "模型回复中，可点右下角按钮停止…" : "给 Spark 发送任务"}
+            placeholder={streaming ? t("common.modelReplyStop", lang) : t("chat.placeholder", lang)}
             className="block w-full resize-none overflow-hidden bg-transparent px-3.5 pt-3 pb-1 text-sm leading-relaxed outline-none placeholder:text-spark-muted/80"
           />
           <div className="flex items-center justify-between gap-2 px-2 pb-2">
             <div className="flex min-w-0 items-center gap-0.5">
               <button
                 type="button"
-                title="附加图片"
+                title={t("common.attachImage", lang)}
                 disabled={streaming}
                 onClick={() => fileRef.current?.click()}
                 className="flex h-8 w-8 items-center justify-center rounded-lg text-spark-muted transition-colors hover:bg-spark-line hover:text-spark-text disabled:opacity-50"
@@ -114,7 +117,7 @@ export default function InputBox({ value, onChange, onSubmit, onStop, streaming,
               {value && !streaming && (
                 <button
                   type="button"
-                  title="清空输入"
+                  title={t("common.clearInput", lang)}
                   onClick={clearInput}
                   className="flex h-8 w-8 animate-in items-center justify-center rounded-lg text-spark-muted transition-colors hover:bg-spark-line hover:text-spark-text"
                 >
@@ -126,19 +129,19 @@ export default function InputBox({ value, onChange, onSubmit, onStop, streaming,
               {model && (
                 <button
                   type="button"
-                  title="当前模型，点击到设置中管理"
+                  title={t("common.currentModel", lang)}
                   onClick={onOpenSettings}
                   className="ml-0.5 max-w-[9rem] truncate rounded-md bg-spark-line/60 px-2 py-1 text-[10px] font-medium text-spark-muted transition-colors hover:bg-spark-line hover:text-spark-text"
                 >
                   {model}
                 </button>
               )}
-              <span className="ml-1 hidden shrink-0 text-[10px] text-spark-muted/70 md:block">Enter 发送 · Shift+Enter 换行</span>
+              <span className="ml-1 hidden shrink-0 text-[10px] text-spark-muted/70 md:block">{t("common.enterSend", lang)}</span>
             </div>
             {streaming ? (
               <button
                 type="button"
-                title="停止生成"
+                title={t("common.stopGenerate", lang)}
                 onClick={onStop}
                 className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-spark-err/20 text-spark-err transition-transform hover:scale-105 hover:bg-spark-err/30 active:scale-95"
               >
@@ -147,7 +150,7 @@ export default function InputBox({ value, onChange, onSubmit, onStop, streaming,
             ) : (
               <button
                 type="button"
-                title="发送"
+                title={t("common.send", lang)}
                 disabled={!canSend}
                 onClick={submit}
                 className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-spark-accent text-spark-on-accent transition-all hover:brightness-110 active:scale-95 disabled:cursor-not-allowed disabled:opacity-40"

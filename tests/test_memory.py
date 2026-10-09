@@ -8,7 +8,7 @@ import pytest
 from spark.config import MemoryConfig, SparkConfig
 from spark.memory.extractor import Candidate, Op
 from spark.memory.service import MemoryService
-from spark.memory.store import MemoryStore, cosine, pack_vector, tokenize
+from spark.memory.store import MemoryStore, cosine, tokenize
 
 
 def make_store(tmp_path: Path, **kw) -> MemoryStore:

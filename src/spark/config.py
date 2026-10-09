@@ -1,3 +1,15 @@
+"""Configuration — built on pydantic-settings.
+
+* ``SparkConfig`` extends :class:`pydantic_settings.BaseSettings` so that every
+  field can be overridden via ``SPARK_*`` environment variables out of the box
+  (e.g. ``SPARK_AGENT__MAX_TOOL_ROUNDS=50``).
+* TOML file loading is preserved via :func:`load_config` which feeds the parsed
+  dict into ``SparkConfig.model_validate`` — env vars from pydantic-settings
+  then override the TOML values automatically.
+* Untrusted project-local ``.spark.toml`` files go through
+  :func:`_sanitize_project_config` exactly like before.
+"""
+
 from __future__ import annotations
 
 import json
@@ -6,7 +18,10 @@ import tomllib
 from pathlib import Path
 from typing import Any, Literal
 
+from dataclasses import dataclass
+
 from pydantic import BaseModel, Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from spark.errors import ConfigError
 
@@ -21,6 +36,20 @@ DisplayConfigKey = Literal[
     "show_keywords",
     "show_notices",
 ]
+"""Tool-call approval policy and wildcard permission rules."""
+PermissionAction = Literal["allow", "prompt", "deny"]
+
+
+@dataclass
+class PermissionRule:
+    """A single wildcard permission rule evaluated against tool resources.
+
+    ``resource`` is a glob pattern (``src/foo/*``, ``**/*.py``, ...).
+    ``action`` is one of ``allow``, ``prompt``, ``deny``.
+    """
+
+    action: PermissionAction
+    resource: str
 
 
 class ProviderConfig(BaseModel):
@@ -58,11 +87,21 @@ class ContextConfig(BaseModel):
     keep_recent_messages: int = Field(default=8, ge=2, le=200)
 
 
+class McpTransportConfig(BaseModel):
+    """HTTP/SSE transport configuration (for opencode-style MCP servers)."""
+
+    url: str
+    headers: dict[str, str] = Field(default_factory=dict)
+    timeout_sec: int = 30
+
+
 class McpServerConfig(BaseModel):
     name: str
-    command: str
-    args: list[str] = Field(default_factory=list)
+    command: str = ""  # for stdio transport
+    args: list[str] = Field(default_factory=list)  # for stdio transport
     readonly_tools: list[str] = Field(default_factory=list)
+    transport: Literal["stdio", "sse"] = "stdio"
+    http: McpTransportConfig | None = None  # for SSE transport
 
 
 class MemoryConfig(BaseModel):
@@ -88,9 +127,25 @@ class HookConfig(BaseModel):
     args: list[str] = Field(default_factory=list)
     name: str = ""
     timeout_sec: int = 15
+    on_deny: Literal["warn", "block"] = "warn"
 
 
-class SparkConfig(BaseModel):
+class SparkConfig(BaseSettings):
+    """Root configuration — native ``SPARK_*`` env-var support via pydantic-settings.
+
+    ``env_nested_delimiter="__"`` means ``SPARK_AGENT__MAX_TOOL_ROUNDS=50`` maps
+    to ``agent.max_tool_rounds = 50``.  Extra keys present in neither TOML nor
+    env are ignored (``extra="ignore"``) for forward-compatibility.
+    """
+
+    model_config = SettingsConfigDict(
+        env_prefix="SPARK_",
+        env_nested_delimiter="__",
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
+
     active_profile_id: str = ""
     provider: ProviderConfig = Field(default_factory=ProviderConfig)
     agent: AgentConfig = Field(default_factory=AgentConfig)
@@ -99,6 +154,12 @@ class SparkConfig(BaseModel):
     mcp_servers: list[McpServerConfig] = Field(default_factory=list)
     model_profiles: list[ModelProfile] = Field(default_factory=list)
     hooks: list[HookConfig] = Field(default_factory=list)
+    permission_rules: list[PermissionRule] = Field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
+# File-system helpers (unchanged)
+# ---------------------------------------------------------------------------
 
 
 def default_home() -> Path:
@@ -129,6 +190,7 @@ api_key_env = "SPARK_API_KEY"
 [agent]
 approval = "suggest"
 workdir_only = true
+sandbox_mode = "workspace"
 shell_timeout_sec = 60
 max_tool_rounds = 30
 max_repeat_calls = 4
@@ -138,9 +200,68 @@ max_turn_tokens = 0
 agents_md = "AGENTS.md"
 max_fragment_chars = 8000
 history_budget_chars = 96000
+max_context_tokens = 32768
+compact_threshold = 0.85
+keep_recent_messages = 8
+
+[memory]
+enabled = true
+top_k = 6
+capacity = 500
+embedding_model = "text-embedding-3-small"
+auto_extract = true
+
+# MCP server — stdio transport example (uncomment to enable)
+# [[mcp.servers]]
+# name = "my-stdio-server"
+# command = "npx"
+# args = ["-y", "@example/mcp-server"]
+# transport = "stdio"
+# readonly_tools = []
+
+# MCP server — SSE transport example (uncomment to enable)
+# [[mcp.servers]]
+# name = "my-sse-server"
+# transport = "sse"
+# readonly_tools = []
+# [mcp.servers.http]
+# url = "http://localhost:3000/sse"
+# headers = {Authorization = "Bearer <token>"}
+# timeout_sec = 30
+
+# Model profiles (uncomment to enable multi-model switching)
+# [[model_profiles]]
+# id = "gpt-4o"
+# name = "GPT-4o"
+# provider = "openai_compat"
+# base_url = "https://api.openai.com/v1"
+# model = "gpt-4o"
+# api_key = ""
+
+# Pre/post hooks (uncomment to enable shell hooks)
+# [[hooks]]
+# event = "pre_tool"
+# command = "echo"
+# args = ["tool about to run"]
+# name = "log-hook"
+# timeout_sec = 15
+# on_deny = "warn"
+
+# Permission rules (uncomment to enable, last match wins)
+# [[permission_rules]]
+# action = "allow"
+# resource = "src/**/*.py"
+# [[permission_rules]]
+# action = "deny"
+# resource = "/etc/**"
 """,
         encoding="utf-8",
     )
+
+
+# ---------------------------------------------------------------------------
+# TOML loading helpers (unchanged)
+# ---------------------------------------------------------------------------
 
 
 def _load_toml(path: Path) -> dict[str, Any]:
@@ -182,6 +303,11 @@ def _sanitize_project_config(raw: dict[str, Any]) -> dict[str, Any]:
     return clean
 
 
+# ---------------------------------------------------------------------------
+# Config assembly
+# ---------------------------------------------------------------------------
+
+
 def load_config(
     *,
     config_path: Path | None = None,
@@ -212,10 +338,14 @@ def load_config(
             break
     if from_local_workdir:
         raw = _sanitize_project_config(raw)
+
+    # SparkConfig (BaseSettings) validates TOML data *and* reads SPARK_* env vars
+    # automatically.  Programmatic CLI overrides are applied below.
     try:
         cfg = SparkConfig.model_validate(raw)
     except Exception as exc:
         raise ConfigError(f"Invalid config file: {chosen or 'defaults'}") from exc
+
     if approval:
         cfg.agent.approval = approval
     if sandbox_mode:
@@ -240,7 +370,11 @@ def require_api_key(cfg: SparkConfig) -> str | None:
     env_name = cfg.provider.api_key_env
     key = os.environ.get(env_name) or os.environ.get("SPARK_API_KEY")
     if not key:
-        raise ConfigError(f"Missing User API Key in environment variable {env_name}")
+        raise ConfigError(
+            f"Missing API key: neither config's provider.api_key nor "
+            f"environment variable '{env_name}' is set. "
+            f"Fix: run 'spark init' or set {env_name}=<your-key>."
+        )
     return key
 
 
@@ -250,6 +384,11 @@ def mask_secret(value: str | None) -> str:
     if len(value) <= 12:
         return "*" * len(value)
     return value[:4] + "..." + value[-4:]
+
+
+# ---------------------------------------------------------------------------
+# Config serialisation
+# ---------------------------------------------------------------------------
 
 
 def _toml_str(value: str) -> str:
@@ -266,13 +405,34 @@ def save_config(cfg: SparkConfig, path: Path | None = None) -> Path:
     )
     mcp_blocks = []
     for server in cfg.mcp_servers:
-        mcp_blocks.append(
-            "[[mcp.servers]]\n"
-            f"name = {_toml_str(server.name)}\n"
-            f"command = {_toml_str(server.command)}\n"
-            f"args = {json.dumps(server.args)}\n"
-            f"readonly_tools = {json.dumps(server.readonly_tools)}\n"
-        )
+        if server.transport == "sse":
+            http = server.http
+            url_str = _toml_str(http.url) if http else '""'
+            hdr_pairs = (
+                ", ".join(f'{_toml_str(k)} = {_toml_str(v)}' for k, v in http.headers.items())
+                if http and http.headers
+                else ""
+            )
+            timeout_str = str(http.timeout_sec) if http else "30"
+            mcp_blocks.append(
+                "[[mcp.servers]]\n"
+                f"name = {_toml_str(server.name)}\n"
+                f'transport = "sse"\n'
+                f"readonly_tools = {json.dumps(server.readonly_tools)}\n"
+                f"\n"
+                f"[mcp.servers.http]\n"
+                f"url = {url_str}\n"
+                f"headers = {{{hdr_pairs}}}\n"
+                f"timeout_sec = {timeout_str}\n"
+            )
+        else:
+            mcp_blocks.append(
+                "[[mcp.servers]]\n"
+                f"name = {_toml_str(server.name)}\n"
+                f"command = {_toml_str(server.command)}\n"
+                f"args = {json.dumps(server.args)}\n"
+                f"readonly_tools = {json.dumps(server.readonly_tools)}\n"
+            )
     mcp_section = ("\n" + "\n".join(mcp_blocks)) if mcp_blocks else ""
     profile_blocks = []
     for prof in cfg.model_profiles:
@@ -295,8 +455,17 @@ def save_config(cfg: SparkConfig, path: Path | None = None) -> Path:
             f"args = {json.dumps(list(hook.args))}\n"
             f"name = {_toml_str(hook.name)}\n"
             f"timeout_sec = {hook.timeout_sec}\n"
+            f"on_deny = {_toml_str(hook.on_deny)}\n"
         )
     hooks_section = ("\n" + "\n".join(hook_blocks)) if hook_blocks else ""
+    permission_blocks = []
+    for rule in cfg.permission_rules:
+        permission_blocks.append(
+            "[[permission_rules]]\n"
+            f"action = {_toml_str(rule.action)}\n"
+            f"resource = {_toml_str(rule.resource)}\n"
+        )
+    permissions_section = ("\n" + "\n".join(permission_blocks)) if permission_blocks else ""
     memory_section = (
         f"\n[memory]\nenabled = {str(cfg.memory.enabled).lower()}\n"
         f"top_k = {cfg.memory.top_k}\ncapacity = {cfg.memory.capacity}\n"
@@ -332,7 +501,7 @@ max_fragment_chars = {cfg.context.max_fragment_chars}
 history_budget_chars = {cfg.context.history_budget_chars}
 max_context_tokens = {cfg.context.max_context_tokens}
 compact_threshold = {cfg.context.compact_threshold}
-keep_recent_messages = {cfg.context.keep_recent_messages}{memory_section}{mcp_section}{profiles_section}{hooks_section}
+keep_recent_messages = {cfg.context.keep_recent_messages}{memory_section}{mcp_section}{profiles_section}{hooks_section}{permissions_section}
 """
     tmp = path.with_suffix(path.suffix + ".tmp")
     tmp.write_text(body, encoding="utf-8")

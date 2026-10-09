@@ -1,3 +1,4 @@
+"""Shared LLM helpers: chat completion, embeddings, JSON parsing."""
 from __future__ import annotations
 
 import json

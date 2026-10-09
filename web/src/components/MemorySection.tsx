@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState } from "react"
 import { fetchMemories, memoryAdd, memoryDelete, memoryOptimize, type MemoryItem, type MemoryStats } from "../api"
+import { t } from "../i18n"
+import { useUiStore } from "../store/uiStore"
 
 const typeBadge: Record<string, string> = {
   preference: "bg-spark-user/15 text-spark-user",
@@ -18,6 +20,7 @@ function fmtTime(ts: number): string {
 }
 
 function ItemRow({ item, onDelete }: { item: MemoryItem; onDelete: (id: number) => void }) {
+  const lang = useUiStore((s) => s.lang)
   return (
     <div className="flex items-start gap-2 rounded-lg border border-spark-line bg-spark-bg px-3 py-2">
       <span className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-bold ${typeBadge[item.type] || typeBadge.general}`}>
@@ -26,8 +29,8 @@ function ItemRow({ item, onDelete }: { item: MemoryItem; onDelete: (id: number) 
       <div className="min-w-0 flex-1">
         <p className="text-xs break-words text-spark-text">{item.content}</p>
         <p className="mt-0.5 text-[10px] text-spark-muted">
-          重要度 {item.importance} · 命中 {item.access_count} 次 · {fmtTime(item.updated_at)}
-          {item.status === "archived" && " · 已归档"}
+          {t("memory.importance", lang, { score: item.importance })} · {t("memory.hits", lang, { count: item.access_count })} · {fmtTime(item.updated_at)}
+          {item.status === "archived" && ` · ${t("memory.archivedFlag", lang)}`}
         </p>
       </div>
       <button
@@ -35,13 +38,14 @@ function ItemRow({ item, onDelete }: { item: MemoryItem; onDelete: (id: number) 
         onClick={() => onDelete(item.id)}
         className="shrink-0 rounded px-2 py-1 text-[10px] font-bold text-spark-err hover:bg-spark-err/12"
       >
-        删除
+        {t("memory.delete", lang)}
       </button>
     </div>
   )
 }
 
 export default function MemorySection() {
+  const lang = useUiStore((s) => s.lang)
   const [stats, setStats] = useState<MemoryStats | null>(null)
   const [items, setItems] = useState<MemoryItem[]>([])
   const [query, setQuery] = useState("")
@@ -58,7 +62,7 @@ export default function MemorySection() {
       setItems(data.items)
       setHits(q ? data.search : null)
     } catch (e) {
-      setReport(`记忆加载失败：${e instanceof Error ? e.message : String(e)}`)
+      setReport(t("memory.loadFailed", lang, { msg: e instanceof Error ? e.message : String(e) }))
     }
   }, [])
 
@@ -71,7 +75,7 @@ export default function MemorySection() {
     try {
       await refresh(query.trim())
     } catch (e) {
-      setReport(`检索失败：${e instanceof Error ? e.message : String(e)}`)
+      setReport(t("memory.searchFailed", lang, { msg: e instanceof Error ? e.message : String(e) }))
     } finally {
       setBusy(false)
     }
@@ -85,7 +89,7 @@ export default function MemorySection() {
       setNewContent("")
       await refresh(query.trim())
     } catch (e) {
-      setReport(`添加失败：${e instanceof Error ? e.message : String(e)}`)
+      setReport(t("memory.addFailed", lang, { msg: e instanceof Error ? e.message : String(e) }))
     } finally {
       setBusy(false)
     }
@@ -97,7 +101,7 @@ export default function MemorySection() {
       await memoryDelete(id)
       await refresh(query.trim())
     } catch (e) {
-      setReport(`删除失败：${e instanceof Error ? e.message : String(e)}`)
+      setReport(t("memory.deleteFailed", lang, { msg: e instanceof Error ? e.message : String(e) }))
     } finally {
       setBusy(false)
     }
@@ -105,15 +109,15 @@ export default function MemorySection() {
 
   async function handleOptimize() {
     setBusy(true)
-    setReport("优化中：相似合并 + 容量淘汰…")
+    setReport(t("common.optimizing", lang))
     try {
       const { report: r } = await memoryOptimize()
-      const parts = [`合并簇 ${r.consolidated_groups} 组`, `归档 ${r.archived} 条`]
-      if (r.errors?.length) parts.push(`错误 ${r.errors.length}`)
-      setReport(`完成：${parts.join("，")}。`)
+      const parts = [t("memory.optimizeMerge", lang, { n: r.consolidated_groups }), t("memory.optimizeArchive", lang, { n: r.archived })]
+      if (r.errors?.length) parts.push(t("memory.optimizeError", lang, { n: r.errors.length }))
+      setReport(t("memory.optimizeDone", lang, { text: parts.join(", ") }))
       await refresh("")
     } catch (e) {
-      setReport(`优化失败：${e instanceof Error ? e.message : String(e)}`)
+      setReport(t("memory.optimizeFailed", lang, { msg: e instanceof Error ? e.message : String(e) }))
     } finally {
       setBusy(false)
     }
@@ -121,23 +125,23 @@ export default function MemorySection() {
 
   return (
     <div className="rounded-xl border border-spark-line p-4 flex flex-col gap-3">
-      <div className="text-xs font-bold tracking-widest text-spark-accent uppercase">长期记忆</div>
+      <div className="text-xs font-bold tracking-widest text-spark-accent uppercase">{t("memory.longTerm", lang)}</div>
       <p className="text-xs text-spark-muted">
-        模型自动从对话中抽取事实，检索后注入每轮上下文。支持去重合并（UPDATE/NOOP）、相似巩固、容量淘汰与访问强化。
+        {t("memory.description", lang)}
       </p>
       {stats && (
         <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-spark-muted">
-          <span>活跃 <b className="text-spark-text">{stats.active}</b></span>
-          <span>归档 <b className="text-spark-text">{stats.archived}</b></span>
+          <span>{t("memory.active", lang)} <b className="text-spark-text">{stats.active}</b></span>
+          <span>{t("memory.archived", lang)} <b className="text-spark-text">{stats.archived}</b></span>
           {Object.entries(stats.by_type).map(([t, n]) => (
             <span key={t}>
               {t} <b className="text-spark-text">{n}</b>
             </span>
           ))}
           <span>
-            向量检索{" "}
+            {t("memory.vectorSearch", lang)}{" "}
             <b className={stats.embedding_available ? "text-spark-ok" : "text-spark-tool"}>
-              {stats.embedding_available ? "可用" : stats.embedding_available === false ? "降级为关键词" : "未探测"}
+              {stats.embedding_available ? t("memory.available", lang) : stats.embedding_available === false ? t("memory.degraded", lang) : t("memory.undetected", lang)}
             </b>
           </span>
         </div>
@@ -153,7 +157,7 @@ export default function MemorySection() {
               void handleSearch()
             }
           }}
-          placeholder="检索测试：输入问题看会命中哪些记忆"
+          placeholder={t("memory.searchTest", lang)}
           className="rounded-lg border border-spark-line bg-spark-bg px-3 py-2 text-sm text-spark-text outline-none focus:border-spark-accent"
         />
         <button
@@ -162,14 +166,14 @@ export default function MemorySection() {
           disabled={busy}
           className="rounded-lg bg-spark-line px-3 py-2 text-xs font-bold text-spark-text hover:opacity-80 disabled:opacity-50"
         >
-          检索
+          {t("common.search", lang)}
         </button>
       </div>
 
       {hits !== null && (
         <div className="flex flex-col gap-2">
-          <div className="text-[11px] text-spark-muted">命中结果（含打分）：</div>
-          {hits.length === 0 && <p className="text-xs text-spark-muted">无命中。</p>}
+          <div className="text-[11px] text-spark-muted">{t("memory.searchResults", lang)}</div>
+          {hits.length === 0 && <p className="text-xs text-spark-muted">{t("memory.noHits", lang)}</p>}
           {hits.map((h) => (
             <ItemRow key={`h-${h.id}`} item={h} onDelete={handleDelete} />
           ))}
@@ -177,7 +181,7 @@ export default function MemorySection() {
       )}
 
       <div className="max-h-64 overflow-auto flex flex-col gap-2 border-t border-spark-line pt-3">
-        {items.length === 0 && <p className="text-xs text-spark-muted">还没有记忆。对话后自动积累，或在下方手动添加。</p>}
+        {items.length === 0 && <p className="text-xs text-spark-muted">{t("memory.noItems", lang)}</p>}
         {items.map((item) => (
           <ItemRow key={item.id} item={item} onDelete={handleDelete} />
         ))}
@@ -193,7 +197,7 @@ export default function MemorySection() {
               void handleAdd()
             }
           }}
-          placeholder="手动添加一条记忆"
+          placeholder={t("memory.addPlaceholder", lang)}
           className="rounded-lg border border-spark-line bg-spark-bg px-3 py-2 text-sm text-spark-text outline-none focus:border-spark-accent"
         />
         <div className="grid grid-cols-2 gap-2 sm:contents">
@@ -213,7 +217,7 @@ export default function MemorySection() {
             disabled={busy || !newContent.trim()}
             className="rounded-lg bg-spark-accent px-3 py-2 text-xs font-bold text-spark-on-accent hover:opacity-90 disabled:opacity-50"
           >
-            添加
+            {t("memory.add", lang)}
           </button>
         </div>
         <button
@@ -222,7 +226,7 @@ export default function MemorySection() {
           disabled={busy}
           className="rounded-lg bg-spark-line px-3 py-2 text-xs font-bold text-spark-text hover:opacity-80 disabled:opacity-50"
         >
-          立即优化
+          {t("memory.optimize", lang)}
         </button>
       </div>
       {report && <div className="rounded-lg border border-spark-line px-3 py-2 text-xs text-spark-muted">{report}</div>}

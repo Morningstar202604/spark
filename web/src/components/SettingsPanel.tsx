@@ -14,6 +14,8 @@ import {
 import MemorySection from "./MemorySection"
 import Modal from "./Modal"
 import { applyTheme, getStoredTheme, type Theme } from "../theme"
+import { t, type TranslationKey } from "../i18n"
+import { useUiStore } from "../store/uiStore"
 
 interface Props {
   status: Status | null
@@ -28,14 +30,14 @@ const sectionCls = "rounded-xl border border-spark-line p-4 flex flex-col gap-3"
 
 type Tab = "model" | "agent" | "security" | "display" | "mcp" | "memory" | "project"
 
-const tabs: { key: Tab; label: string }[] = [
-  { key: "model", label: "模型" },
-  { key: "agent", label: "Agent" },
-  { key: "security", label: "权限" },
-  { key: "display", label: "展示" },
-  { key: "memory", label: "记忆" },
-  { key: "mcp", label: "MCP" },
-  { key: "project", label: "项目" },
+const tabKeys: { key: Tab; i18n: TranslationKey }[] = [
+  { key: "model", i18n: "tab.model" },
+  { key: "agent", i18n: "tab.agent" },
+  { key: "security", i18n: "tab.security" },
+  { key: "display", i18n: "tab.display" },
+  { key: "memory", i18n: "tab.memory" },
+  { key: "mcp", i18n: "tab.mcp" },
+  { key: "project", i18n: "tab.project" },
 ]
 
 const hookEventOptions: { key: string; label: string }[] = [
@@ -45,16 +47,18 @@ const hookEventOptions: { key: string; label: string }[] = [
   { key: "turn_end", label: "turn_end — 每轮结束" },
 ]
 
-const displayOptions: { key: keyof FullConfig["agent"] & `show_${string}`; label: string; desc: string }[] = [
-  { key: "show_thinking", label: "思考过程", desc: "模型的 reasoning 流式块（默认折叠，可点击展开）" },
-  { key: "show_tools", label: "工具调用", desc: "工具执行的名称、参数与结果块" },
-  { key: "show_plan", label: "计划卡片", desc: "Plan 工具产出的任务清单卡片" },
-  { key: "show_context", label: "上下文用量", desc: "顶部 ContextMeter 百分比与用量" },
-  { key: "show_keywords", label: "会话关键词", desc: "侧栏会话列表的关键词徽标" },
-  { key: "show_notices", label: "系统提示", desc: "压缩、错误等临时通知横幅" },
+const displayOptions: { key: keyof FullConfig["agent"] & `show_${string}`; labelKey: TranslationKey; descKey: TranslationKey }[] = [
+  { key: "show_thinking", labelKey: "display.thinking", descKey: "display.thinkingDesc" },
+  { key: "show_tools", labelKey: "display.tools", descKey: "display.toolsDesc" },
+  { key: "show_plan", labelKey: "display.plan", descKey: "display.planDesc" },
+  { key: "show_context", labelKey: "display.context", descKey: "display.contextDesc" },
+  { key: "show_keywords", labelKey: "display.keywords", descKey: "display.keywordsDesc" },
+  { key: "show_notices", labelKey: "display.notices", descKey: "display.noticesDesc" },
 ]
 
 export default function SettingsPanel({ status, onClose, onSaved }: Props) {
+  const lang = useUiStore((s) => s.lang)
+  const setLang = useUiStore((s) => s.setLang)
   const [tab, setTab] = useState<Tab>("model")
   const [cfg, setCfg] = useState<FullConfig | null>(null)
   const [mcpRows, setMcpRows] = useState<McpServer[]>([])
@@ -81,7 +85,7 @@ export default function SettingsPanel({ status, onClose, onSaved }: Props) {
       const data = await listModelProfiles()
       setProfiles(data.profiles)
     } catch (e) {
-      setNotice(`模型档案加载失败：${e instanceof Error ? e.message : String(e)}`)
+      setNotice(t('model.loadFailed', lang, { msg: e instanceof Error ? e.message : String(e) }))
     }
   }
 
@@ -99,10 +103,10 @@ export default function SettingsPanel({ status, onClose, onSaved }: Props) {
         setProtectedText(data.agent.protected_paths?.join("\n") ?? "")
         setHookRows((data.hooks || []).map((h) => ({ ...h, args: [...(h.args || [])] })))
       })
-      .catch((e) => setNotice(`配置加载失败：${e instanceof Error ? e.message : String(e)}`))
+      .catch((e) => setNotice(t('settings.loadFailed', lang, { msg: e instanceof Error ? e.message : String(e) })))
     fetchAgentsMd().then((d) => {
       if (!dirtyRef.current.md) setAgentsMd(d)
-    }).catch((e) => setNotice(`项目记忆加载失败：${e instanceof Error ? e.message : String(e)}`))
+    }).catch((e) => setNotice(t('settings.memoryLoadFailed', lang, { msg: e instanceof Error ? e.message : String(e) })))
   }, [])
 
   function patchAgent(patch: Partial<FullConfig["agent"]>) {
@@ -133,8 +137,8 @@ export default function SettingsPanel({ status, onClose, onSaved }: Props) {
         setHookRows((data.hooks || []).map((h) => ({ ...h, args: [...(h.args || [])] })))
         setMcpErrors([])
       })
-      .catch((e) => setNotice(`配置加载失败：${e instanceof Error ? e.message : String(e)}`))
-    fetchAgentsMd().then(setAgentsMd).catch((e) => setNotice(`项目记忆加载失败：${e instanceof Error ? e.message : String(e)}`))
+      .catch((e) => setNotice(t('settings.loadFailed', lang, { msg: e instanceof Error ? e.message : String(e) })))
+    fetchAgentsMd().then(setAgentsMd).catch((e) => setNotice(t('settings.memoryLoadFailed', lang, { msg: e instanceof Error ? e.message : String(e) })))
   }
 
   async function handleSave() {
@@ -190,7 +194,7 @@ export default function SettingsPanel({ status, onClose, onSaved }: Props) {
       setCfg(data.config)
       setMcpErrors(data.mcp_errors || [])
       setMcpRows(data.config.mcp_servers.map((s) => ({ ...s, args: [...s.args], readonly_tools: [...s.readonly_tools] })))
-      setNotice("已保存并生效。")
+      setNotice(t('settings.saved', lang))
     } catch (e) {
       setProbe({ ok: false, error: String(e instanceof Error ? e.message : e) })
     } finally {
@@ -203,7 +207,7 @@ export default function SettingsPanel({ status, onClose, onSaved }: Props) {
     try {
       const r = await saveAgentsMd(agentsMd.content)
       setAgentsMd({ ...agentsMd, chars: r.chars, max_fragment_chars: r.max_fragment_chars })
-      setNotice("项目记忆已保存，下一轮对话生效。")
+      setNotice(t('project.memorySaved', lang))
     } catch (e) {
       setProbe({ ok: false, error: String(e instanceof Error ? e.message : e) })
     }
@@ -213,27 +217,27 @@ export default function SettingsPanel({ status, onClose, onSaved }: Props) {
     <Modal labelledBy="settings-panel-title" onClose={onClose} className="animate-fade">
       <aside className="animate-in absolute top-0 right-0 flex h-full w-full flex-col border-l border-spark-line bg-spark-panel sm:w-[38rem]">
         <div className="flex items-center justify-between border-b border-spark-line px-4 py-3 sm:px-5">
-          <h2 id="settings-panel-title" className="text-base font-bold">设置</h2>
+          <h2 id="settings-panel-title" className="text-base font-bold">{t('settings.title', lang)}</h2>
           <div className="flex items-center gap-2">
             <button type="button" onClick={resetForm} title="放弃修改，恢复当前配置" className="rounded-lg bg-spark-line px-3 py-1.5 text-xs text-spark-muted transition-colors hover:text-spark-text">
-              重置
+              {t('common.reset', lang)}
             </button>
             <button data-modal-initial-focus type="button" onClick={onClose} className="rounded-lg bg-spark-line px-3 py-1.5 text-sm text-spark-text transition-colors hover:text-spark-accent">
-              关闭
+              {t('common.close', lang)}
             </button>
           </div>
         </div>
         <div className="flex gap-1 overflow-x-auto border-b border-spark-line px-3 py-2 sm:px-4">
-          {tabs.map((t) => (
+          {tabKeys.map((tk) => (
             <button
-              key={t.key}
+              key={tk.key}
               type="button"
-              onClick={() => setTab(t.key)}
+              onClick={() => setTab(tk.key)}
               className={`shrink-0 rounded-lg px-3 py-1.5 text-xs font-bold transition-colors ${
-                tab === t.key ? "bg-spark-accent text-spark-on-accent" : "text-spark-muted hover:bg-spark-line hover:text-spark-text"
+                tab === tk.key ? "bg-spark-accent text-spark-on-accent" : "text-spark-muted hover:bg-spark-line hover:text-spark-text"
               }`}
             >
-              {t.label}
+              {t(tk.i18n, lang)}
             </button>
           ))}
         </div>
@@ -241,9 +245,9 @@ export default function SettingsPanel({ status, onClose, onSaved }: Props) {
           {tab === "model" && (
             <div className="flex flex-col gap-4">
               <div className={sectionCls}>
-                <div className="text-xs font-bold tracking-widest text-spark-accent uppercase">模型档案</div>
-                <p className="text-xs text-spark-muted">保存多个模型配置，随时一键切换。当前生效的档案会高亮显示。</p>
-                {profiles.length === 0 && <p className="text-xs text-spark-muted">暂无档案，在下方添加第一个模型。</p>}
+                <div className="text-xs font-bold tracking-widest text-spark-accent uppercase">{t('model.profiles', lang)}</div>
+                <p className="text-xs text-spark-muted">{t('model.profilesDesc', lang)}</p>
+                {profiles.length === 0 && <p className="text-xs text-spark-muted">{t('model.noProfiles', lang)}</p>}
                 <div className="flex flex-col gap-2">
                   {profiles.map((p) => (
                     <div
@@ -255,7 +259,7 @@ export default function SettingsPanel({ status, onClose, onSaved }: Props) {
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2 text-sm font-bold text-spark-text">
                           <span className="truncate">{p.name}</span>
-                          {p.active && <span className="shrink-0 rounded bg-spark-accent px-1.5 py-0.5 text-[10px] text-spark-on-accent">使用中</span>}
+                          {p.active && <span className="shrink-0 rounded bg-spark-accent px-1.5 py-0.5 text-[10px] text-spark-on-accent">{t('model.active', lang)}</span>}
                         </div>
                         <div className="truncate text-xs text-spark-text">{p.model}</div>
                         <div className="truncate text-[11px] text-spark-muted">
@@ -275,7 +279,7 @@ export default function SettingsPanel({ status, onClose, onSaved }: Props) {
                                 const r = await activateModelProfile(p.id)
                                 onSaved(r.status)
                                 await refreshProfiles()
-                                setNotice(`已切换到 ${p.name}。`)
+                                setNotice(t('model.switched', lang, { name: p.name }))
                               } catch (e) {
                                 setProbe({ ok: false, error: String(e instanceof Error ? e.message : e) })
                               } finally {
@@ -284,7 +288,7 @@ export default function SettingsPanel({ status, onClose, onSaved }: Props) {
                             }}
                             className="flex-1 rounded-lg bg-spark-accent px-3 py-1.5 text-xs font-bold text-spark-on-accent hover:opacity-90 disabled:opacity-50 sm:flex-none"
                           >
-                            使用
+                            {t('model.use', lang)}
                           </button>
                         )}
                         <button
@@ -303,7 +307,7 @@ export default function SettingsPanel({ status, onClose, onSaved }: Props) {
                           }}
                           className="flex-1 rounded-lg bg-spark-line px-3 py-1.5 text-xs font-bold text-spark-text hover:opacity-80 sm:flex-none"
                         >
-                          编辑
+                          {t('common.edit', lang)}
                         </button>
                         <button
                           type="button"
@@ -321,7 +325,7 @@ export default function SettingsPanel({ status, onClose, onSaved }: Props) {
                           }}
                           className="flex-1 rounded-lg bg-spark-err/12 px-3 py-1.5 text-xs font-bold text-spark-err hover:opacity-80 disabled:opacity-50 sm:flex-none"
                         >
-                          删除
+                          {t('common.delete', lang)}
                         </button>
                       </div>
                     </div>
@@ -337,7 +341,7 @@ export default function SettingsPanel({ status, onClose, onSaved }: Props) {
                     }}
                     className="self-start rounded-lg bg-spark-line px-3 py-1.5 text-xs font-bold text-spark-text hover:opacity-80"
                   >
-                    + 添加模型
+                    {t('model.add', lang)}
                   </button>
                 )}
               </div>
@@ -345,20 +349,20 @@ export default function SettingsPanel({ status, onClose, onSaved }: Props) {
               {showProfileForm && (
                 <div className={sectionCls}>
                   <div className="text-xs font-bold tracking-widest text-spark-accent uppercase">
-                    {profileForm.id ? "编辑模型" : "新模型"}
+                    {profileForm.id ? t('model.edit', lang) : t('model.new', lang)}
                   </div>
                   <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                     <label className={labelCls}>
-                      显示名称
+                      {t('model.displayName', lang)}
                       <input
                         value={profileForm.name}
                         onChange={(e) => setProfileForm((f) => ({ ...f, name: e.target.value }))}
-                        placeholder="如 GPT-4o / 本地 qwen"
+                        placeholder={t('model.displayNamePh', lang)}
                         className={inputCls}
                       />
                     </label>
                     <label className={labelCls}>
-                      Provider
+                      {t('model.provider', lang)}
                       <select
                         value={profileForm.provider}
                         onChange={(e) => setProfileForm((f) => ({ ...f, provider: e.target.value }))}
@@ -370,25 +374,25 @@ export default function SettingsPanel({ status, onClose, onSaved }: Props) {
                       </select>
                     </label>
                     <label className={`${labelCls} sm:col-span-2`}>
-                      Base URL
+                      {t('model.baseUrl', lang)}
                       <input
                         value={profileForm.base_url}
                         onChange={(e) => setProfileForm((f) => ({ ...f, base_url: e.target.value }))}
-                        placeholder="https://api.example.com/v1"
+                        placeholder={t('model.baseUrlPh', lang)}
                         className={inputCls}
                       />
                     </label>
                     <label className={`${labelCls} sm:col-span-2`}>
-                      Model
+                      {t('model.model', lang)}
                       <input
                         value={profileForm.model}
                         onChange={(e) => setProfileForm((f) => ({ ...f, model: e.target.value }))}
-                        placeholder="model-id"
+                        placeholder={t('model.modelPh', lang)}
                         className={inputCls}
                       />
                     </label>
                     <label className={`${labelCls} sm:col-span-2`}>
-                      API Key
+                      {t('model.apiKey', lang)}
                       <input
                         value={profileForm.api_key}
                         onChange={(e) => setProfileForm((f) => ({ ...f, api_key: e.target.value }))}
@@ -396,9 +400,9 @@ export default function SettingsPanel({ status, onClose, onSaved }: Props) {
                         placeholder={
                           profileForm.id
                             ? profiles.find((p) => p.id === profileForm.id)?.has_api_key
-                              ? `留空保持 ${profiles.find((p) => p.id === profileForm.id)?.api_key_masked}`
+                              ? t('model.apiKeyPhEdit', lang, { masked: profiles.find((p) => p.id === profileForm.id)?.api_key_masked ?? "" })
                               : "your-api-key-here"
-                            : "留空则沿用当前全局 Key"
+                            : t('model.apiKeyPhNew', lang)
                         }
                         className={inputCls}
                       />
@@ -422,7 +426,7 @@ export default function SettingsPanel({ status, onClose, onSaved }: Props) {
                           })
                           setShowProfileForm(false)
                           await refreshProfiles()
-                          setNotice("模型档案已保存。")
+                          setNotice(t('model.saved', lang))
                         } catch (e) {
                           setProbe({ ok: false, error: String(e instanceof Error ? e.message : e) })
                         } finally {
@@ -431,7 +435,7 @@ export default function SettingsPanel({ status, onClose, onSaved }: Props) {
                       }}
                       className="rounded-lg bg-spark-accent px-4 py-2 text-sm font-bold text-spark-on-accent hover:opacity-90 disabled:opacity-50"
                     >
-                      保存档案
+                      {t('model.saveProfile', lang)}
                     </button>
                     <button
                       type="button"
@@ -454,21 +458,21 @@ export default function SettingsPanel({ status, onClose, onSaved }: Props) {
                       }}
                       className="rounded-lg bg-spark-line px-4 py-2 text-sm font-bold text-spark-text hover:opacity-80 disabled:opacity-50"
                     >
-                      {busy === "test" ? "测试中…" : "测试连接"}
+                      {busy === "test" ? t('model.testing', lang) : t('model.testConnection', lang)}
                     </button>
                     <button
                       type="button"
                       onClick={() => setShowProfileForm(false)}
                       className="rounded-lg bg-spark-line px-4 py-2 text-sm font-bold text-spark-text hover:opacity-80"
                     >
-                      取消
+                      {t('common.cancel', lang)}
                     </button>
                   </div>
                 </div>
               )}
 
               {probe === null ? (
-                <p className="text-xs text-spark-muted">测试标准：连续两轮真实文本，流式完整结束。点「测试连接」后结果在这里显示。</p>
+                <p className="text-xs text-spark-muted">{t('model.testDesc', lang)}</p>
               ) : (
                 <div
                   className={`rounded-lg border px-3 py-2 font-mono text-xs whitespace-pre-wrap ${
@@ -484,45 +488,45 @@ export default function SettingsPanel({ status, onClose, onSaved }: Props) {
           {tab === "agent" && (
             <div className={sectionCls}>
               <label className={labelCls}>
-                审批模式
+                {t('agent.approval', lang)}
                 <select value={cfg?.agent.approval || "suggest"} onChange={(e) => patchAgent({ approval: e.target.value })} className={inputCls}>
-                  <option value="suggest">suggest（每步确认）</option>
-                  <option value="auto-edit">auto-edit（自动改文件）</option>
-                  <option value="full-auto">full-auto（全自动）</option>
+                  <option value="suggest">{t('agent.suggest', lang)}</option>
+                  <option value="auto-edit">{t('agent.autoEdit', lang)}</option>
+                  <option value="full-auto">{t('agent.fullAuto', lang)}</option>
                 </select>
               </label>
               <label className="flex items-center gap-2 text-sm text-spark-text">
                 <input type="checkbox" checked={cfg?.agent.workdir_only ?? true} onChange={(e) => patchAgent({ workdir_only: e.target.checked })} className="h-4 w-4 accent-teal-300" />
-                限制在工作目录内（workdir_only）
+                {t('agent.workdirOnly', lang)}
               </label>
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                 <label className={labelCls}>
-                  最大工具轮数
+                  {t('agent.maxToolRounds', lang)}
                   <input type="number" min={1} value={cfg?.agent.max_tool_rounds ?? 30} onChange={(e) => patchAgent({ max_tool_rounds: Number(e.target.value) })} className={inputCls} />
                 </label>
                 <label className={labelCls}>
-                  Shell 超时（秒）
+                  {t('agent.shellTimeout', lang)}
                   <input type="number" min={1} value={cfg?.agent.shell_timeout_sec ?? 60} onChange={(e) => patchAgent({ shell_timeout_sec: Number(e.target.value) })} className={inputCls} />
                 </label>
                 <label className={labelCls}>
-                  输出上限（字符）
+                  {t('agent.maxOutput', lang)}
                   <input type="number" min={200} value={cfg?.agent.max_output_chars ?? 8000} onChange={(e) => patchAgent({ max_output_chars: Number(e.target.value) })} className={inputCls} />
                 </label>
               </div>
-              <div className="text-xs font-bold tracking-widest text-spark-accent uppercase">长任务护栏</div>
-              <p className="text-xs text-spark-muted">防止死循环与费用失控。重复调用熔断：同一工具以完全相同参数连续调用超过上限即中断本轮；0 表示关闭。Token 预算：单轮累计超过上限即停止，0 表示不限。</p>
+              <div className="text-xs font-bold tracking-widest text-spark-accent uppercase">{t('agent.guardrails', lang)}</div>
+              <p className="text-xs text-spark-muted">{t('agent.guardrailsDesc', lang)}</p>
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <label className={labelCls}>
-                  重复调用熔断（次）
+                  {t('agent.repeatLimit', lang)}
                   <input type="number" min={0} value={cfg?.agent.max_repeat_calls ?? 4} onChange={(e) => patchAgent({ max_repeat_calls: Math.max(0, Number(e.target.value) || 0) })} className={inputCls} />
                 </label>
                 <label className={labelCls}>
-                  单轮 Token 预算（0=不限）
+                  {t('agent.tokenBudget', lang)}
                   <input type="number" min={0} step={1000} value={cfg?.agent.max_turn_tokens ?? 0} onChange={(e) => patchAgent({ max_turn_tokens: Math.max(0, Number(e.target.value) || 0) })} className={inputCls} />
                 </label>
               </div>
               <button type="button" onClick={handleSave} disabled={busy !== null} className="self-start rounded-lg bg-spark-accent px-4 py-2 text-sm font-bold text-spark-on-accent hover:opacity-90 disabled:opacity-50">
-                {busy === "save" ? "保存中…" : "保存设置"}
+                {busy === "save" ? t('settings.saving', lang) : t('common.save', lang)}
               </button>
             </div>
           )}
@@ -530,14 +534,14 @@ export default function SettingsPanel({ status, onClose, onSaved }: Props) {
           {tab === "security" && (
             <div className="flex flex-col gap-4">
               <div className={sectionCls}>
-                <div className="text-xs font-bold tracking-widest text-spark-accent uppercase">访问级别</div>
-                <p className="text-xs text-spark-muted">限制模型对系统的操作范围，立即生效（下一轮对话起）。</p>
+                <div className="text-xs font-bold tracking-widest text-spark-accent uppercase">{t('security.accessLevel', lang)}</div>
+                <p className="text-xs text-spark-muted">{t('security.accessDesc', lang)}</p>
                 <div className="flex flex-col gap-2">
                   {([
-                    { key: "sandbox-only", title: "仅沙箱内访问", desc: "只读工作区文件，可分析和给建议，禁用命令执行与文件写入" },
-                    { key: "workspace", title: "局部访问（推荐）", desc: "可读写文件、执行命令，但仅限工作目录内；系统目录与危险命令一律拦截" },
-                    { key: "full-access", title: "完全访问", desc: "允许操作工作目录之外的路径；系统目录与 Spark 自身代码仍受保护" },
-                    { key: "unrestricted", title: "无限制版", desc: "零防护：所有拦截全部关闭，包括 Spark 自身代码与配置，任何操作均放行；用户自定义保护路径仍生效" },
+                    { key: "sandbox-only", title: t('security.sandboxOnly', lang), desc: t('security.sandboxOnlyDesc', lang) },
+                    { key: "workspace", title: t('security.workspace', lang), desc: t('security.workspaceDesc', lang) },
+                    { key: "full-access", title: t('security.fullAccess', lang), desc: t('security.fullAccessDesc', lang) },
+                    { key: "unrestricted", title: t('security.unrestricted', lang), desc: t('security.unrestrictedDesc', lang) },
                   ] as const).map((opt) => (
                     <button
                       key={opt.key}
@@ -558,7 +562,7 @@ export default function SettingsPanel({ status, onClose, onSaved }: Props) {
                             : "bg-spark-line"
                         }`} />
                         {opt.title}
-                        {opt.key === "unrestricted" && <span className="rounded bg-spark-err/20 px-1.5 py-0.5 text-[10px] text-spark-err">危险</span>}
+                        {opt.key === "unrestricted" && <span className="rounded bg-spark-err/20 px-1.5 py-0.5 text-[10px] text-spark-err">{t('security.danger', lang)}</span>}
                       </div>
                       <p className="mt-1 text-xs text-spark-muted">{opt.desc}</p>
                     </button>
@@ -566,9 +570,9 @@ export default function SettingsPanel({ status, onClose, onSaved }: Props) {
                 </div>
               </div>
               <div className={sectionCls}>
-                <div className="text-xs font-bold tracking-widest text-spark-accent uppercase">受保护路径</div>
+                <div className="text-xs font-bold tracking-widest text-spark-accent uppercase">{t('security.protectedPaths', lang)}</div>
                 <p className="text-xs text-spark-muted">
-                  每行一个绝对路径。访问这些路径（读/写/命令内引用）会被拦截。选择「无限制版」时，系统内置保护失效，仅保留此清单；其余档位额外默认保护 /etc、/root/.spark 及 Spark 自身代码。
+                  {t('security.protectedPathsDesc', lang)}
                 </p>
                 <textarea
                   value={protectedText}
@@ -579,8 +583,8 @@ export default function SettingsPanel({ status, onClose, onSaved }: Props) {
                 />
               </div>
               <div className={sectionCls}>
-                <div className="text-xs font-bold tracking-widest text-spark-accent uppercase">运行环境探测</div>
-                <p className="text-xs text-spark-muted">启动时自动探测的默认工具链，模型被告知同样的信息。</p>
+                <div className="text-xs font-bold tracking-widest text-spark-accent uppercase">{t('security.envProbe', lang)}</div>
+                <p className="text-xs text-spark-muted">{t('security.envProbeDesc', lang)}</p>
                 {status?.env && Object.keys(status.env).length > 0 ? (
                   <dl className="flex flex-col gap-1.5 text-xs">
                     {Object.entries(status.env).map(([k, v]) => (
@@ -591,13 +595,13 @@ export default function SettingsPanel({ status, onClose, onSaved }: Props) {
                     ))}
                   </dl>
                 ) : (
-                  <p className="text-xs text-spark-muted">暂无探测数据。</p>
+                  <p className="text-xs text-spark-muted">{t('security.noProbeData', lang)}</p>
                 )}
               </div>
               <div className={sectionCls}>
-                <div className="text-xs font-bold tracking-widest text-spark-accent uppercase">生命周期钩子</div>
+                <div className="text-xs font-bold tracking-widest text-spark-accent uppercase">{t('security.hooks', lang)}</div>
                 <p className="text-xs text-spark-muted">
-                  在关键节点执行外部命令。pre_tool 在每次工具调用前运行，退出码非 0 即拦截该工具并把 stderr 作为原因回传给模型。
+                  {t('security.hooksDesc', lang)}
                 </p>
                 <div className="flex flex-col gap-2">
                   {hookRows.map((h, i) => (
@@ -608,20 +612,21 @@ export default function SettingsPanel({ status, onClose, onSaved }: Props) {
                             <option key={opt.key} value={opt.key}>{opt.label}</option>
                           ))}
                         </select>
-                        <input type="number" min={1} value={h.timeout_sec} onChange={(e) => patchHook(i, { timeout_sec: Math.max(1, Number(e.target.value) || 1) })} className={`${inputCls} w-24`} title="超时（秒）" />
-                        <button type="button" onClick={() => setHookRows((rows) => rows.filter((_, idx) => idx !== i))} className="rounded border border-spark-err/45 px-2 py-1 text-xs text-spark-err hover:bg-spark-err/12">删除</button>
+                        <input type="number" min={1} value={h.timeout_sec} onChange={(e) => patchHook(i, { timeout_sec: Math.max(1, Number(e.target.value) || 1) })} className={`${inputCls} w-24`} title={t('agent.shellTimeout', lang)} />
+                        <button type="button" onClick={() => setHookRows((rows) => rows.filter((_, idx) => idx !== i))} className="rounded border border-spark-err/45 px-2 py-1 text-xs text-spark-err hover:bg-spark-err/12">{t('common.delete', lang)}</button>
                       </div>
-                      <input value={h.command} onChange={(e) => patchHook(i, { command: e.target.value })} placeholder="命令，例如 ./scripts/lint.sh" className={`${inputCls} font-mono text-xs`} />
-                      <input value={h.args.join(" ")} onChange={(e) => patchHook(i, { args: e.target.value.trim() ? e.target.value.trim().split(/\s+/) : [] })} placeholder="参数（空格分隔，可选）" className={`${inputCls} font-mono text-xs`} />                      <input value={h.name} onChange={(e) => patchHook(i, { name: e.target.value })} placeholder="名称（可选）" className={`${inputCls} text-xs`} />
+                      <input value={h.command} onChange={(e) => patchHook(i, { command: e.target.value })} placeholder={t('mcp.commandPh', lang)} className={`${inputCls} font-mono text-xs`} />
+                      <input value={h.args.join(" ")} onChange={(e) => patchHook(i, { args: e.target.value.trim() ? e.target.value.trim().split(/\s+/) : [] })} placeholder={t('mcp.argsPh', lang)} className={`${inputCls} font-mono text-xs`} />
+                      <input value={h.name} onChange={(e) => patchHook(i, { name: e.target.value })} placeholder={t('common.name', lang)} className={`${inputCls} text-xs`} />
                     </div>
                   ))}
                   <button type="button" onClick={() => setHookRows((rows) => [...rows, { event: "pre_tool", command: "", args: [], name: "", timeout_sec: 15 }])} className="self-start rounded border border-spark-line px-3 py-1.5 text-xs text-spark-text hover:bg-spark-line">
-                    添加钩子
+                    {t('security.addHook', lang)}
                   </button>
                 </div>
               </div>
               <button type="button" onClick={handleSave} disabled={busy !== null} className="self-start rounded-lg bg-spark-accent px-4 py-2 text-sm font-bold text-spark-on-accent hover:opacity-90 disabled:opacity-50">
-                {busy === "save" ? "保存中…" : "保存权限设置"}
+                {busy === "save" ? t('settings.saving', lang) : t('agent.saveApproval', lang)}
               </button>
             </div>
           )}
@@ -631,12 +636,12 @@ export default function SettingsPanel({ status, onClose, onSaved }: Props) {
           {tab === "display" && (
             <div className="flex flex-col gap-4">
               <div className={sectionCls}>
-                <div className="text-xs font-bold tracking-widest text-spark-accent uppercase">主题颜色</div>
-                <p className="text-xs text-spark-muted">亮色 / 暗色界面，选择后立即生效并记住偏好。</p>
+                <div className="text-xs font-bold tracking-widest text-spark-accent uppercase">{t('display.theme', lang)}</div>
+                <p className="text-xs text-spark-muted">{t('display.themeDesc', lang)}</p>
                 <div className="grid grid-cols-2 gap-2">
                   {([
-                    { key: "light" as const, label: "亮色", desc: "浅色背景，适合日间" },
-                    { key: "dark" as const, label: "暗色", desc: "深色背景，适合夜间" },
+                    { key: "light" as const, label: t('display.light', lang), desc: t('display.lightDesc', lang) },
+                    { key: "dark" as const, label: t('display.dark', lang), desc: t('display.darkDesc', lang) },
                   ]).map((opt) => (
                     <button
                       key={opt.key}
@@ -662,8 +667,28 @@ export default function SettingsPanel({ status, onClose, onSaved }: Props) {
                 </div>
               </div>
               <div className={sectionCls}>
-                <div className="text-xs font-bold tracking-widest text-spark-accent uppercase">前端展示开关</div>
-                <p className="text-xs text-spark-muted">控制聊天界面中各元素的显示与隐藏，保存后立即生效。</p>
+                <div className="text-[11px] font-semibold text-spark-accent uppercase tracking-wider">
+                  {t('display.language', lang)}
+                </div>
+                <div className="flex gap-2">
+                  {(["zh", "en"] as const).map((l) => (
+                    <button
+                      key={l}
+                      onClick={() => setLang(l)}
+                      className={`rounded-lg px-3 py-1.5 text-sm transition ${
+                        lang === l
+                          ? "bg-spark-accent text-spark-on-accent"
+                          : "border border-spark-line hover:border-spark-accent"
+                      }`}
+                    >
+                      {l === "zh" ? "中文" : "English"}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className={sectionCls}>
+                <div className="text-xs font-bold tracking-widest text-spark-accent uppercase">{t('display.toggles', lang)}</div>
+                <p className="text-xs text-spark-muted">{t('display.togglesDesc', lang)}</p>
                 <div className="flex flex-col gap-2">
                   {displayOptions.map((opt) => {
                     const checked = (cfg?.agent[opt.key] as boolean | undefined) ?? true
@@ -679,8 +704,8 @@ export default function SettingsPanel({ status, onClose, onSaved }: Props) {
                           className="mt-0.5 h-4 w-4 shrink-0 accent-teal-300"
                         />
                         <span className="min-w-0">
-                          <span className="block text-sm font-bold text-spark-text">{opt.label}</span>
-                          <span className="block text-xs text-spark-muted">{opt.desc}</span>
+                          <span className="block text-sm font-bold text-spark-text">{t(opt.labelKey, lang)}</span>
+                          <span className="block text-xs text-spark-muted">{t(opt.descKey, lang)}</span>
                         </span>
                       </label>
                     )
@@ -688,7 +713,7 @@ export default function SettingsPanel({ status, onClose, onSaved }: Props) {
                 </div>
               </div>
               <button type="button" onClick={handleSave} disabled={busy !== null} className="self-start rounded-lg bg-spark-accent px-4 py-2 text-sm font-bold text-spark-on-accent hover:opacity-90 disabled:opacity-50">
-                {busy === "save" ? "保存中…" : "保存展示设置"}
+                {busy === "save" ? t('settings.saving', lang) : t('display.save', lang)}
               </button>
             </div>
           )}
@@ -696,27 +721,27 @@ export default function SettingsPanel({ status, onClose, onSaved }: Props) {
           {tab === "mcp" && (
             <div className="flex flex-col gap-3">
               <div className={sectionCls}>
-                <p className="text-xs text-spark-muted">通过 stdio 启动的 MCP 服务器，其工具会以 mcp__名称__工具 注册给模型。</p>
-                {mcpRows.length === 0 && <p className="text-xs text-spark-muted">暂未配置。</p>}
+                <p className="text-xs text-spark-muted">{t('mcp.desc', lang)}</p>
+                {mcpRows.length === 0 && <p className="text-xs text-spark-muted">{t('mcp.empty', lang)}</p>}
                 {mcpRows.map((row, i) => (
                   <div key={i} className="flex flex-col gap-2 rounded-lg border border-spark-line bg-spark-bg p-3">
                     <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                      <input value={row.name} onChange={(e) => patchMcp(i, { name: e.target.value })} placeholder="名称" className={inputCls} />
-                      <input value={row.command} onChange={(e) => patchMcp(i, { command: e.target.value })} placeholder="命令 (如 npx)" className={inputCls} />
+                      <input value={row.name} onChange={(e) => patchMcp(i, { name: e.target.value })} placeholder={t('common.name', lang)} className={inputCls} />
+                      <input value={row.command} onChange={(e) => patchMcp(i, { command: e.target.value })} placeholder={t('mcp.commandPh', lang)} className={inputCls} />
                     </div>
-                    <input value={row.args.join(" ")} onChange={(e) => patchMcp(i, { args: e.target.value.split(" ") })} placeholder="参数（空格分隔）" className={inputCls} />
-                    <input value={row.readonly_tools.join(" ")} onChange={(e) => patchMcp(i, { readonly_tools: e.target.value.split(" ") })} placeholder="只读工具名（空格分隔，可空）" className={inputCls} />
+                    <input value={row.args.join(" ")} onChange={(e) => patchMcp(i, { args: e.target.value.split(" ") })} placeholder={t('mcp.argsPh', lang)} className={inputCls} />
+                    <input value={row.readonly_tools.join(" ")} onChange={(e) => patchMcp(i, { readonly_tools: e.target.value.split(" ") })} placeholder={t('mcp.readonlyPh', lang)} className={inputCls} />
                     <button type="button" onClick={() => setMcpRows((rows) => rows.filter((_, idx) => idx !== i))} className="self-start rounded-lg bg-spark-err/12 px-3 py-1.5 text-xs font-bold text-spark-err hover:opacity-80">
-                      移除
+                      {t('common.remove', lang)}
                     </button>
                   </div>
                 ))}
                 <button type="button" onClick={() => setMcpRows((rows) => [...rows, { name: "", command: "", args: [], readonly_tools: [] }])} className="self-start rounded-lg bg-spark-line px-3 py-1.5 text-xs font-bold text-spark-text hover:opacity-80">
-                  + 添加服务器
+                  {t('mcp.add', lang)}
                 </button>
                 {mcpErrors.length > 0 && <div className="rounded-lg border border-spark-err/45 px-3 py-2 text-xs text-spark-err">{mcpErrors.join("\n")}</div>}
                 <button type="button" onClick={handleSave} disabled={busy !== null} className="self-start rounded-lg bg-spark-line px-4 py-2 text-sm font-bold text-spark-text hover:opacity-80 disabled:opacity-50">
-                  {busy === "save" ? "保存中…" : "保存设置"}
+                  {busy === "save" ? t('settings.saving', lang) : t('common.save', lang)}
                 </button>
               </div>
             </div>
@@ -725,51 +750,51 @@ export default function SettingsPanel({ status, onClose, onSaved }: Props) {
           {tab === "project" && (
             <div className="flex flex-col gap-4">
               <div className={sectionCls}>
-                <div className="text-xs font-bold tracking-widest text-spark-accent uppercase">项目记忆（AGENTS.md）</div>
-                <p className="text-xs text-spark-muted">每轮注入给模型的项目级指令，跨会话生效。超出片段上限会截断。</p>
+                <div className="text-xs font-bold tracking-widest text-spark-accent uppercase">{t('project.memoryTitle', lang)}</div>
+                <p className="text-xs text-spark-muted">{t('project.memoryDesc', lang)}</p>
                 <textarea
                   value={agentsMd?.content ?? ""}
                   onChange={(e) => {
                     dirtyRef.current.md = true
                     setAgentsMd((m) => (m ? { ...m, content: e.target.value } : m))
                   }}
-                  placeholder="例如：本项目使用 pnpm；提交信息用中文；不要动 legacy/ 目录…"
+                  placeholder={t('project.memoryPh', lang)}
                   rows={10}
                   className={`${inputCls} resize-y font-mono text-xs leading-relaxed`}
                 />
                 <div className="flex items-center justify-between">
                   <span className={`text-xs ${(agentsMd?.chars || 0) > (agentsMd?.max_fragment_chars || 8000) ? "text-spark-err" : "text-spark-muted"}`}>
-                    {agentsMd?.chars || 0} / {agentsMd?.max_fragment_chars || 8000} 字符
+                    {t('project.charCount', lang, { current: agentsMd?.chars || 0, max: agentsMd?.max_fragment_chars || 8000 })}
                   </span>
                   <button type="button" onClick={handleSaveMemory} className="rounded-lg bg-spark-line px-3 py-1.5 text-xs font-bold text-spark-text hover:opacity-80">
-                    保存记忆
+                    {t('project.saveMemory', lang)}
                   </button>
                 </div>
               </div>
               <div className={sectionCls}>
-                <div className="text-xs font-bold tracking-widest text-spark-accent uppercase">上下文管理</div>
-                <p className="text-xs text-spark-muted">上下文接近预算时，旧对话自动压缩为结构化摘要。</p>
+                <div className="text-xs font-bold tracking-widest text-spark-accent uppercase">{t('project.contextMgmt', lang)}</div>
+                <p className="text-xs text-spark-muted">{t('project.contextDesc', lang)}</p>
                 <dl className="flex flex-col gap-1.5 text-xs">
                   <div className="flex items-baseline justify-between gap-3">
-                    <dt className="shrink-0 text-spark-muted">自动压缩阈值</dt>
+                    <dt className="shrink-0 text-spark-muted">{t('project.compactThreshold', lang)}</dt>
                     <dd className="text-spark-text">{cfg?.context.compact_threshold ? `${Math.round(cfg.context.compact_threshold * 100)}%` : "—"}</dd>
                   </div>
                   <div className="flex items-baseline justify-between gap-3">
-                    <dt className="shrink-0 text-spark-muted">上下文预算</dt>
+                    <dt className="shrink-0 text-spark-muted">{t('project.contextBudget', lang)}</dt>
                     <dd className="text-spark-text">{cfg?.context.max_context_tokens ?? "—"} tokens</dd>
                   </div>
                   <div className="flex items-baseline justify-between gap-3">
-                    <dt className="shrink-0 text-spark-muted">保留最近原文</dt>
-                    <dd className="text-spark-text">{cfg?.context.keep_recent_messages ?? 8} 条</dd>
+                    <dt className="shrink-0 text-spark-muted">{t('project.keepRecent', lang)}</dt>
+                    <dd className="text-spark-text">{t('project.messages', lang, { n: cfg?.context.keep_recent_messages ?? 8 })}</dd>
                   </div>
                   <div className="flex items-baseline justify-between gap-3">
-                    <dt className="shrink-0 text-spark-muted">AGENTS.md 片段上限</dt>
-                    <dd className="text-spark-text">{cfg?.context.max_fragment_chars} 字符</dd>
+                    <dt className="shrink-0 text-spark-muted">{t('project.fragmentLimit', lang)}</dt>
+                    <dd className="text-spark-text">{t('project.chars', lang, { n: cfg?.context.max_fragment_chars ?? 0 })}</dd>
                   </div>
                 </dl>
               </div>
               <div className={sectionCls}>
-                <div className="text-xs font-bold tracking-widest text-spark-accent uppercase">工作目录</div>
+                <div className="text-xs font-bold tracking-widest text-spark-accent uppercase">{t('project.workdir', lang)}</div>
                 <code className="self-start rounded bg-spark-bg px-2 py-1 text-xs break-all text-spark-text">{cfg?.workdir || status?.workdir}</code>
               </div>
             </div>
@@ -780,10 +805,10 @@ export default function SettingsPanel({ status, onClose, onSaved }: Props) {
         )}
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-spark-line px-5 py-2.5 text-[11px] text-spark-muted">
           <span className="truncate">
-            模型 <b className="font-medium text-spark-text">{status?.model}</b>
+            {t('status.model', lang)} <b className="font-medium text-spark-text">{status?.model}</b>
           </span>
           <span>
-            审批 <b className="font-medium text-spark-text">{status?.approval}</b>
+            {t('status.approval', lang)} <b className="font-medium text-spark-text">{status?.approval}</b>
           </span>
           <span className="ml-auto hidden font-mono text-[10px] sm:inline">session {status?.session_id}</span>
         </div>

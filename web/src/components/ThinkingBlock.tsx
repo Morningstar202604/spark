@@ -1,4 +1,6 @@
 import { useState } from "react"
+import { t } from "../i18n"
+import { useUiStore } from "../store/uiStore"
 
 interface Props {
   text: string
@@ -6,6 +8,7 @@ interface Props {
 }
 
 export default function ThinkingBlock({ text, active }: Props) {
+  const lang = useUiStore((s) => s.lang)
   const [open, setOpen] = useState(false)
 
   if (!text) return null
@@ -18,11 +21,11 @@ export default function ThinkingBlock({ text, active }: Props) {
       >
         <span className={`text-[10px] transition-transform ${open ? "rotate-90" : ""}`}>▶</span>
         {active ? (
-          <span className="animate-pulse font-bold">思考中…</span>
+          <span className="animate-pulse font-bold">{t("common.thinking", lang)}</span>
         ) : (
-          <span className="font-bold">思考过程</span>
+          <span className="font-bold">{t("common.thinkingProcess", lang)}</span>
         )}
-        <span className="ml-auto text-[10px] text-spark-muted">{text.length} 字</span>
+        <span className="ml-auto text-[10px] text-spark-muted">{t("common.charCount", lang, { n: text.length })}</span>
       </button>
       {open && (
         <div className="max-h-56 overflow-auto border-t border-spark-user/25 px-3 py-2 whitespace-pre-wrap break-words text-spark-text/75">

@@ -4,7 +4,6 @@ from pathlib import Path
 import pytest
 
 from spark.config import SparkConfig
-from spark.models import ToolResult
 from spark.sandbox import WorkdirSandbox
 from spark.tools import search, web
 

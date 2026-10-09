@@ -1,3 +1,5 @@
+> 🌐 [English](README.md) | [中文](README_zh.md)
+
 # Spark Agent
 
 Spark 是一个**本地自托管**的 AI 编程 Agent，代码在你手，密钥在你手。

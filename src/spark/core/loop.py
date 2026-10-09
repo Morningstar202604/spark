@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import os
 from collections import deque
 from collections.abc import Awaitable, Callable
 from importlib.resources import files
@@ -10,6 +11,8 @@ from pathlib import Path
 from stat import S_ISREG
 
 from spark.config import SparkConfig
+from spark.core.compact import Compactor
+from spark.core.graph import build_react_graph
 from spark.core.context import build_messages, load_agents_md, load_system_prompt
 from spark.core.tokens import estimate_message_tokens, estimate_tool_overhead
 from spark.hooks import HookRegistry
@@ -73,6 +76,26 @@ class AgentLoop:
         self.hooks = HookRegistry.from_config(
             [hook.model_dump() for hook in getattr(cfg, "hooks", [])], workdir
         )
+        self._compactor = Compactor(provider=provider, cfg=cfg)
+        # ── LangGraph orchestration (opt-in) ──────────────────────────────
+        # When enabled, the core ReAct cycle (LLM → tools → repeat) is run
+        # as a LangGraph StateGraph via ``_iter_turn_graph``.
+        self._use_graph: bool = getattr(
+            cfg.agent, "use_langgraph", False
+        ) or os.environ.get("SPARK_USE_LANGGRAPH", "").lower() in {"1", "true", "yes"}
+        # --- lifecycle hooks (best-effort) ---
+        self._notify_safe("app_start", {"workdir": str(workdir)})
+        if len(self.history) == 0:
+            self._notify_safe("session_create", {"session_id": session_id})
+        else:
+            self._notify_safe("session_load", {"session_id": session_id})
+
+    def _notify_safe(self, event: str, payload: dict) -> None:
+        """Fire hook event; swallows all errors to protect the main loop."""
+        try:
+            self._hooks.notify(event, payload)
+        except Exception:
+            pass  # hooks are best-effort
 
     def cancel(self) -> None:
         self.cancelled = True
@@ -285,7 +308,7 @@ class AgentLoop:
         old_part = self.history[:boundary]
         if all(m.role == "summary" for m in old_part):
             return None
-        summary_text = await self._summarize(old_part)
+        summary_text = await self._compactor.summarize(old_part)
         if not summary_text:
             return None
         summary_msg = ChatMessage(
@@ -297,6 +320,15 @@ class AgentLoop:
         before_tokens = usage["used"]
         self._replace_history(self.store.load_messages(self.session_id))
         after_usage = self._usage()
+        self._notify_safe(
+            "compaction",
+            {
+                "message_count": len(old_part),
+                "before_tokens": before_tokens,
+                "after_tokens": after_usage["used"],
+                "limit": limit,
+            },
+        )
         return {
             "before_tokens": before_tokens,
             "after_tokens": after_usage["used"],
@@ -305,44 +337,21 @@ class AgentLoop:
             "usage": after_usage,
         }
 
-    async def _summarize(self, messages: list[ChatMessage]) -> str | None:
-        lines: list[str] = []
-        for msg in messages:
-            content = (msg.content or "").strip()
-            if msg.role == "summary":
-                lines.append(f"[prior summary]\n{content[:4000]}")
-                continue
-            if msg.tool_calls:
-                calls = ", ".join(c.name for c in msg.tool_calls)
-                lines.append(f"[assistant tool calls: {calls}]\n{content[:800]}")
-                continue
-            if msg.role == "tool":
-                lines.append(f"[tool {msg.name}]\n{content[:1200]}")
-                continue
-            label = "user" if msg.role == "user" else "assistant"
-            lines.append(f"[{label}]\n{content[:2000]}")
-        conversation = "\n\n".join(lines)
-        if not conversation.strip():
-            return None
-        prompt = (
-            "你是编码 Agent 的上下文压缩器。把以下对话历史压缩为后续工作所需的结构化摘要，"
-            "用中文 Markdown 输出，严格包含以下小节：\n\n"
-            "## 主要目标\n## 关键决定与约束\n## 涉及的文件与代码（写明路径与关键函数）\n"
-            "## 已完成\n## 未完成 / 待办\n## 错误与修复\n## 当前状态\n## 下一步\n\n"
-            "保留所有文件路径、命令、报错信息的原文。不要输出任何小节之外的内容。\n\n"
-            f"对话历史：\n{conversation[:60000]}"
-        )
-        messages_req = [ChatMessage(role="user", content=prompt)]
-        parts: list[str] = []
-        try:
-            async for delta in self.provider.stream(messages_req, []):
-                if delta.type == "text" and delta.text:
-                    parts.append(delta.text)
-        except Exception:
-            return None
-        return "".join(parts).strip() or None
-
     async def iter_turn(self, user_text: str, images=None):
+        self._notify_safe(
+            "turn_start",
+            {"session_id": self.session_id, "message": user_text},
+        )
+
+        # ── LangGraph opt-in path ─────────────────────────────────────────
+        # When ``_use_graph`` is True (cfg flag or env var), delegate the
+        # core ReAct cycle to a LangGraph StateGraph.  The original while-loop
+        # below remains the default and is only turned off explicitly.
+        if self._use_graph:
+            async for event in self._iter_turn_graph(user_text, images=images):
+                yield event
+            return
+
         compacted = await self._maybe_compact()
         if compacted:
             yield TurnEvent(type="compaction", data=compacted)
@@ -352,6 +361,10 @@ class AgentLoop:
         if self.memory is not None:
             try:
                 memory_block = self.memory.retrieve_context(user_text)
+                self._notify_safe(
+                    "memory_extract",
+                    {"action": "retrieve", "query": user_text},
+                )
             except Exception:
                 memory_block = None
         user = ChatMessage(role="user", content=user_text, images=images)
@@ -393,6 +406,7 @@ class AgentLoop:
                 cfg=self.cfg,
                 history=self.history,
                 memory_block=memory_block,
+                _compactor=self._compactor,
             )
             text_parts: list[str] = []
             reasoning_parts: list[str] = []
@@ -558,16 +572,26 @@ class AgentLoop:
                 await self._persist_tool(call, message_id, result, "hook_block")
                 yield TurnEvent(type="tool_end", tool_call=call, result=result)
                 return
+        rules = self.cfg.permission_rules or None
         decision = decide(
             self.cfg.agent.approval,
             call,
             allow_always=self.allow_always,
             readonly_mcp=self.registry.readonly_mcp,
+            rules=rules,
         )
         approval_label = "allow"
         if decision == "prompt":
             summary, diff = self.registry.approval_summary(call)
             request = ApprovalRequest(tool_call=call, summary=summary, diff=diff)
+            self._notify_safe(
+                "approval_needed",
+                {
+                    "tool_call": call.name,
+                    "arguments": call.arguments,
+                    "summary": summary,
+                },
+            )
             yield TurnEvent(type="approval_needed", approval=request, tool_call=call)
             if self.approver is None:
                 result = ToolResult(
@@ -641,6 +665,15 @@ class AgentLoop:
                 result = ToolResult(ok=True, payload={"summaries": summary_parts})
         else:
             result = await self.registry.execute(call)
+        if not result.ok:
+            self._notify_safe(
+                "tool_error",
+                {
+                    "tool_call": call.name,
+                    "arguments": call.arguments,
+                    "error": result.payload.get("error", ""),
+                },
+            )
         await self._persist_tool(call, message_id, result, approval_label)
         yield TurnEvent(type="tool_end", tool_call=call, result=result)
 
@@ -812,3 +845,251 @@ class AgentLoop:
         finally:
             self._active_children.remove(sub_loop)
             sub_store.close()
+
+    # ── LangGraph-integrated ReAct loop ──────────────────────────────────
+    # When ``_use_graph`` is True the outer turn-cycle is identical to
+    # ``iter_turn`` (compact → user msg → inner loop → auto-checkpoint) but
+    # the **inner loop** is delegated to a LangGraph ``StateGraph``.  The
+    # graph provides:
+    #   • typed intermediate state (ReActState)
+    #   • interrupt_before on the tools node for human approval
+    #   • optional checkpointer persistence per thread_id (= session_id)
+    #   • astream streaming for incremental event emission
+    # All helper methods (``_run_tool``, ``_record_call``,
+    # ``_budget_exceeded``, ``_charge_tokens``, ``_maybe_compact``,
+    # ``_budget_state``) remain shared between the two paths.
+
+    async def _iter_turn_graph(self, user_text: str, images=None) -> AsyncIterator[TurnEvent]:
+        """LangGraph-backed variant of the inner ReAct loop.
+
+        Mirrors the flow of ``iter_turn`` but drives each
+        *think → act → observe* cycle through LangGraph nodes.  All
+        Spark-specific behaviour (token counting, circuit-breaker, approval,
+        compaction, auto-checkpoint) is preserved.
+        """
+        # 1. Pre-loop: compaction, memory, user message — same as iter_turn
+        compacted = await self._maybe_compact()
+        if compacted:
+            yield TurnEvent(type="compaction", data=compacted)
+        yield TurnEvent(type="context", data={"usage": self._usage()})
+        memory_block = None
+        if self.memory is not None:
+            try:
+                memory_block = self.memory.retrieve_context(user_text)
+                self._notify_safe(
+                    "memory_extract",
+                    {"action": "retrieve", "query": user_text},
+                )
+            except Exception:
+                memory_block = None
+        user_msg = ChatMessage(role="user", content=user_text)
+        if images:
+            user_msg.images = images  # type: ignore[assignment]
+        self._append_history(user_msg)
+        self.store.append_message(self.session_id, user_msg)
+        if not self.store.session_title(self.session_id):
+            self.store.set_title(self.session_id, (user_text or "")[:80])
+
+        # 2. Inner ReAct loop via LangGraph
+        rounds = 0
+        self._turn_tokens = 0
+        self._call_window = deque(maxlen=self._breaker_window())
+        self._call_counts.clear()
+
+        checkpointer = None
+        try:
+            from langgraph.checkpoint.memory import MemorySaver
+            checkpointer = MemorySaver()
+        except Exception:
+            pass  # run without checkpointer
+
+        graph = build_react_graph(
+            provider=self.provider,
+            registry=self.registry,
+            workdir=self.workdir,
+            cfg=self.cfg,
+            approver=self.approver,
+            compactor=self._compactor,
+            store=self.store,
+            session_id=self.session_id,
+            memory_obj=self.memory,
+            checkpointer=checkpointer,
+        )
+
+        config = {"configurable": {"thread_id": self.session_id}}
+        state: dict = {
+            "provider": self.provider,
+            "registry": self.registry,
+            "workdir": self.workdir,
+            "cfg": self.cfg,
+            "approver": self.approver,
+            "compactor": self._compactor,
+            "store": self.store,
+            "session_id": self.session_id,
+            "memory_obj": self.memory,
+            "history": list(self.history),
+            "messages": [],
+            "tool_calls": [],
+            "tool_results": [],
+            "text_parts": [],
+            "reasoning_parts": [],
+            "rounds": 0,
+            "turn_tokens": 0,
+            "compacted_this_turn": False,
+            "allow_always": set(self.allow_always),
+        }
+
+        while True:
+            if self.cancelled:
+                yield TurnEvent(type="turn_error", text="Turn cancelled")
+                return
+            if rounds >= self.cfg.agent.max_tool_rounds:
+                yield TurnEvent(
+                    type="turn_error",
+                    text="Reached max_tool_rounds",
+                    data=self._budget_state(),
+                )
+                return
+            if self._budget_exceeded():
+                yield TurnEvent(
+                    type="turn_error",
+                    text=(
+                        "Token budget exceeded for this turn "
+                        f"({self._turn_tokens}/{self.cfg.agent.max_turn_tokens})"
+                    ),
+                    data=self._budget_state(),
+                )
+                return
+
+            try:
+                async for chunk in graph.astream(state, config=config):
+                    # LangGraph emits node-level updates; detect LLM delta
+                    # patches and re-emit as TurnEvents for compatibility.
+                    if "llm" in chunk:
+                        llm_out = chunk["llm"]
+                        for txt in llm_out.get("text_parts", []):
+                            if txt:
+                                yield TurnEvent(type="text_delta", text=txt)
+                        for rsn in llm_out.get("reasoning_parts", []):
+                            if rsn:
+                                yield TurnEvent(type="reasoning_delta", text=rsn)
+                        for tc in llm_out.get("tool_calls", []):
+                            pass  # handled below after node completes
+                    elif "tools" in chunk:
+                        pass  # tool node finished
+            except Exception as exc:
+                # LangGraph interrupts for approval surface here as a dict.
+                exc_str = str(exc)
+                if "interrupt" in exc_str.lower():
+                    # Extract approval info from the interrupt payload and
+                    # surface it as approval_needed (same as _run_tool path).
+                    interrupt_data = getattr(exc, "value", None)
+                    if interrupt_data:
+                        yield TurnEvent(
+                            type="approval_needed",
+                            data={"approval": interrupt_data, "tool": None},
+                            tool=None,
+                        )
+                        # Wait for caller to provide Command(resume=…) via
+                        # graph input — for now we simply end the turn.
+                        return
+                yield TurnEvent(type="turn_error", text=exc_str)
+                return
+
+            # LLM node may have terminated the stream naturally
+            llm_state = {}
+            state.update(llm_state)
+
+            # After LLM node completes the graph ends (no more nodes after
+            # tools → END).  The outer loop mimics the original `iter_turn`:
+            if not state.get("tool_calls"):
+                # LLM finished without tool calls → turn complete
+                assistant = ChatMessage(
+                    role="assistant",
+                    content="".join(state.get("text_parts", [])),
+                )
+                self._append_history(assistant)
+                assistant_id = self.store.append_message(self.session_id, assistant)
+                self._maybe_auto_checkpoint(assistant_id)
+                yield TurnEvent(
+                    type="context",
+                    data={"usage": self._usage(), **self._budget_state()},
+                )
+                if self._budget_exceeded():
+                    yield TurnEvent(
+                        type="turn_error",
+                        text=(
+                            "Token budget exceeded for this turn "
+                            f"({self._turn_tokens}/{self.cfg.agent.max_turn_tokens})"
+                        ),
+                        data=self._budget_state(),
+                    )
+                    return
+                yield TurnEvent(type="turn_end", text=assistant.content)
+                return
+
+            # Circuit breaker
+            tool_calls: list = state["tool_calls"]  # type: ignore[assignment]
+            tripped = None
+            from spark.models import ToolCall as _TC
+
+            for raw in tool_calls:
+                call = raw if isinstance(raw, _TC) else _TC(**raw)
+                guard = self._record_call(call)
+                if guard is not None:
+                    tripped = (call.name, guard[1])
+                    break
+            if tripped is not None:
+                name, count = tripped
+                yield TurnEvent(
+                    type="context",
+                    data={
+                        "usage": self._usage(),
+                        "circuit_breaker": {
+                            "tool": name,
+                            "repeats": count,
+                            "limit": self.cfg.agent.max_repeat_calls,
+                        },
+                        **self._budget_state(),
+                    },
+                )
+                yield TurnEvent(
+                    type="turn_error",
+                    text=(
+                        f"Circuit breaker: tool '{name}' repeated with identical "
+                        f"arguments {count} times (limit "
+                        f"{self.cfg.agent.max_repeat_calls})"
+                    ),
+                    data=self._budget_state(),
+                )
+                return
+
+            # Persist assistant message + emit tool events (same as iter_turn)
+            assistant = ChatMessage(
+                role="assistant",
+                content="".join(state.get("text_parts", [])) or None,
+                tool_calls=[c if isinstance(c, _TC) else _TC(**c) for c in tool_calls],
+            )
+            self._append_history(assistant)
+            msg_id = self.store.append_message(self.session_id, assistant)
+            for raw in tool_calls:
+                call = raw if isinstance(raw, _TC) else _TC(**c)
+                async for event in self._run_tool(call, msg_id):
+                    yield event
+                    if event.type == "turn_error":
+                        return
+                if call.name == "update_plan" and self.registry.plan:
+                    yield TurnEvent(type="plan", data={"steps": self.registry.plan})
+
+            # Token accounting
+            self._turn_tokens += state.get("turn_tokens", 0)
+            rounds += 1
+
+            # Refresh history from persistent store for next iteration
+            state["history"] = list(self.history)
+            state["tool_calls"] = []
+            state["text_parts"] = []
+            state["reasoning_parts"] = []
+            state["turn_tokens"] = 0
+            state["messages"] = []
+

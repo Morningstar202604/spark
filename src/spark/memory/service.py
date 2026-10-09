@@ -1,3 +1,4 @@
+"""Memory service: auto-extraction, retrieval, consolidation, and manual CRUD."""
 from __future__ import annotations
 
 import asyncio
@@ -7,15 +8,13 @@ import time
 
 from spark.config import SparkConfig
 from spark.memory.extractor import (
-    Candidate,
     consolidate_group,
     extract_facts,
     redact_secrets,
     resolve_operations,
 )
-from spark.memory.llm import embed_texts, messages_to_transcript
-from spark.memory.store import MemoryRow, MemoryStore, tokenize
-from spark.models import ChatMessage
+from spark.memory.llm import embed_texts
+from spark.memory.store import MemoryRow, MemoryStore
 
 EXPLICIT_RE = re.compile(r"记住|请记|remember|memorize|keep in mind", re.IGNORECASE)
 
@@ -403,10 +402,6 @@ class MemoryService:
 
 
 __all__ = [
-    "Candidate",
-    "ChatMessage",
     "MemoryService",
     "MemoryStore",
-    "messages_to_transcript",
-    "tokenize",
 ]

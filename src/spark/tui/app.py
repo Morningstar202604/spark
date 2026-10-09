@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from rich.markup import escape as rich_escape
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
@@ -26,6 +27,8 @@ _TOOLBAR_LABELS = {
     "test-model": ("Test model", "T"),
     "help": ("Help (?)", "?"),
 }
+_SPINNER_FRAMES = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+_FLUSH_THRESHOLD = 200  # flush text buffer after this many chars
 
 
 class HelpScreen(ModalScreen[None]):
@@ -105,11 +108,11 @@ class ApprovalScreen(ModalScreen[ApprovalDecision]):
                 f"是否允许执行 {self.request.tool_call.name}？  [访问级别={self.access_mode}]",
                 id="title",
             ),
-            RichLog(id="detail", wrap=True),
+            RichLog(id="detail", wrap=True, markup=True),
             Horizontal(
-                Button("允许", id="allow", variant="success"),
-                Button("拒绝", id="deny", variant="error"),
-                Button("始终允许", id="always", variant="primary"),
+                Button("允许 (y)", id="allow", variant="success"),
+                Button("拒绝 (n)", id="deny", variant="error"),
+                Button("始终允许 (a)", id="always", variant="primary"),
                 id="approval-actions",
             ),
             id="dialog",
@@ -122,7 +125,7 @@ class ApprovalScreen(ModalScreen[ApprovalDecision]):
     def on_mount(self) -> None:
         self._set_narrow(self.size.width <= _NARROW_TERMINAL_WIDTH)
         log = self.query_one("#detail", RichLog)
-        log.write(self.request.diff or self.request.summary)
+        log.write(rich_escape(self.request.diff or self.request.summary))
         try:
             self.query_one("#deny", Button).focus()
         except Exception:
@@ -132,9 +135,19 @@ class ApprovalScreen(ModalScreen[ApprovalDecision]):
         self._set_narrow(event.size.width <= _NARROW_TERMINAL_WIDTH)
 
     def on_key(self, event) -> None:
-        if event.key == "escape":
+        if event.key == "escape" or event.key == "n":
             self.dismiss(
                 ApprovalDecision(tool_call_id=self.request.tool_call.id, action="deny")
+            )
+        elif event.key == "y":
+            self.dismiss(
+                ApprovalDecision(tool_call_id=self.request.tool_call.id, action="allow")
+            )
+        elif event.key == "a":
+            self.dismiss(
+                ApprovalDecision(
+                    tool_call_id=self.request.tool_call.id, action="allow_always"
+                )
             )
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
@@ -147,6 +160,65 @@ class ApprovalScreen(ModalScreen[ApprovalDecision]):
         self.dismiss(
             ApprovalDecision(tool_call_id=self.request.tool_call.id, action=action)
         )
+
+
+class _SessionPickerList(Vertical):
+    """Inner vertical that holds the session buttons."""
+
+
+class SessionPicker(ModalScreen[str | None]):
+    """Simple modal for picking a session to resume."""
+
+    CSS = """
+    #dialog {
+        width: 100%;
+        max-width: 80;
+        height: auto;
+        max-height: 80%;
+        padding: 1 2;
+        background: #1c1815;
+    }
+    #title {
+        width: 100%;
+        height: auto;
+        text-wrap: wrap;
+    }
+    #picker-list {
+        width: 100%;
+        height: auto;
+    }
+    #picker-list Button {
+        width: 100%;
+        height: auto;
+        min-height: 1;
+        margin-top: 0;
+    }
+    """
+
+    def compose(self) -> ComposeResult:
+        yield Vertical(
+            Static("选择会话 (Esc 取消)", id="title"),
+            _SessionPickerList(id="picker-list"),
+            id="dialog",
+        )
+
+    def on_mount(self) -> None:
+        container = self.query_one("#picker-list", Vertical)
+        for s in self.app.store.list_sessions():
+            sid = s["id"]
+            label = s.get("title") or sid[:8]
+            workdir = s.get("workdir", "")
+            container.mount(
+                Button(f"{label}  @{workdir}", id=f"session-{sid}", variant="default")
+            )
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        sid = (event.button.id or "").replace("session-", "", 1)
+        self.dismiss(sid)
+
+    def on_key(self, event) -> None:
+        if event.key == "escape":
+            self.dismiss(None)
 
 
 class SparkApp(App):
@@ -190,6 +262,7 @@ class SparkApp(App):
         Binding("ctrl+l", "clear_chat", "Clear view", show=True),
         Binding("ctrl+t", "test_model", "Test model", show=True),
         Binding("question_mark", "toggle_help", "Help", show=True),
+        Binding("ctrl+r", "resume_session", "Switch session", show=True),
     ]
 
     def __init__(
@@ -210,8 +283,11 @@ class SparkApp(App):
         self.cfg = cfg
         self.store = store
         self.session_id = session_id
+        self.provider = provider
+        self.registry = registry
         self.bridge = bridge
         self.initial_prompt = initial_prompt
+        self.memory = memory
         self.loop_engine = AgentLoop(
             workdir=workdir,
             cfg=cfg,
@@ -223,6 +299,8 @@ class SparkApp(App):
             memory=memory,
         )
         self._running = False
+        self._current_text = ""
+        self._spinner_index = 0
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -233,7 +311,7 @@ class SparkApp(App):
             id="toolbar",
         )
         yield RichLog(
-            id="chat", wrap=True, highlight=True, markup=False, max_lines=5000
+            id="chat", wrap=True, highlight=True, markup=True, max_lines=5000
         )
         yield Input(
             placeholder="Describe a task and press Enter (? for help)", id="composer"
@@ -255,15 +333,16 @@ class SparkApp(App):
 
     def on_mount(self) -> None:
         self._set_toolbar_compact(self.size.width <= _NARROW_TERMINAL_WIDTH)
+        self.set_interval(0.1, self._tick_spinner)
         chat = self.query_one("#chat", RichLog)
         chat.write(welcome_text(self.cfg, str(self.workdir)))
         restored = 0
         for msg in self.loop_engine.history:
             if msg.role in {"user", "assistant"} and msg.content:
-                chat.write(f"{msg.role}: {msg.content}")
+                chat.write(f"[bold cyan]{msg.role}[/bold cyan] {rich_escape(msg.content)}")
                 restored += 1
         if restored:
-            chat.write(f"（已恢复 {restored} 条历史消息）")
+            chat.write(f"[dim]（已恢复 {restored} 条历史消息）[/dim]")
         if self.initial_prompt:
             self.run_worker(self._run_prompt(self.initial_prompt), exclusive=True)
 
@@ -299,7 +378,7 @@ class SparkApp(App):
 
     async def _test_model(self) -> None:
         chat = self.query_one("#chat", RichLog)
-        chat.write("正在测试模型连通性…")
+        chat.write("[dim]正在测试模型连通性…[/dim]")
         try:
             key = require_api_key(self.cfg) or ""
             result = await probe_provider(
@@ -309,17 +388,17 @@ class SparkApp(App):
                 rounds=2,
             )
         except Exception as exc:
-            chat.write(f"[red]测试失败[/red] {exc}")
+            chat.write(f"[red bold]测试失败[/red bold] {rich_escape(str(exc))}")
             chat.write(f"[yellow]{error_hint(str(exc))}[/yellow]")
             return
         if result.ok:
             chat.write(
                 f"[green]连通正常[/green] {result.latency_ms}ms x{result.rounds}"
             )
-            chat.write(f"content: {result.content}")
-            chat.write(f"stream: {result.stream_content}")
+            chat.write(f"content: {rich_escape(str(result.content))}")
+            chat.write(f"stream: {rich_escape(str(result.stream_content))}")
         else:
-            chat.write(f"[red]测试失败[/red] {result.error}")
+            chat.write(f"[red bold]测试失败[/red bold] {rich_escape(result.error or '')}")
             chat.write(f"[yellow]{error_hint(result.error or '')}[/yellow]")
 
     async def _approve(self, request: ApprovalRequest) -> ApprovalDecision:
@@ -329,45 +408,123 @@ class SparkApp(App):
 
     async def _run_prompt(self, text: str) -> None:
         self._running = True
+        self._current_text = ""
+        self._update_status()
         chat = self.query_one("#chat", RichLog)
-        chat.write(f"[bold cyan]你[/bold cyan] {text}")
+        chat.write(f"[bold cyan]你[/bold cyan] {rich_escape(text)}")
         try:
             async for event in self.loop_engine.iter_turn(text):
                 self._render(event, chat)
         finally:
+            self._flush_text(chat)
             self._running = False
+            self._update_status()
+
+    def _flush_text(self, chat: RichLog) -> None:
+        if self._current_text:
+            chat.write(self._current_text.rstrip("\n"))
+            self._current_text = ""
 
     def _render(self, event: TurnEvent, chat: RichLog) -> None:
         if event.type == "text_delta" and event.text:
-            chat.write(event.text)
-        elif event.type == "reasoning_delta" and event.text:
-            chat.write(f"[thinking] {event.text}")
+            self._current_text += event.text
+            if "\n" in event.text or len(self._current_text) > _FLUSH_THRESHOLD:
+                self._flush_text(chat)
+            return
+        self._flush_text(chat)
+        if event.type == "reasoning_delta" and event.text:
+            chat.write(f"[dim italic]思考: {rich_escape(event.text)}[/dim italic]")
         elif event.type == "tool_start" and event.tool_call:
-            chat.write(f"tool {event.tool_call.name} ...")
+            chat.write(f"[bold yellow]▶ {rich_escape(event.tool_call.name)}[/bold yellow] ...")
         elif event.type == "tool_end" and event.tool_call and event.result:
             payload = str(event.result.payload)
             if len(payload) > 500:
                 payload = payload[:500] + "..."
-            chat.write(f"tool {event.tool_call.name}: {payload}")
+            status = "ok" if event.result.ok else "fail"
+            color = "green" if event.result.ok else "red"
+            chat.write(
+                f"[{color}]◀ {event.tool_call.name} [{status}][/color] {rich_escape(payload)}"
+            )
         elif event.type == "plan" and event.data and event.data.get("steps"):
             steps = event.data["steps"]
-            chat.write("plan: " + " | ".join(str(s.get("title", "")) for s in steps))
+            chat.write("[bold]plan:[/bold] " + " | ".join(
+                str(s.get("title", "")) for s in steps
+            ))
         elif event.type == "context" and event.data and event.data.get("usage"):
             usage = event.data["usage"]
-            chat.write(f"context: {usage.get('used')}/{usage.get('limit')} tokens")
+            chat.write(
+                f"[dim]context: {usage.get('used')}/{usage.get('limit')} tokens[/dim]"
+            )
         elif (
             event.type == "compaction"
             and event.data
             and event.data.get("before_tokens")
         ):
             chat.write(
-                f"compacted: {event.data['before_tokens']} -> {event.data.get('after_tokens')} tokens"
+                f"[dim]compacted: {event.data['before_tokens']} -> "
+                f"{event.data.get('after_tokens')} tokens[/dim]"
             )
         elif event.type == "turn_error":
-            chat.write(f"[red]错误[/red] {event.text}")
-            chat.write(f"[yellow]{error_hint(event.text or '')}[/yellow]")
+            text = event.text or "未知错误"
+            hint = error_hint(text)
+            chat.write("[red]━" * 30 + "[/red]")
+            chat.write(f"[red bold]✗ 错误[/red bold] {rich_escape(text)}")
+            if hint:
+                chat.write(f"[yellow]→ {hint}[/yellow]")
+            chat.write("[red]━" * 30 + "[/red]")
         elif event.type == "turn_end" and event.text:
             pass
+
+    def _update_status(self, spinner_frame: str = "") -> None:
+        status = self.query_one("#status", Static)
+        base = self._status_text()
+        if self._running and spinner_frame:
+            status.update(f"Spark {spinner_frame} {base}")
+            status.styles.color = "#ffcc00"
+        else:
+            status.update(base)
+            status.styles.color = "#ff7a3d"
+
+    def _tick_spinner(self) -> None:
+        if not self._running:
+            return
+        self._spinner_index = (self._spinner_index + 1) % len(_SPINNER_FRAMES)
+        self._update_status(_SPINNER_FRAMES[self._spinner_index])
+
+    def action_resume_session(self) -> None:
+        if self._running:
+            return
+        self.run_worker(self._switch_session(), exclusive=True)
+
+    async def _switch_session(self) -> None:
+        target = await self.push_screen_wait(SessionPicker())
+        if not target or target == self.session_id:
+            return
+        self.loop_engine.cancel()
+        self.session_id = target
+        self.loop_engine = AgentLoop(
+            workdir=self.workdir,
+            cfg=self.cfg,
+            provider=self.provider,
+            registry=self.registry,
+            store=self.store,
+            session_id=target,
+            approver=self._approve,
+            memory=self.memory,
+        )
+        self.query_one("#chat", RichLog).clear()
+        self.query_one("#chat", RichLog).write(
+            welcome_text(self.cfg, str(self.workdir))
+        )
+        restored = 0
+        chat = self.query_one("#chat", RichLog)
+        for msg in self.loop_engine.history:
+            if msg.role in {"user", "assistant"} and msg.content:
+                chat.write(f"[bold cyan]{msg.role}[/bold cyan] {rich_escape(msg.content)}")
+                restored += 1
+        if restored:
+            chat.write(f"[dim]（已恢复到会话 {target[:8]}，{restored} 条历史消息）[/dim]")
+        self._update_status()
 
     async def on_unmount(self) -> None:
         try:

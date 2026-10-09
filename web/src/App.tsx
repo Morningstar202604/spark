@@ -1,29 +1,25 @@
-import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react"
-import ChatMessage, { type ChatItem } from "./components/ChatMessage"
+import { lazy, Suspense, useCallback, useEffect, useRef } from "react"
+import ChatMessage from "./components/ChatMessage"
 import Modal from "./components/Modal"
 import SessionSidebar from "./components/SessionSidebar"
 import ApprovalCard from "./components/ApprovalCard"
 import InputBox from "./components/InputBox"
 import ThinkingBlock from "./components/ThinkingBlock"
-import Toast, { type ToastItem } from "./components/Toast"
+import Toast from "./components/Toast"
 import ContextMeter from "./components/ContextMeter"
 import PlanCard from "./components/PlanCard"
 import Logo from "./components/Logo"
 import {
   fetchStatus,
-  streamChat,
-  listSessions,
-  newSession,
-  switchSession,
-  deleteSession,
-  cancelTurn,
-  respondApproval,
   listCheckpoints,
   rollbackCheckpoint,
-  fetchHistory,
   type CheckpointRow,
 } from "./api"
-import type { ApprovalInfo, ChatEvent, PlanStep, SessionRow, Status } from "./types"
+import type { HistoryMessage } from "./types"
+import { useChatStore } from "./store/chatStore"
+import { useSessionStore } from "./store/sessionStore"
+import { useUiStore } from "./store/uiStore"
+import { t } from "./i18n"
 
 const EXAMPLES = [
   "看看这个项目的结构，总结入口文件",
@@ -33,23 +29,21 @@ const EXAMPLES = [
 
 const SettingsPanel = lazy(() => import("./components/SettingsPanel"))
 
-function historyToItems(messages: { role: "user" | "assistant" | "tool"; content: string; name?: string; images?: string[] }[]): ChatItem[] {
+function historyToItems(messages: HistoryMessage[]) {
   return messages.map((m) =>
     m.role === "tool"
-      ? { kind: "tool", role: "assistant", text: "", call: { id: "", name: m.name || "tool", arguments: {} }, result: m.content, ok: true }
-      : { kind: "message", role: m.role, text: m.content, images: m.images },
+      ? { kind: "tool" as const, role: "assistant" as const, text: "", call: { id: "", name: m.name || "tool", arguments: {} as unknown }, result: m.content, ok: true }
+      : { kind: "message" as const, role: m.role, text: m.content, images: m.images },
   )
 }
 
-interface CheckpointDialogProps {
+function CheckpointDialog({ checkpoints, busy, streaming, onClose, onRollback }: {
   checkpoints: CheckpointRow[]
   busy: boolean
   streaming: boolean
   onClose: () => void
   onRollback: (id: number) => void
-}
-
-function CheckpointDialog({ checkpoints, busy, streaming, onClose, onRollback }: CheckpointDialogProps) {
+}) {
   return (
     <Modal labelledBy="checkpoint-dialog-title" onClose={onClose} className="animate-fade">
       <aside className="animate-in absolute top-0 right-0 flex h-full w-full flex-col border-l border-spark-line bg-spark-panel sm:w-[26rem]">
@@ -99,22 +93,14 @@ function CheckpointDialog({ checkpoints, busy, streaming, onClose, onRollback }:
 }
 
 export default function App() {
-  const [status, setStatus] = useState<Status | null>(null)
-  const [items, setItems] = useState<ChatItem[]>([])
-  const [input, setInput] = useState("")
-  const [streaming, setStreaming] = useState(false)
-  const [settingsOpen, setSettingsOpen] = useState(false)
-  const [sidebarOpen, setSidebarOpen] = useState(window.innerWidth >= 768)
-  const [sessions, setSessions] = useState<SessionRow[]>([])
-  const [approval, setApproval] = useState<ApprovalInfo | null>(null)
-  const [thinking, setThinking] = useState<{ text: string; active: boolean } | null>(null)
-  const [plan, setPlan] = useState<PlanStep[]>([])
-  const [cpsOpen, setCpsOpen] = useState(false)
-  const [checkpoints, setCheckpoints] = useState<CheckpointRow[]>([])
-  const [cpsBusy, setCpsBusy] = useState(false)
+  const { items, input, streaming, thinking, loading, setInput, send, loadInitialHistory, setItems, setThinking, addErrorItem } = useChatStore()
+  const { status, sessions, plan, approval, approvalBusy, setStatus, setPlan, refreshSessions, handleNewSession, handleSwitch, handleDelete, handleCancel, handleApproval } = useSessionStore()
+  const { settingsOpen, sidebarOpen, toasts, checkpoints, cpsOpen, cpsBusy, openSettings, closeSettings, toggleSidebar, setSidebarOpen, pushToast, dismissToast, openCheckpoints, closeCheckpoints, setCheckpoints, setCpsBusy } = useUiStore()
+  const lang = useUiStore((s) => s.lang)
+
   const logRef = useRef<HTMLDivElement>(null)
-  const showNoticesRef = useRef(true)
-  showNoticesRef.current = status?.display?.show_notices ?? true
+  const interactedRef = useRef(false)
+
   const d = status?.display
   const show = {
     thinking: d?.show_thinking ?? true,
@@ -125,23 +111,6 @@ export default function App() {
     notices: d?.show_notices ?? true,
   }
   const visibleItems = show.tools ? items : items.filter((it) => it.kind !== "tool")
-  const [toasts, setToasts] = useState<ToastItem[]>([])
-  const toastId = useRef(0)
-  const interactedRef = useRef(false)
-  const approvalBusyRef = useRef(false)
-  const [approvalBusy, setApprovalBusy] = useState(false)
-  function pushToast(text: string, kind: ToastItem["kind"] = "error") {
-    toastId.current += 1
-    const id = toastId.current
-    setToasts((prev) => [...prev.slice(-2), { id, text, kind }])
-  }
-  const dismissToast = useCallback((id: number) => {
-    setToasts((prev) => prev.filter((t) => t.id !== id))
-  }, [])
-
-  function addErrorItem(text: string) {
-    setItems((prev) => [...prev, { kind: "message", role: "error", text }])
-  }
 
   useEffect(() => {
     fetchStatus()
@@ -149,43 +118,41 @@ export default function App() {
         setStatus(s)
         setPlan(s.plan || [])
       })
-      .catch(() => pushToast("无法连接后端服务，请稍后重试或刷新页面"))
+      .catch(() => pushToast(t('common.error', lang) + ': Backend'))
     refreshSessions()
-    fetchHistory()
-      .then((h) => {
-        if (!interactedRef.current) setItems(historyToItems(h.messages))
-      })
-      .catch(() => {
-        if (!interactedRef.current) pushToast("历史消息加载失败")
-      })
+    loadInitialHistory()
   }, [])
 
   useEffect(() => {
     logRef.current?.scrollTo({ top: logRef.current.scrollHeight })
   }, [items, approval, thinking])
 
-  function patchLast(mutate: (item: ChatItem) => ChatItem) {
-    setItems((prev) => (prev.length === 0 ? prev : [...prev.slice(0, -1), mutate(prev[prev.length - 1])]))
-  }
+  const wrappedHandleNewSession = useCallback(async () => {
+    if (useChatStore.getState().streaming) return
+    interactedRef.current = true
+    await handleNewSession()
+  }, [handleNewSession])
 
-  async function refreshSessions() {
-    try {
-      const data = await listSessions()
-      setSessions(data.sessions)
-    } catch (e) {
-      pushToast(`会话列表加载失败：${e instanceof Error ? e.message : String(e)}`)
-    }
-  }
+  const wrappedHandleSwitch = useCallback(async (id: string) => {
+    if (useChatStore.getState().streaming || id === useSessionStore.getState().status?.session_id) return
+    interactedRef.current = true
+    await handleSwitch(id)
+  }, [handleSwitch])
 
-  async function openCheckpoints() {
-    setCpsOpen(true)
-    setCpsBusy(true)
+  const wrappedHandleDelete = useCallback(async (id: string) => {
+    if (useChatStore.getState().streaming) return
+    interactedRef.current = true
+    await handleDelete(id)
+  }, [handleDelete])
+
+  async function handleOpenCheckpoints() {
+    openCheckpoints()
     try {
       const data = await listCheckpoints()
       setCheckpoints(data.checkpoints)
     } catch {
       setCheckpoints([])
-      pushToast("加载检查点失败")
+      pushToast(t('sidebar.checkpoint', lang) + ' ' + t('common.error', lang))
     } finally {
       setCpsBusy(false)
     }
@@ -193,7 +160,7 @@ export default function App() {
 
   async function handleRollback(id: number) {
     if (streaming || cpsBusy) return
-    if (!window.confirm("回滚到该检查点？文件与会话都会恢复到当时状态，之后的对话将被移除。")) return
+    if (!window.confirm(t('sidebar.checkpoint', lang) + ' | ' + t('common.confirm', lang))) return
     interactedRef.current = true
     setCpsBusy(true)
     try {
@@ -202,208 +169,13 @@ export default function App() {
       setItems(historyToItems(data.messages))
       setThinking(null)
       setPlan(data.status.plan || [])
-      setCpsOpen(false)
+      closeCheckpoints()
       await refreshSessions()
     } catch (e) {
-      addErrorItem(`回滚失败: ${e instanceof Error ? e.message : String(e)}`)
-      pushToast("回滚失败，请重试")
+      addErrorItem(t('sidebar.checkpoint', lang) + ' ' + t('common.error', lang) + `: ${e instanceof Error ? e.message : String(e)}`)
+      pushToast(t('sidebar.checkpoint', lang) + ' ' + t('common.error', lang))
     } finally {
       setCpsBusy(false)
-    }
-  }
-
-  async function handleNewSession() {
-    if (streaming) return
-    interactedRef.current = true
-    try {
-      const st = await newSession()
-      setStatus(st)
-      setItems([])
-      setThinking(null)
-      setPlan([])
-      await refreshSessions()
-    } catch (e) {
-      addErrorItem(e instanceof Error ? e.message : String(e))
-      pushToast("新建会话失败")
-    }
-  }
-
-  async function handleSwitch(id: string) {
-    if (streaming || id === status?.session_id) return
-    interactedRef.current = true
-    try {
-      const data = await switchSession(id)
-      setStatus(data.status)
-      setItems(historyToItems(data.messages))
-      setThinking(null)
-      setPlan(data.status.plan || [])
-      await refreshSessions()
-    } catch (e) {
-      addErrorItem(e instanceof Error ? e.message : String(e))
-      pushToast("切换会话失败")
-    }
-  }
-
-  async function handleDelete(id: string) {
-    if (streaming) return
-    interactedRef.current = true
-    try {
-      const data = await deleteSession(id)
-      if (data.status) setStatus(data.status)
-      if (id === status?.session_id) {
-        setItems([])
-        setThinking(null)
-        setPlan(data.status?.plan || [])
-      }
-      await refreshSessions()
-    } catch (e) {
-      addErrorItem(`删除会话失败：${e instanceof Error ? e.message : String(e)}`)
-      pushToast("删除会话失败")
-    }
-  }
-
-  async function handleCancel() {
-    try {
-      await cancelTurn()
-    } catch {
-      pushToast("取消失败，请重试")
-    }
-  }
-
-  async function handleApproval(decision: "allow" | "allow_always" | "deny") {
-    if (approvalBusyRef.current) return
-    approvalBusyRef.current = true
-    setApprovalBusy(true)
-    try {
-      await respondApproval(decision)
-      setApproval(null)
-    } catch {
-      pushToast("审批响应失败，请重试")
-    } finally {
-      approvalBusyRef.current = false
-      setApprovalBusy(false)
-    }
-  }
-
-  async function send(images: string[] = []) {
-    const prompt = input.trim()
-    if ((!prompt && images.length === 0) || streaming) return
-    interactedRef.current = true
-    setInput("")
-    setStreaming(true)
-    setThinking(null)
-    setItems((prev) => [
-      ...prev,
-      { kind: "message", role: "user", text: prompt, images },
-      { kind: "message", role: "assistant", text: "", streaming: true },
-    ])
-
-    const buf = { text: "", think: "", gotText: false }
-    let rafPending = false
-    function flush() {
-      rafPending = false
-      if (buf.text) {
-        const add = buf.text
-        buf.text = ""
-        patchLast((it) => (it.kind === "message" ? { ...it, text: it.text + add } : it))
-      }
-      setThinking(buf.think ? { text: buf.think, active: !buf.gotText } : null)
-    }
-    function schedule() {
-      if (!rafPending) {
-        rafPending = true
-        requestAnimationFrame(flush)
-      }
-    }
-
-    const onEvent = (ev: ChatEvent) => {
-      switch (ev.type) {
-        case "text_delta":
-          buf.gotText = true
-          buf.text += ev.text
-          schedule()
-          break
-        case "reasoning_delta":
-          buf.think += ev.text
-          schedule()
-          break
-        case "tool_start":
-          flush()
-          patchLast((it) => (it.kind === "message" ? { ...it, streaming: false } : it))
-          setItems((prev) => [...prev, { kind: "tool", role: "assistant", text: "", call: ev.tool }])
-          break
-        case "tool_end":
-          flush()
-          setItems((prev) => {
-            const next = [...prev]
-            for (let i = next.length - 1; i >= 0; i -= 1) {
-              if (next[i].kind === "tool" && next[i].call?.id === ev.tool.id) {
-                next[i] = { ...next[i], result: ev.result, ok: ev.ok }
-                break
-              }
-            }
-            return next
-          })
-          setItems((prev) => (prev.some((it) => it.kind === "message" && it.streaming) ? prev : [...prev, { kind: "message", role: "assistant", text: "", streaming: true }]))
-          break
-        case "approval_needed":
-          setApproval(ev.approval)
-          break
-        case "compaction":
-          if (ev.data?.usage) {
-            setStatus((s) => (s ? { ...s, context: ev.data!.usage } : s))
-          }
-          if (ev.data?.before_tokens) {
-            flush()
-            setItems((prev) => [
-              ...prev.filter((it) => !(it.kind === "message" && it.role === "assistant" && !it.text)),
-              ...(showNoticesRef.current
-                ? [
-                    {
-                      kind: "notice" as const,
-                      role: "assistant" as const,
-                      text: `上下文已自动压缩：约 ${ev.data!.before_tokens} → ${ev.data!.after_tokens} tokens（摘要合并了 ${ev.data!.summarized_messages} 条历史消息）`,
-                    },
-                  ]
-                : []),
-              { kind: "message", role: "assistant", text: "", streaming: true },
-            ])
-          }
-          break
-        case "context":
-          if (ev.data?.usage) setStatus((s) => (s ? { ...s, context: ev.data!.usage } : s))
-          break
-        case "plan":
-          if (ev.data?.steps) setPlan(ev.data.steps)
-          break
-        case "turn_end":
-          flush()
-          patchLast((it) => (it.kind === "message" ? { ...it, streaming: false, text: ev.text && it.text ? it.text : ev.text || it.text } : it))
-          break
-        case "turn_error":
-          flush()
-          setItems((prev) => [...prev, { kind: "message", role: "error", text: ev.text || "turn error" }])
-          break
-        case "done":
-          flush()
-          patchLast((it) => (it.kind === "message" ? { ...it, streaming: false } : it))
-          break
-      }
-    }
-    try {
-      await streamChat(prompt, onEvent, undefined, images)
-      flush()
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e)
-      flush()
-      setItems((prev) => prev.filter((it) => !(it.kind === "message" && it.role === "assistant" && !it.text)))
-      addErrorItem(msg)
-      pushToast("发送失败：后端连接中断或模型不可用")
-    } finally {
-      setStreaming(false)
-      setApproval(null)
-      setThinking((t) => (t ? { ...t, active: false } : t))
-      refreshSessions()
     }
   }
 
@@ -416,9 +188,9 @@ export default function App() {
         current={status?.session_id || ""}
         showKeywords={show.keywords}
         onClose={() => setSidebarOpen(false)}
-        onSelect={handleSwitch}
-        onNew={handleNewSession}
-        onDelete={handleDelete}
+        onSelect={wrappedHandleSwitch}
+        onNew={wrappedHandleNewSession}
+        onDelete={wrappedHandleDelete}
       />
       <div className="grid min-w-0 flex-1 grid-rows-[auto_1fr_auto]">
         <header className="border-b border-spark-line bg-spark-panel px-2 py-2 sm:px-4">
@@ -426,7 +198,7 @@ export default function App() {
             <div className="flex min-w-0 items-center gap-0.5">
               <button
                 type="button"
-                onClick={() => setSidebarOpen(!sidebarOpen)}
+                onClick={toggleSidebar}
                 title="切换会话栏"
                 aria-label="切换会话栏"
                 aria-expanded={sidebarOpen}
@@ -441,7 +213,7 @@ export default function App() {
               {streaming && (
                 <button
                   type="button"
-                  onClick={handleCancel}
+                  onClick={() => void handleCancel()}
                   title="停止生成"
                   className="flex h-9 w-9 animate-in items-center justify-center rounded-lg bg-spark-err/15 text-spark-err transition-colors hover:bg-spark-err/25"
                 >
@@ -452,7 +224,7 @@ export default function App() {
               <button
                 type="button"
                 title="检查点回滚"
-                onClick={() => void openCheckpoints()}
+                onClick={() => void handleOpenCheckpoints()}
                 className="flex h-9 w-9 items-center justify-center rounded-lg bg-spark-line text-spark-text transition-colors hover:bg-spark-line/70 hover:text-spark-accent"
               >
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
@@ -464,12 +236,12 @@ export default function App() {
               <button
                 type="button"
                 title="设置"
-                onClick={() => setSettingsOpen(true)}
+                onClick={openSettings}
                 className="flex h-9 w-9 items-center justify-center rounded-lg bg-spark-line text-spark-text transition-colors hover:bg-spark-line/70 hover:text-spark-accent"
               >
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
                   <circle cx="12" cy="12" r="3" />
-                  <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+                  <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
                 </svg>
               </button>
             </div>
@@ -478,7 +250,14 @@ export default function App() {
         <div ref={logRef} className="overflow-x-hidden overflow-y-auto px-2.5 py-4 sm:px-4 sm:py-5">
           <div className="mx-auto flex min-w-0 max-w-4xl flex-col gap-3">
             {show.plan && plan.length > 0 && <PlanCard steps={plan} />}
-            {items.length === 0 && !approval && !thinking && (
+            {loading && items.length === 0 && (
+              <div className="space-y-4 p-4 animate-pulse">
+                <div className="h-4 bg-spark-line rounded w-1/4"></div>
+                <div className="h-4 bg-spark-line rounded w-1/2"></div>
+                <div className="h-4 bg-spark-line rounded w-2/3"></div>
+              </div>
+            )}
+            {!loading && items.length === 0 && !approval && !thinking && (
               <div className="mt-10 text-center sm:mt-20">
                 <div className="flex justify-center">
                   <Logo size={44} withWordmark={false} />
@@ -499,11 +278,16 @@ export default function App() {
                 </div>
               </div>
             )}
-            {visibleItems.map((item, i) => (
-              <div key={i} className="animate-in">
-                <ChatMessage item={item} />
-              </div>
-            ))}
+            {visibleItems.map((item, i) => {
+              const key = item.kind === "tool" && item.call?.id
+                ? `tool-${item.call.id}`
+                : `${item.kind}-${item.role}-${i}`
+              return (
+                <div key={key} className="animate-in">
+                  <ChatMessage item={item} />
+                </div>
+              )
+            })}
             {show.thinking && thinking && <ThinkingBlock text={thinking.text} active={thinking.active} />}
             {approval && <ApprovalCard approval={approval} onDecide={handleApproval} busy={approvalBusy} />}
           </div>
@@ -515,12 +299,12 @@ export default function App() {
           onStop={() => void handleCancel()}
           streaming={streaming}
           model={status?.model}
-          onOpenSettings={() => setSettingsOpen(true)}
+          onOpenSettings={openSettings}
         />
       </div>
       {settingsOpen && (
         <Suspense fallback={null}>
-          <SettingsPanel status={status} onClose={() => setSettingsOpen(false)} onSaved={(s) => setStatus(s)} />
+          <SettingsPanel status={status} onClose={closeSettings} onSaved={(s) => setStatus(s)} />
         </Suspense>
       )}
       {cpsOpen && (
@@ -528,7 +312,7 @@ export default function App() {
           checkpoints={checkpoints}
           busy={cpsBusy}
           streaming={streaming}
-          onClose={() => setCpsOpen(false)}
+          onClose={closeCheckpoints}
           onRollback={(id) => void handleRollback(id)}
         />
       )}

@@ -4,8 +4,9 @@
 .opencode
 .monkeycode/
 
-# Build cache
+# Build cache & output
 web/.vite/
+web/dist/
 
 # Upstream Codex CLI clone used as architecture reference only
 /codex/

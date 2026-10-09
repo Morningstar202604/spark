@@ -6,7 +6,7 @@ import pytest
 from spark.config import SparkConfig
 from spark.core.context import build_messages, history_token_usage
 from spark.core.loop import AgentLoop
-from spark.core.tokens import estimate_history_tokens, estimate_tokens
+from spark.core.tokens import estimate_tokens
 from spark.models import ChatDelta, ChatMessage, ToolCall
 from spark.providers.mock import MockProvider
 from spark.sandbox import WorkdirSandbox

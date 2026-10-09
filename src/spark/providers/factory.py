@@ -7,6 +7,12 @@ from spark.providers.openai_compat import OllamaProvider, OpenAICompatProvider
 
 
 def create_provider(cfg: SparkConfig, mock: MockProvider | None = None) -> Provider:
+    valid = ("openai_compat", "ollama", "mock")
+    if cfg.provider.name not in valid:
+        raise ValueError(
+            f"Unknown provider '{cfg.provider.name}'. "
+            f"Valid options: {', '.join(valid)}"
+        )
     if cfg.provider.name == "mock":
         return mock or MockProvider()
     key = require_api_key(cfg)

@@ -144,10 +144,10 @@ def test_registry_has_new_tools(tmp_path: Path) -> None:
     assert {"bg_start", "bg_output", "bg_kill", "bg_list", "task"} <= names
 
 
-def test_task_schema_supports_parallel() -> None:
+def test_task_schema_supports_parallel(tmp_path: Path) -> None:
     from spark.tools.registry import _schema  # noqa: F401
 
-    ctx = ToolContext(sandbox=WorkdirSandbox(Path("/tmp"), _cfg()), config=_cfg())
+    ctx = ToolContext(sandbox=WorkdirSandbox(tmp_path, _cfg()), config=_cfg())
     reg = ToolRegistry(ctx)
     task = next(s for s in reg.schemas() if s["function"]["name"] == "task")
     props = task["function"]["parameters"]["properties"]

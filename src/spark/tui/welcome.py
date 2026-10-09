@@ -14,6 +14,9 @@ SHORTCUTS = [
     ("Ctrl+T", "测试模型连通性"),
     ("Ctrl+C", "中止当前任务"),
     ("Ctrl+L", "清空输出区"),
+    ("Ctrl+R", "切换会话"),
+    ("y/n/a", "审批: 允许/拒绝/始终允许"),
+    ("Esc", "关闭弹窗 / 拒绝审批"),
     ("?", "打开/关闭本帮助"),
     ("Ctrl+D", "退出"),
 ]
@@ -52,13 +55,13 @@ def welcome_text(cfg: SparkConfig, workdir: str = "") -> str:
     lines = [
         "[bold #ff7a3d]◆ Spark[/bold #ff7a3d] [dim]Ember[/dim] — 本地编程智能体",
         "",
-        f"模型  {cfg.provider.model}",
-        f"接口  {cfg.provider.base_url}",
-        f"密钥  {key_label}",
-        f"审批  {cfg.agent.approval}    访问  {cfg.agent.sandbox_mode}",
+        f"[bold]模型[/bold]  {cfg.provider.model}",
+        f"[bold]接口[/bold]  {cfg.provider.base_url}",
+        f"[bold]密钥[/bold]  {key_label}",
+        f"[bold]审批[/bold]  {cfg.agent.approval}    [bold]访问[/bold]  {cfg.agent.sandbox_mode}",
     ]
     if workdir:
-        lines.append(f"目录  {workdir}")
+        lines.append(f"[bold]目录[/bold]  {workdir}")
     lines += [
         "",
         "[bold]可以这样说：[/bold]",

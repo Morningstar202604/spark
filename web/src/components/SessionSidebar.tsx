@@ -1,5 +1,7 @@
 import { useState } from "react"
 import type { SessionRow } from "../types"
+import { t } from "../i18n"
+import { useUiStore } from "../store/uiStore"
 
 interface Props {
   open: boolean
@@ -18,6 +20,7 @@ function timeLabel(ts: number): string {
 
 export default function SessionSidebar({ open, sessions, current, showKeywords = true, onClose, onSelect, onNew, onDelete }: Props) {
   const [confirmId, setConfirmId] = useState<string | null>(null)
+  const lang = useUiStore((s) => s.lang)
   return (
     <>
       {/* mobile overlay */}
@@ -25,18 +28,18 @@ export default function SessionSidebar({ open, sessions, current, showKeywords =
       <aside
         id="session-sidebar"
         aria-hidden={!open ? true : undefined}
-        inert={!open ? true : undefined}
+        inert={!open}
         className={`fixed inset-y-0 left-0 z-30 flex w-64 flex-col border-r border-spark-line bg-spark-side transition-transform duration-200 md:static md:translate-x-0 ${
           open ? "translate-x-0" : "-translate-x-full md:w-0 md:overflow-hidden md:border-r-0"
         }`}
       >
         <div className="flex items-center justify-between border-b border-spark-line px-4 py-2.5">
-          <span className="text-xs font-bold tracking-widest text-spark-muted uppercase">会话历史</span>
+          <span className="text-xs font-bold tracking-widest text-spark-muted uppercase">{t('sidebar.sessions', lang)}</span>
           <button
             type="button"
             onClick={onClose}
-            title="关闭侧栏"
-            aria-label="关闭侧栏"
+            title={t('common.close', lang)}
+            aria-label={t('common.close', lang)}
             className="-mr-1 flex h-9 w-9 items-center justify-center rounded-lg text-spark-muted transition-colors hover:bg-spark-line hover:text-spark-text md:hidden"
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden>
@@ -50,11 +53,11 @@ export default function SessionSidebar({ open, sessions, current, showKeywords =
             onClick={onNew}
             className="w-full rounded-lg border border-dashed border-spark-line px-4 py-2 text-sm text-spark-muted transition-colors hover:border-spark-accent hover:text-spark-accent active:scale-[0.98]"
           >
-            + 新建会话
+            {t('sidebar.newSession', lang)}
           </button>
         </div>
         <div className="flex-1 overflow-auto px-3 pb-3">
-          {sessions.length === 0 && <p className="px-1 text-xs text-spark-muted">暂无历史会话。</p>}
+          {sessions.length === 0 && <p className="px-1 text-xs text-spark-muted">{t('sidebar.noSessions', lang)}</p>}
           <ul className="flex flex-col gap-1.5">
             {sessions.map((s) => (
               <li key={s.id} className="group relative">
@@ -68,7 +71,7 @@ export default function SessionSidebar({ open, sessions, current, showKeywords =
                   }`}
                 >
                   <span className="block truncate font-medium">
-                    {s.title && s.title !== "untitled" ? s.title : "未命名会话"}
+                    {s.title && s.title !== "untitled" ? s.title : t('sidebar.noSessions', lang)}
                   </span>
                   {showKeywords && s.keywords && (
                     <span className="mt-1 flex flex-wrap gap-1">
@@ -91,7 +94,7 @@ export default function SessionSidebar({ open, sessions, current, showKeywords =
                   <span className="absolute top-1.5 right-1.5 flex items-center gap-1 rounded-lg border border-spark-err/45 bg-spark-bg px-1.5 py-1">
                     <button
                       type="button"
-                      title="确认删除"
+                      title={t('common.confirm', lang)}
                       onClick={(e) => {
                         e.stopPropagation()
                         setConfirmId(null)
@@ -99,18 +102,18 @@ export default function SessionSidebar({ open, sessions, current, showKeywords =
                       }}
                       className="rounded p-1 text-[10px] font-bold text-spark-err transition-colors hover:bg-spark-err/12"
                     >
-                      删除
+                      {t('common.delete', lang)}
                     </button>
                     <button
                       type="button"
-                      title="取消"
+                      title={t('common.cancel', lang)}
                       onClick={(e) => {
                         e.stopPropagation()
                         setConfirmId(null)
                       }}
                       className="rounded p-1 text-[10px] text-spark-muted transition-colors hover:bg-spark-line"
                     >
-                      取消
+                      {t('common.cancel', lang)}
                       </button>
                   </span>
                 ) : (
@@ -120,8 +123,8 @@ export default function SessionSidebar({ open, sessions, current, showKeywords =
                       e.stopPropagation()
                       setConfirmId(s.id)
                     }}
-                    title="删除会话"
-                    aria-label="删除会话"
+                    title={t('sidebar.deleteSession', lang)}
+                    aria-label={t('sidebar.deleteSession', lang)}
                     className="absolute top-1.5 right-1.5 flex h-7 w-7 items-center justify-center rounded-lg text-spark-muted transition-all hover:bg-spark-err/12 hover:text-spark-err active:scale-90 md:opacity-0 md:group-hover:opacity-100 md:focus-visible:opacity-100"
                   >
                     <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden>

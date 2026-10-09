@@ -168,7 +168,7 @@ def main(
         raise typer.Exit(exc.exit_code) from exc
 
 
-@app.command("exec")
+@app.command("exec", help="非交互执行单条 prompt，通过 stdout 输出最终结果（适合脚本与管道）")
 def exec_cmd(
     prompt: str = typer.Argument(...),
     workdir: Path = typer.Option(Path("."), "--workdir"),
@@ -255,7 +255,7 @@ def web_cmd(
         "--host",
         help="默认仅本机可访问；改为 0.0.0.0 会把控制面暴露到局域网/公网，风险自负",
     ),
-    port: int = typer.Option(8000, "--port"),
+    port: int = typer.Option(8000, "--port", help="Web 服务监听端口"),
 ) -> None:
     try:
         workdir = workdir.resolve()
@@ -329,7 +329,7 @@ def test_cmd(
         raise typer.Exit(exc.exit_code) from exc
 
 
-@app.command("sessions")
+@app.command("sessions", help="列出所有会话，按更新时间倒序")
 def sessions_cmd() -> None:
     store = _store()
     rows = store.list_sessions()
@@ -372,7 +372,7 @@ def resume_cmd(
         raise typer.Exit(exc.exit_code) from exc
 
 
-@app.command("version")
+@app.command("version", help="输出当前语义化版本号")
 def version_cmd() -> None:
     """Show the installed Spark version."""
     from importlib.metadata import PackageNotFoundError, version
@@ -580,7 +580,7 @@ def config_set_cmd(
     typer.echo(f"已保存到 {written}")
 
 
-@config_app.command("path")
+@config_app.command("path", help="输出当前使用的配置文件绝对路径")
 def config_path_cmd() -> None:
     """Print the configuration file location."""
     typer.echo(str(default_home() / "config.toml"))

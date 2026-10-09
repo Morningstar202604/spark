@@ -1,3 +1,4 @@
+"""SQLite-backed session store with WAL mode and schema migrations."""
 from __future__ import annotations
 
 import json
@@ -110,6 +111,7 @@ class SessionStore:
             self._conn.close()
 
     def create_session(self, workdir: Path, model: str, title: str = "untitled") -> str:
+        """Create a new session row and return its id."""
         sid = uuid.uuid4().hex[:12]
         now = int(time.time())
         with self._lock:
@@ -121,6 +123,7 @@ class SessionStore:
         return sid
 
     def list_sessions(self) -> list[dict]:
+        """Return all sessions ordered by most-recently-updated first."""
         with self._lock:
             rows = self._conn.execute(
                 "SELECT id, workdir, model, created_at, updated_at, title, keywords FROM sessions ORDER BY updated_at DESC"
@@ -128,6 +131,7 @@ class SessionStore:
             return [dict(r) for r in rows]
 
     def get_session(self, session_id: str) -> dict | None:
+        """Fetch a single session dict, or None if the id is unknown."""
         with self._lock:
             row = self._conn.execute(
                 "SELECT * FROM sessions WHERE id = ?", (session_id,)
@@ -135,6 +139,7 @@ class SessionStore:
             return dict(row) if row else None
 
     def delete_session(self, session_id: str) -> None:
+        """Remove a session and its messages/tool-events permanently."""
         with self._lock:
             self._conn.execute(
                 "DELETE FROM tool_events WHERE session_id = ?", (session_id,)
@@ -146,6 +151,7 @@ class SessionStore:
             self._conn.commit()
 
     def touch(self, session_id: str, title: str | None = None) -> None:
+        """Update the session timestamp (and optionally its title)."""
         now = int(time.time())
         with self._lock:
             if title:
@@ -174,6 +180,7 @@ class SessionStore:
             self._conn.commit()
 
     def append_message(self, session_id: str, message: ChatMessage) -> int:
+        """Persist a message and bump the session timestamp; return the new row id."""
         now = int(time.time())
         payload = {
             "tool_calls": [c.model_dump() for c in message.tool_calls]
@@ -208,6 +215,7 @@ class SessionStore:
         result: ToolResult | None,
         approval: str | None,
     ) -> None:
+        """Record one tool invocation (name, arguments, result, approval)."""
         now = int(time.time())
         with self._lock:
             self._conn.execute(
@@ -243,6 +251,7 @@ class SessionStore:
             return int(row["compact_from"]) if row and row["compact_from"] else 0
 
     def load_messages(self, session_id: str) -> list[ChatMessage]:
+        """Return messages for a session, honouring the compact-from cut-off."""
         with self._lock:
             rows = self._conn.execute(
                 """SELECT id, role, content, payload_json FROM messages

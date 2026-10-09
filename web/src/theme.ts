@@ -13,6 +13,7 @@ export function getStoredTheme(): Theme {
 }
 
 export function applyTheme(theme: Theme): void {
+  document.documentElement.style.transition = "background-color 0.2s, color 0.2s"
   document.documentElement.setAttribute("data-theme", theme)
   try {
     localStorage.setItem(STORAGE_KEY, theme)
@@ -21,6 +22,12 @@ export function applyTheme(theme: Theme): void {
   }
   const meta = document.querySelector('meta[name="theme-color"]')
   if (meta) meta.setAttribute("content", theme === "light" ? "#fbf8f4" : "#14110f")
+}
+
+export function setTheme(theme: Theme): void {
+  document.documentElement.classList.add("transitioning")
+  applyTheme(theme)
+  setTimeout(() => document.documentElement.classList.remove("transitioning"), 200)
 }
 
 export function initTheme(): Theme {

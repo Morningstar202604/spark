@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from "react"
 import Markdown from "./Markdown"
 import type { ToolCall } from "../types"
+import { t } from "../i18n"
+import { useUiStore } from "../store/uiStore"
 
 export interface ChatItem {
-  kind: "message" | "tool" | "notice"
+  kind: "message" | "tool" | "notice" | "summary"
   role: "user" | "assistant" | "error"
   text: string
   streaming?: boolean
@@ -14,9 +16,9 @@ export interface ChatItem {
 }
 
 const roleMeta: Record<ChatItem["role"], { label: string; dot: string }> = {
-  user: { label: "you", dot: "bg-spark-user" },
-  assistant: { label: "spark", dot: "bg-spark-accent" },
-  error: { label: "error", dot: "bg-spark-err" },
+  user: { label: "chat.you", dot: "bg-spark-user" },
+  assistant: { label: "chat.spark", dot: "bg-spark-accent" },
+  error: { label: "common.error", dot: "bg-spark-err" },
 }
 
 function looksLikeDiff(text: string): boolean {
@@ -26,6 +28,7 @@ function looksLikeDiff(text: string): boolean {
 
 function ToolCallBlock({ name, call, result, ok }: { name: string; call: ToolCall; result?: unknown; ok?: boolean }) {
   const [open, setOpen] = useState(false)
+  const lang = useUiStore((s) => s.lang)
   const border = ok === undefined ? "border-spark-line" : ok ? "border-spark-ok/45" : "border-spark-err/45"
   const resultText = result === undefined ? "" : typeof result === "string" ? result : JSON.stringify(result, null, 2)
   const isDiff = name === "apply_patch" || looksLikeDiff(resultText)
@@ -44,9 +47,9 @@ function ToolCallBlock({ name, call, result, ok }: { name: string; call: ToolCal
             : ""}
         </span>
         <span className="ml-auto shrink-0 text-[10px]">
-          {ok === false && <span className="text-spark-err">失败</span>}
-          {ok === true && <span className="text-spark-ok">完成</span>}
-          {ok === undefined && <span className="animate-pulse text-spark-tool">运行中…</span>}
+          {ok === false && <span className="text-spark-err">{t('chat.failed', lang)}</span>}
+          {ok === true && <span className="text-spark-ok">{t('chat.completed', lang)}</span>}
+          {ok === undefined && <span className="animate-pulse text-spark-tool">{t('chat.toolRunning', lang)}</span>}
         </span>
       </button>
       {open && (
@@ -76,6 +79,7 @@ function ToolCallBlock({ name, call, result, ok }: { name: string; call: ToolCal
 export default function ChatMessage({ item }: { item: ChatItem }) {
   const [copied, setCopied] = useState(false)
   const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const lang = useUiStore((s) => s.lang)
   useEffect(
     () => () => {
       if (copyTimerRef.current) clearTimeout(copyTimerRef.current)
@@ -83,7 +87,11 @@ export default function ChatMessage({ item }: { item: ChatItem }) {
     [],
   )
   if (item.kind === "tool") {
-    return <ToolCallBlock name={item.call?.name || "tool"} call={item.call!} result={item.result} ok={item.ok} />
+    const call = item.call
+    if (!call) {
+      return null
+    }
+    return <ToolCallBlock name={call.name || "tool"} call={call} result={item.result} ok={item.ok} />
   }
   if (item.kind === "notice") {
     return (
@@ -106,7 +114,7 @@ export default function ChatMessage({ item }: { item: ChatItem }) {
     >
       <div className="mb-1.5 flex items-center gap-2">
         <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${meta.dot}`} />
-        <span className="text-[10px] font-bold tracking-widest text-spark-muted uppercase">{meta.label}</span>
+        <span className="text-[10px] font-bold tracking-widest text-spark-muted uppercase">{t(meta.label as any, lang)}</span>
         {item.streaming && <span className="h-3 w-1.5 animate-pulse bg-spark-accent" />}
         {item.role === "assistant" && !item.streaming && item.text && (
           <button
@@ -119,14 +127,14 @@ export default function ChatMessage({ item }: { item: ChatItem }) {
             }}
             className="ml-auto shrink-0 rounded px-1.5 py-0.5 text-[10px] text-spark-muted transition-opacity hover:bg-spark-line md:opacity-0 md:group-hover:opacity-100"
           >
-            {copied ? "已复制" : "复制"}
+            {copied ? t('common.copied', lang) : t('common.copy', lang)}
           </button>
         )}
       </div>
       {item.images && item.images.length > 0 && (
         <div className="mb-2 flex flex-wrap gap-2">
           {item.images.map((src, i) => (
-            <img key={i} src={src} alt="attached" className="max-h-44 max-w-full rounded-lg border border-spark-line" />
+            <img key={i} src={src} alt={`Attached image ${i + 1}`} className="max-h-44 max-w-full rounded-lg border border-spark-line" />
           ))}
         </div>
       )}

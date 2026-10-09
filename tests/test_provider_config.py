@@ -18,4 +18,6 @@ def test_mock_skips_key(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("SPARK_API_KEY", raising=False)
     cfg = SparkConfig()
     cfg.provider.name = "mock"
-    assert require_api_key(cfg) in {None, "ollama"} or True
+    # mock provider should not raise ConfigError without an API key
+    result = require_api_key(cfg)
+    assert result is None or isinstance(result, str)

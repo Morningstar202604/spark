@@ -6,6 +6,7 @@ from pathlib import Path
 from spark.config import SparkConfig
 from spark.core.tokens import estimate_message_tokens
 from spark.models import ChatMessage
+from spark.skills import discover_skills, inject_skills
 
 
 def load_system_prompt() -> str:
@@ -47,11 +48,20 @@ def build_messages(
     cfg: SparkConfig,
     history: list[ChatMessage],
     memory_block: str | None = None,
+    _compactor=None,
 ) -> list[ChatMessage]:
+    """Build the list of messages sent to the provider.
+
+    When ``_compactor`` is provided, budget trimming is delegated to the
+    Compactor's token-aware implementation; otherwise the original
+    char-based budget logic is used (preserved for backward compatibility).
+    """
     system = load_system_prompt() + f"\n\nWorkdir: {workdir.resolve()}"
     mode_hint = MODE_HINTS.get(getattr(cfg.agent, "sandbox_mode", "workspace"))
     if mode_hint:
         system += f"\n{mode_hint}"
+    skills = discover_skills(workdir)
+    system = inject_skills(system, skills)
     messages: list[ChatMessage] = [ChatMessage(role="system", content=system)]
     agents = load_agents_md(workdir, cfg)
     if agents:
@@ -67,7 +77,23 @@ def build_messages(
 
     summaries = [m for m in rest if m.role == "summary"]
     recent = [m for m in rest if m.role != "summary"]
-    budget = cfg.context.history_budget_chars
+
+    if _compactor is not None:
+        kept = _compactor.trim_recent(recent, cfg.context.history_budget_chars)
+    else:
+        kept = _trim_recent_chars(recent, cfg.context.history_budget_chars)
+
+    kept = _collapse_old_images(kept)
+    messages.extend(summaries)
+    messages.extend(kept)
+    return messages
+
+
+def _trim_recent_chars(
+    recent: list[ChatMessage],
+    budget: int,
+) -> list[ChatMessage]:
+    """Original char-based budget trimming — kept as the default fallback."""
     kept: list[ChatMessage] = []
     used = 0
     for msg in reversed(recent):
@@ -79,10 +105,7 @@ def build_messages(
         kept.append(msg)
         used += size
     kept.reverse()
-    kept = _collapse_old_images(kept)
-    messages.extend(summaries)
-    messages.extend(kept)
-    return messages
+    return kept
 
 
 def _collapse_old_images(kept: list[ChatMessage]) -> list[ChatMessage]:
@@ -117,6 +140,8 @@ def history_token_usage(
 ) -> dict:
     """Estimate total request size: system + agents.md + memory slot + history + tool schemas."""
     system = load_system_prompt() + f"\n\nWorkdir: {workdir.resolve()}"
+    skills = discover_skills(workdir)
+    system = inject_skills(system, skills)
     total = estimate_message_tokens(ChatMessage(role="system", content=system))
     agents = load_agents_md(workdir, cfg)
     if agents:

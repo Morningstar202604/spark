@@ -1,3 +1,4 @@
+"""Workdir sandbox with path-escape and command-injection guards."""
 from __future__ import annotations
 
 import os

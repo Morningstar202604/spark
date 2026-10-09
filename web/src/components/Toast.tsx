@@ -8,8 +8,18 @@ export interface ToastItem {
 
 const kindStyle: Record<ToastItem["kind"], string> = {
   error: "border-spark-err/45 bg-spark-err/10 text-spark-err",
-  info: "border-spark-line bg-spark-panel text-spark-text",
+  info: "border-spark-accent/45 bg-spark-panel text-spark-accent",
   ok: "border-spark-ok/45 bg-spark-ok/10 text-spark-ok",
+}
+
+const kindIcon: Record<ToastItem["kind"], string> = {
+  error: "❌",
+  info: "ℹ",
+  ok: "✓",
+}
+
+function durationFor(text: string): number {
+  return Math.min(3000 + Math.floor(text.length / 20) * 1000, 10000)
 }
 
 export default function Toast({ toasts, onDismiss }: { toasts: ToastItem[]; onDismiss: (id: number) => void }) {
@@ -28,7 +38,7 @@ export default function Toast({ toasts, onDismiss }: { toasts: ToastItem[]; onDi
         const timer = setTimeout(() => {
           timersRef.current.delete(t.id)
           onDismiss(t.id)
-        }, 5000)
+        }, durationFor(t.text))
         timersRef.current.set(t.id, timer)
       }
     }
@@ -49,9 +59,10 @@ export default function Toast({ toasts, onDismiss }: { toasts: ToastItem[]; onDi
           key={t.id}
           type="button"
           onClick={() => onDismiss(t.id)}
-          className={`animate-in pointer-events-auto w-full rounded-xl border px-4 py-2.5 text-left text-xs leading-relaxed shadow-lg transition-opacity hover:opacity-80 ${kindStyle[t.kind]}`}
+          className={`animate-in pointer-events-auto flex items-center gap-2 w-full rounded-xl border px-4 py-2.5 text-left text-xs leading-relaxed shadow-lg transition-opacity hover:opacity-80 ${kindStyle[t.kind]}`}
         >
-          {t.text}
+          <span className="text-sm shrink-0" aria-hidden>{kindIcon[t.kind]}</span>
+          <span className="flex-1">{t.text}</span>
         </button>
       ))}
     </div>

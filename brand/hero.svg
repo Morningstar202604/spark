@@ -1,25 +1,44 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 540" width="960" height="540">
   <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="960" y2="540" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#0a0e13"/>
-      <stop offset="1" stop-color="#0f1a19"/>
-    </linearGradient>
-    <linearGradient id="bolt" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#99f6e4"/>
-      <stop offset="0.55" stop-color="#5eead4"/>
-      <stop offset="1" stop-color="#2dd4bf"/>
-    </linearGradient>
-    <radialGradient id="glow" cx="0.5" cy="0.5" r="0.7">
-      <stop offset="0" stop-color="#2dd4bf" stop-opacity="0.25"/>
-      <stop offset="1" stop-color="#2dd4bf" stop-opacity="0"/>
+    <radialGradient id="bg" cx="0.5" cy="0.45" r="0.75">
+      <stop offset="0" stop-color="#1c1815"/>
+      <stop offset="1" stop-color="#14110f"/>
     </radialGradient>
+    <radialGradient id="ember" cx="0.5" cy="0.42" r="0.65">
+      <stop offset="0" stop-color="#ff7a3d" stop-opacity="0.28"/>
+      <stop offset="0.5" stop-color="#c2410c" stop-opacity="0.1"/>
+      <stop offset="1" stop-color="#14110f" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="shell" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#2a1a12"/>
+      <stop offset="1" stop-color="#4a2415"/>
+    </linearGradient>
+    <linearGradient id="core" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ffd9a8"/>
+      <stop offset="0.4" stop-color="#ff9d4f"/>
+      <stop offset="1" stop-color="#ff6a1f"/>
+    </linearGradient>
+    <filter id="glow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="14" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
   </defs>
   <rect width="960" height="540" fill="url(#bg)"/>
-  <circle cx="480" cy="250" r="230" fill="url(#glow)"/>
-  <g transform="translate(360,120)">
-    <rect x="0" y="0" width="240" height="240" rx="60" fill="#0c1f1c" stroke="#1d4a43" stroke-width="3"/>
-    <path d="M136 42 L82 130 h33 l-13 76 62-90 h-33 l10-64 z" fill="url(#bolt)" stroke="#0c1f1c" stroke-width="5" stroke-linejoin="round"/>
+  <rect width="960" height="540" fill="url(#ember)"/>
+  <g transform="translate(340,110)">
+    <rect x="2" y="2" width="276" height="276" rx="66" fill="url(#shell)" stroke="#7a3a1c" stroke-width="3"/>
+    <rect x="2" y="2" width="276" height="276" rx="66" fill="#ff7a3d" opacity="0.04"/>
+    <path d="M14 12 L14 108 M60 6 L60 116 M108 2 L108 122 M156 6 L156 116 M204 2 L204 122 M252 4 L252 118" stroke="#7a3a1c" stroke-width="1.8" stroke-linecap="round" opacity="0.25"/>
+    <path d="M8 30 L96 30 M140 18 L268 18 M4 78 L276 78 M8 130 L272 130 M4 178 L96 178 M140 192 L268 192" stroke="#7a3a1c" stroke-width="1.4" stroke-linecap="round" opacity="0.18"/>
+    <rect x="62" y="52" width="156" height="170" rx="14" fill="#1a120c" opacity="0.7"/>
+    <circle cx="140" cy="137" r="60" fill="#ff7a3d" filter="url(#glow)" opacity="0.55"/>
+    <circle cx="140" cy="137" r="44" fill="#ff7a3d" filter="url(#glow)" opacity="0.8"/>
+    <path d="M126 76 L104 98 L112 110 M154 200 L176 178 L168 166" fill="none" stroke="#7a3a1c" stroke-width="2.2" stroke-linecap="round" opacity="0.4"/>
+    <path d="M140 78 L118 108 L136 108 L126 152 L162 112 L144 112 L150 78 Z" fill="url(#core)" stroke="#2a1a12" stroke-width="2.4" stroke-linejoin="round"/>
+    <rect x="112" y="100" width="6" height="32" rx="2" fill="#ff7a3d" opacity="0.5"/>
+    <rect x="200" y="86" width="6" height="22" rx="2" fill="#ff7a3d" opacity="0.4"/>
+    <rect x="76" y="150" width="6" height="24" rx="2" fill="#ff7a3d" opacity="0.4"/>
   </g>
-  <text x="480" y="412" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="52" font-weight="800" fill="#e7ecf3">Spark</text>
-  <text x="480" y="448" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="18" letter-spacing="6" fill="#8b9bb4">LOCAL · AGENTIC · OPEN SOURCE</text>
+  <text x="480" y="430" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="54" font-weight="800" fill="#ffffff" letter-spacing="0.5">Spark</text>
+  <text x="480" y="470" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="20" fill="#b0a89a" letter-spacing="1">&#x672C;&#x5730;&#x4F18;&#x5148; &#xB7; &#x667A;&#x80FD;&#x4F53;&#x9A71;&#x52A8; &#xB7; &#x5F00;&#x653E;&#x6E90;&#x4EE3;&#x7801;</text>
 </svg>

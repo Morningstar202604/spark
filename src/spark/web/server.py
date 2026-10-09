@@ -351,17 +351,6 @@ def _safe_agents_md_name(filename: str) -> str | None:
     return filename
 
 
-_BLOCKED_HOST_PREFIXES = (
-    "127.",
-    "10.",
-    "192.168.",
-    "169.254.",
-    "0.",
-    "[::1]",
-    "localhost",
-)
-
-
 def _probe_target_allowed(base_url: str, trusted_base_url: str) -> bool:
     """Only probe the same origin the user already configured; never let a request
     send the stored credential to an arbitrary host."""
@@ -724,6 +713,14 @@ def _event_payload(event) -> dict:
     return payload
 
 
+def _port_in_use(host: str, port: int) -> bool:
+    import socket
+
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.settimeout(0.3)
+        return s.connect_ex((host, port)) == 0
+
+
 def serve_web(
     *,
     workdir: Path,
@@ -741,6 +738,12 @@ def serve_web(
     )
 
     class Handler(BaseHTTPRequestHandler):
+        def end_headers(self) -> None:
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.send_header("X-Frame-Options", "DENY")
+            self.send_header("Referrer-Policy", "no-referrer")
+            super().end_headers()
+
         def log_message(self, fmt: str, *args) -> None:
             sys_stderr = __import__("sys").stderr
             sys_stderr.write(f"{self.address_string()} - {fmt % args}\n")
@@ -1626,6 +1629,12 @@ def serve_web(
                 return
             self._json(404, {"error": "not found"})
 
+    if _port_in_use(host, port):
+        print(
+            f"Error: Port {port} is already in use. Use --port <N> to specify another port.",
+            file=__import__("sys").stderr,
+        )
+        raise SystemExit(1)
     server = ThreadingHTTPServer((host, port), Handler)
     local_only = host in {"127.0.0.1", "localhost", "::1"}
     print(

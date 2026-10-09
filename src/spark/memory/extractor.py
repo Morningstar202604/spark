@@ -1,3 +1,4 @@
+"""LLM-backed fact extraction and conflict resolution for memory."""
 from __future__ import annotations
 
 import re
