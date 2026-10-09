@@ -1,0 +1,63 @@
+# Spark Agent — 构建可复现性基线锁文件
+# 安装：pip install -r requirements.lock
+#
+# 生成方式（在新环境执行一次）：
+#   pip install -e ".[extras,office]"
+#   pip freeze > requirements.lock
+#
+# 更新依赖后重新执行以上两步；CI 跑两套：日常 `>=` 测试 + lock 文件完整跑测试。
+
+# ---- 核心依赖（pyproject 声明顺序） ----
+fastapi==0.136.1
+uvicorn==0.47.0
+httpx==0.28.1
+typer==0.27.2
+tomlkit==0.15.1
+openai==2.16.0
+tiktoken>=0.7
+trafilatura==2.3.0
+tree-sitter==0.26.0
+tree-sitter-python==0.25.0
+tree-sitter-javascript==0.25.0
+tree-sitter-typescript==0.23.2
+tree-sitter-go==0.25.0
+tree-sitter-rust==0.24.2
+tree-sitter-java==0.23.5
+tree-sitter-cpp==0.23.4
+
+# ---- 核心传递依赖（pip freeze 锁定） ----
+anyio==4.12.1
+certifi==2026.1.1
+click==8.3.1
+exceptiongroup==1.3.1
+h11==0.16.0
+httpcore==1.0.9
+idna==3.11
+jiter==0.13.0
+markdown-it-py==4.0.0
+mdurl==0.1.2
+pydantic==2.12.5
+pydantic-core==2.41.5
+pygments==2.19.2
+regex==2026.2.28
+rich==14.3.3
+shellingham==1.5.4
+sniffio==1.3.1
+starlette==0.52.1
+tqdm==6.67.2
+typing-extensions==4.15.0
+
+# ---- 可选 extras（mcp, textual, sentence-transformers 按需安装） ----
+# mcp>=1.0,<2
+# textual>=0.60
+# sentence-transformers>=2.7
+
+# ---- 办公文档 optional ----
+# python-docx>=1.1
+# openpyxl>=3.1
+# pypdf>=4.0
+
+# ---- CI / 开发 ----
+pytest==9.1.1
+pytest-asyncio==1.4.0
+ruff>=0.8

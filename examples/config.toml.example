@@ -1,0 +1,32 @@
+# Spark 配置示例 —— 复制为 ~/.spark/config.toml 后按需修改
+# 完整字段说明见 docs/CONFIG.md
+
+provider = "deepseek"                # deepseek / qwen / glm / kimi / doubao / unisound / ollama / custom / mock
+base_url = ""                        # custom 预设必填，如 https://api.deepseek.com/v1
+model = "deepseek-v4-pro"            # 主模型
+api_key = ""                         # 密钥；也可用环境变量 <PROVIDER>_API_KEY
+workdir = "/home/you/projects/my-app"  # 默认工作目录
+approval_mode = "suggest"            # suggest / auto-edit / full-auto / plan
+max_context_tokens = 32000
+# token = ""                         # 设置后访问需带 X-Spark-Token（空 = 本机免登录）
+
+# ---- 模型路由与容灾 ----
+model_fast = "deepseek-flash"        # 简单任务走快速模型；留空 = 不启用路由
+fallback_model = ""                  # 主模型故障自动切换的备用模型；留空 = 不启用
+
+# ---- 记忆 ----
+memory_embedding = "off"             # off / api / local
+# memory_embed_model = "doubao-embedding"
+
+# ---- 高级 ----
+# system_prompt = ""                 # 自定义系统提示词（支持 {workdir} {protected}）
+# protected_paths = ["/etc"]         # 永远拒绝写入的路径
+# auto_verify = true                 # 改完自动跑 pytest 验证
+# proxy = "http://127.0.0.1:7890"    # HTTP 代理
+
+# ---- MCP 服务器 ----
+# [[mcp_servers]]
+# name = "filesystem"
+# command = "npx"
+# args = ["-y", "@modelcontextprotocol/server-filesystem", "."]
+# transport = "stdio"

@@ -1,0 +1,61 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            asset: spark-windows-x86_64
+            setup: |
+              pip install -e ".[dev]" pyinstaller
+              python -m pytest -q
+              pyinstaller --clean -y spark.spec
+            pack: powershell Compress-Archive -Path dist/spark -DestinationPath spark-windows-x86_64.zip
+          - os: ubuntu-22.04   # GLIBC 2.35：兼容绝大多数发行版
+            asset: spark-linux-x86_64
+            setup: |
+              pip install -e ".[dev]" pyinstaller
+              python -m pytest -q
+              pyinstaller --clean -y spark.spec
+            pack: tar -czf spark-linux-x86_64.tar.gz -C dist spark
+          - os: macos-13      # Intel x86_64 runner
+            asset: spark-macos-x86_64
+            setup: |
+              pip install -e ".[dev]" pyinstaller
+              python -m pytest -q
+              pyinstaller --clean -y spark.spec
+            pack: tar -czf spark-macos-x86_64.tar.gz -C dist spark
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build
+        run: ${{ matrix.setup }}
+      - name: Pack
+        run: ${{ matrix.pack }}
+      - name: Upload logs (diagnostics)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs-${{ matrix.os }}
+          path: |
+            build/spark/warn-spark.txt
+            build/spark/xref-spark.html
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            spark-windows-*
+            spark-linux-*
+            spark-macos-*
+          generate_release_notes: true
