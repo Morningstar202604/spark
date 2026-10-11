@@ -1,185 +1,75 @@
-# AI Tools
-.claude
-.gemini
-.opencode
-.monkeycode/
+# The bundled web UI at src/spark/web/dist/ is INTENTIONALLY TRACKED so that a
+# pip install ships a working UI without needing Node. Never add a **/dist/ rule.
 
-# Build cache & output
-web/.vite/
-web/dist/
+# OS
+.DS_Store
+Thumbs.db
+Desktop.ini
 
-# Upstream Codex CLI clone used as architecture reference only
-/codex/
-
-# IDE and Editors
-**/.idea/
-**/.vscode/
+# Editors
+.idea/
+.vscode/
 *.swp
 *.swo
-*~
-**/.project
-**/.classpath
-**/.settings/
 *.sublime-project
 *.sublime-workspace
-**/.spyproject/
-**/.ropeproject/
 *.code-workspace
 
-# macOS
-**/.DS_Store
-**/.AppleDouble
-**/.LSOverride
-**/._*
-**/.Spotlight-V100
-**/.Trashes
-
-# Windows
-**/Thumbs.db
-**/ehthumbs.db
-**/Desktop.ini
-**/$RECYCLE.BIN/
-*.lnk
-
-# Linux
-**/.fuse_hidden*
-**/.nfs*
-
-# Node.js
-**/node_modules/
-**/npm-debug.log*
-**/yarn-debug.log*
-**/yarn-error.log*
-**/.npm
-**/.yarn/cache
-**/.pnpm-store/
-**/*.tsbuild*
+# Local state of AI coding tools (not part of the product)
+.claude/
+.gemini/
+.opencode/
+.monkeycode/
+.aqg/
+.workbuddy/
+.meituan-catpaw/
+.test_workspace/
+.spark/
 
 # Python
-**/__pycache__/
+__pycache__/
 *.py[cod]
-*$py.class
-**/.Python
-**/build/
-**/develop-eggs/
-**/dist/
-**/downloads/
-**/eggs/
-**/.eggs/
-**/parts/
-**/sdist/
-**/var/
-**/wheels/
+.venv/
+venv/
+ENV/
 *.egg-info/
-**/.installed.cfg
 *.egg
-**/.venv/
-**/venv/
-**/ENV/
-**/.pytest_cache/
-**/.mypy_cache/
-**/.ruff_cache/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
 
-# Java
-*.class
-*.jar
-*.war
-*.ear
-**/.gradle/
+# Build output (PyInstaller / setuptools) and release bundles
+build/
+/dist/
+/spark-windows-*.zip
+/spark-*-x86_64.tar.gz
 
-# C/C++/Go/Rust
-*.o
-*.obj
-*.exe
-*.out
-*.app
-*.dll
-*.dylib
-*.so
-*.test
-**/target/
-**/go.work
-**/Cargo.lock
+# Frontend tooling. Source of truth is web/src; the shipped bundle lives in
+# src/spark/web/dist and is tracked.
+node_modules/
+web/.vite/
+web/dist/
+*.tsbuildinfo
+npm-debug.log*
+/package-lock.json
 
-# Ruby
-*.gem
-*.rbc
-**/.bundle/
-**/vendor/bundle
-**/.byebug_history
-
-# Logs
+# Logs and scratch output from build/test sessions
 *.log
-**/logs/
-
-# Environment and secrets
-**/.env
-**/.env.local
-**/.env.*.local
-*.pem
-*.key
-
-# Temporary files
+/build-log.txt
+/final-test.txt
 *.tmp
 *.temp
 *.bak
-*.backup
-*.cache
-**/.cache/
-**/tmp/
-**/temp/
 
-# Dart
-**/.dart_tool/
-**/*.dart_tool
-**/analysis_options.yaml
-**/.packages
-**/.pub-cache/
-**/.pub/
+# Secrets
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
 
-# Flutter
-**/flutter_export_environment.sh
-**/flutter_export_environment.bat
-**/.flutter-plugins
-**/.flutter-plugins-dependencies
-**/.flutter-plugins-dependencies.lock
-**/.metadata
-**/.flutter_build
-**/build/
-**/.dart_tool/
-**/ios/Pods/
-**/ios/.symlinks/
-**/ios/Flutter/ephemeral/
-**/ios/Podfile.lock
-**/ios/.generated/
-**/android/**/generated/
-**/android/.gradle/
-**/android/gradlew
-**/android/gradlew.bat
-**/android/local.properties
-**/android/**/GeneratedPluginRegistrant.java
-**/android/**/flutter_*.json
-**/web/.dart_tool/
-**/web/build/
-**/.flutter-plugins
-**/.flutter-plugins-dependencies
-
-# Compressed files
-*.zip
-*.rar
-*.7z
-*.tar
-*.tar.gz
-*.tgz
-*.tar.bz2
-*.tbz2
-*.tar.xz
-*.txz
-*.gz
-*.bz2
-*.xz
-*.Z
-*.lz
-*.lzma
-*.iso
-.aqg/
+# Upstream Codex CLI clone kept only as an architecture reference
+/codex/

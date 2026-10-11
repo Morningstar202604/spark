@@ -1,0 +1,263 @@
+from __future__ import annotations
+
+import json
+import logging
+import queue
+import select
+import socket
+import threading
+import time
+
+from spark.sanitize import sanitize, sanitize_sse_payload
+from spark.web.utils import _event_payload
+
+logger = logging.getLogger(__name__)
+
+SSE_TEXT_FLUSH_INTERVAL = 0.04
+SSE_TEXT_MAX_CHARS = 1024
+SSE_HEARTBEAT_INTERVAL = 15.0
+SSE_MAX_QUEUED_EVENTS = 256
+SSE_WRITER_POLL_INTERVAL = 0.25
+SSE_DISCONNECT_ERRORS = (
+    ConnectionError,
+    BrokenPipeError,
+    ConnectionAbortedError,
+    OSError,
+)
+_SSE_DONE = object()
+_SSE_STOP = object()
+
+
+class _SSESession:
+    def __init__(
+        self,
+        wfile,
+        *,
+        connection=None,
+        on_disconnect=None,
+        close_connection=None,
+        flush_interval: float = SSE_TEXT_FLUSH_INTERVAL,
+        heartbeat_interval: float = SSE_HEARTBEAT_INTERVAL,
+        max_text_chars: int = SSE_TEXT_MAX_CHARS,
+        max_queue: int = SSE_MAX_QUEUED_EVENTS,
+        secrets: tuple[str, ...] = (),
+    ) -> None:
+        self._wfile = wfile
+        self._connection = connection
+        self._on_disconnect = on_disconnect
+        self._close_connection = close_connection
+        self._peer_monitor_disabled = False
+        self._flush_interval = max(0.001, float(flush_interval))
+        self._heartbeat_interval = max(0.001, float(heartbeat_interval))
+        self._max_text_chars = max(1, int(max_text_chars))
+        self._secrets = tuple(s for s in secrets if s)
+        self._queue: queue.Queue[object] = queue.Queue(maxsize=max(1, int(max_queue)))
+        self._thread: threading.Thread | None = None
+        self._stop = threading.Event()
+        self._disconnected = threading.Event()
+        self._disconnect_lock = threading.Lock()
+
+    @property
+    def disconnected(self) -> bool:
+        return self._disconnected.is_set()
+
+    def start(self) -> None:
+        if self._thread is not None:
+            return
+        self._thread = threading.Thread(target=self._run, name="spark-sse", daemon=True)
+        self._thread.start()
+
+    def submit(self, event) -> bool:
+        return self._enqueue(event)
+
+    def submit_payload(self, payload: dict) -> bool:
+        data = (
+            b"data: "
+            + json.dumps(
+                sanitize_sse_payload(payload, self._secrets), ensure_ascii=False
+            ).encode("utf-8")
+            + b"\n\n"
+        )
+        return self._enqueue(data)
+
+    def finish(self) -> bool:
+        if self._stop.is_set() or self._disconnected.is_set():
+            self._wait()
+            return False
+        try:
+            self._queue.put(_SSE_DONE, timeout=0.5)
+        except queue.Full:
+            self._disconnect()
+            self._wait()
+            return False
+        self._wait()
+        return not self._disconnected.is_set()
+
+    def abort(self) -> None:
+        if not self._disconnected.is_set():
+            self._stop.set()
+            self._close_transport()
+            try:
+                self._queue.put_nowait(_SSE_STOP)
+            except queue.Full:
+                pass
+        self._wait()
+
+    def _enqueue(self, item: object) -> bool:
+        if self._stop.is_set() or self._disconnected.is_set():
+            return False
+        try:
+            self._queue.put_nowait(item)
+        except queue.Full:
+            self._disconnect()
+            return False
+        return True
+
+    def _next_timeout(self, pending_since: float | None, last_write: float) -> float:
+        now = time.monotonic()
+        deadlines = [
+            now + SSE_WRITER_POLL_INTERVAL,
+            last_write + self._heartbeat_interval,
+        ]
+        if pending_since is not None:
+            deadlines.append(pending_since + self._flush_interval)
+        return max(0.0, min(deadlines) - now)
+
+    def _peer_disconnected(self) -> bool:
+        if self._connection is None or self._peer_monitor_disabled:
+            return False
+        try:
+            readable, _, _ = select.select([self._connection], [], [], 0)
+            if not readable:
+                return False
+            data = self._connection.recv(1, getattr(socket, "MSG_PEEK", 0))
+            if data:
+                self._peer_monitor_disabled = True
+                return False
+            return True
+        except (OSError, ValueError):
+            return True
+
+    def _run(self) -> None:
+        pending_text: list[str] = []
+        pending_chars = 0
+        pending_since: float | None = None
+        last_write = time.monotonic()
+
+        def flush_pending() -> None:
+            nonlocal pending_chars, pending_since, last_write
+            if not pending_text:
+                return
+            text = sanitize("".join(pending_text), self._secrets)
+            self._write(
+                b"data: "
+                + json.dumps(
+                    {"type": "text_delta", "text": text},
+                    ensure_ascii=False,
+                ).encode("utf-8")
+                + b"\n\n"
+            )
+            pending_text.clear()
+            pending_chars = 0
+            pending_since = None
+            last_write = time.monotonic()
+
+        try:
+            while True:
+                if self._stop.is_set():
+                    return
+                if self._peer_disconnected():
+                    self._disconnect()
+                    return
+                try:
+                    item = self._queue.get(
+                        timeout=self._next_timeout(pending_since, last_write)
+                    )
+                except queue.Empty:
+                    now = time.monotonic()
+                    if (
+                        pending_text
+                        and pending_since is not None
+                        and now - pending_since >= self._flush_interval
+                    ):
+                        flush_pending()
+                    if time.monotonic() - last_write >= self._heartbeat_interval:
+                        self._write(b": ping\n\n")
+                        last_write = time.monotonic()
+                    continue
+                if item is _SSE_STOP:
+                    return
+                if item is _SSE_DONE:
+                    flush_pending()
+                    self._write(b'data: {"type": "done"}\n\n')
+                    return
+                if isinstance(item, bytes):
+                    flush_pending()
+                    self._write(item)
+                    last_write = time.monotonic()
+                    continue
+                event_type = getattr(item, "type", "")
+                text = getattr(item, "text", None)
+                if event_type == "text_delta" and text:
+                    value = str(text)
+                    while value:
+                        if not pending_text:
+                            pending_since = time.monotonic()
+                        room = self._max_text_chars - pending_chars
+                        part = value[:room]
+                        pending_text.append(part)
+                        pending_chars += len(part)
+                        value = value[len(part) :]
+                        if pending_chars >= self._max_text_chars:
+                            flush_pending()
+                        elif (
+                            pending_since is not None
+                            and time.monotonic() - pending_since >= self._flush_interval
+                        ):
+                            flush_pending()
+                    continue
+                flush_pending()
+                self._write(
+                    b"data: "
+                    + json.dumps(
+                        sanitize_sse_payload(_event_payload(item), self._secrets),
+                        ensure_ascii=False,
+                    ).encode("utf-8")
+                    + b"\n\n"
+                )
+                last_write = time.monotonic()
+        except SSE_DISCONNECT_ERRORS:
+            self._disconnect()
+        except (TypeError, ValueError, UnicodeError):
+            self._disconnect()
+
+    def _write(self, data: bytes) -> None:
+        self._wfile.write(data)
+        flush = getattr(self._wfile, "flush", None)
+        if flush is not None:
+            flush()
+
+    def _disconnect(self) -> None:
+        with self._disconnect_lock:
+            if self._disconnected.is_set():
+                return
+            self._disconnected.set()
+            self._stop.set()
+        try:
+            if self._on_disconnect is not None:
+                self._on_disconnect()
+        finally:
+            self._close_transport()
+
+    def _close_transport(self) -> None:
+        if self._close_connection is None:
+            return
+        try:
+            self._close_connection()
+        except SSE_DISCONNECT_ERRORS:
+            pass
+
+    def _wait(self) -> None:
+        if self._thread is None or self._thread is threading.current_thread():
+            return
+        self._thread.join(timeout=2.0)
