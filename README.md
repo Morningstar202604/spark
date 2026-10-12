@@ -42,7 +42,7 @@ Open `http://localhost:8000` to start conversing.
 | Memory | AGENTS.md injection, long-term memory retrieval, auto keyword tagging |
 | Persistence | Session management, checkpoint & rollback, hot-reload configuration |
 | Models | DeepSeek, OpenAI, Ollama local models, multi-profile switching |
-| Extension | MCP protocol compatible, custom Provider, plugin-based tools |
+| Extension | MCP protocol compatible, custom Provider, project-level skills (`.spark/skills/`) |
 
 ## Architecture
 

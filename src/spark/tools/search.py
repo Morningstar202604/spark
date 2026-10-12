@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 import fnmatch
+import logging
 import os
 import re
 import time
 from pathlib import Path
 
+logger = logging.getLogger(__name__)
 
-def _glob_to_regex(pattern: str) -> re.Pattern[str]:
+
+def _glob_to_regex(pattern: str) -> re.Pattern[str]:  # noqa: E302
     i = 0
     out: list[str] = ["^"]
     n = len(pattern)
@@ -127,7 +130,9 @@ class GlobArgs(BaseModel):
 def _walk(root: Path):
     for dirpath, dirnames, filenames in os.walk(root):
         dirnames[:] = [
-            d for d in dirnames if d not in SKIP_DIRS and not d.startswith(".git")
+            # Exact membership only: startswith(".git") also pruned .github,
+            # so grep reported "no matches" for workflow files that do exist.
+            d for d in dirnames if d not in SKIP_DIRS
         ]
         yield Path(dirpath), filenames
 
@@ -169,6 +174,8 @@ def grep_tool(sandbox: WorkdirSandbox, args: GrepArgs) -> ToolResult:
             try:
                 sandbox._check_protected(resolved)
             except Exception:
+                # 路径安全检查失败时跳过该文件（不阻塞搜索结果）
+                logger.debug("文件安全检查失败，跳过: %s", resolved, exc_info=True)
                 continue
             try:
                 size = file.stat().st_size

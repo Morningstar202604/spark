@@ -4,7 +4,7 @@ set -e
 cd "$(dirname "$0")/.."
 echo "[1/3] venv + deps"
 python3 -m venv .venv
-.venv/bin/pip install -e ".[dev]" pyinstaller
+.venv/bin/pip install -e ".[dev,desktop]" pyinstaller
 echo "[2/3] tests"
 .venv/bin/python -m pytest -q
 echo "[3/3] pyinstaller"

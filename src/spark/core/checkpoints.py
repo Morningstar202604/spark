@@ -89,6 +89,10 @@ def _load_manifest(snapshot_id: str) -> dict | None:
             or any(type(value) is not int for value in metadata)
         ):
             raise ValueError(f"invalid snapshot manifest: {snapshot_id}")
+    unarchived = data.get("unarchived", [])
+    if not isinstance(unarchived, list) or any(not isinstance(n, str) for n in unarchived):
+        raise ValueError(f"invalid snapshot manifest: {snapshot_id}")
+    data["unarchived"] = unarchived
     return data
 
 
@@ -214,6 +218,7 @@ def snapshot_workdir(workdir: Path) -> str:
     )
     os.close(fd)
     tmp_path = Path(tmp_name)
+    unarchived: set[str] = set()
     try:
         with tarfile.open(tmp_path, "w:gz") as tar:
             for path, rel, _metadata in entries:
@@ -223,7 +228,11 @@ def snapshot_workdir(workdir: Path) -> str:
                 try:
                     tar.add(path, arcname=name)
                 except (OSError, PermissionError):
+                    # A file we could not read (locked by another process on
+                    # Windows is the common case) is *not* in the archive, so it
+                    # must never be treated as removable at restore time.
                     current_files.pop(name, None)
+                    unarchived.add(name)
         os.replace(tmp_path, out)
         try:
             _write_manifest(
@@ -233,6 +242,7 @@ def snapshot_workdir(workdir: Path) -> str:
                     "root": _root_key(workdir),
                     "baseline_snapshot_id": baseline_id,
                     "files": current_files,
+                    "unarchived": sorted(unarchived),
                 },
             )
         except (OSError, TypeError, ValueError):
@@ -279,7 +289,9 @@ def _manifest_archived_paths(workdir: Path, manifest: dict) -> set[str]:
     return archived
 
 
-def _expected_archive_names(manifest: dict, baseline: dict | None) -> set[str]:
+def _expected_archive_names(manifest: dict | None, baseline: dict | None) -> set[str]:
+    if manifest is None:
+        raise ValueError("snapshot manifest is required")
     if baseline is None:
         return set(manifest["files"])
     return {
@@ -348,14 +360,19 @@ def restore_workdir(workdir: Path, snapshot_id: str) -> dict:
                 for member in members
                 if member.isfile()
             }
+    # Files the snapshot could not read are deliberately left out of the archive;
+    # deleting them here would turn a capture failure into user data loss.
+    keep_unarchived = set(manifest["unarchived"]) if manifest else set()
     removed = 0
     for path, rel, _metadata in _iter_workdir_files(workdir, _snapshot_dir()):
-        if rel.as_posix() not in archived:
-            try:
-                path.unlink()
-                removed += 1
-            except OSError:
-                continue
+        name = rel.as_posix()
+        if name in archived or name in keep_unarchived:
+            continue
+        try:
+            path.unlink()
+            removed += 1
+        except OSError:
+            continue
     return {
         "snapshot_id": snapshot_id,
         "restored_files": restored,

@@ -33,7 +33,7 @@ while True:
     method = msg.get("method")
     req_id = msg.get("id")
     if method == "initialize":
-        write({"jsonrpc": "2.0", "id": req_id, "result": {"protocolVersion": "2024-11-05", "capabilities": {"tools": {}}, "serverInfo": {"name": "fake"}}})
+        write({"jsonrpc": "2.0", "id": req_id, "result": {"protocolVersion": "2024-11-05", "capabilities": {"tools": {}}, "serverInfo": {"name": "fake", "version": "0.0.0"}}})
     elif method == "notifications/initialized":
         continue
     elif method == "tools/list":

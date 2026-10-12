@@ -127,8 +127,8 @@ SQLite 存储：
 | `sessions` | 会话元信息（id, title, model, updated_at） |
 | `messages` | 对话消息（role, content, timestamp） |
 | `checkpoints` | 检查点记录（id, session_id, label, created_at） |
-| `memory` | 长期记忆（text, embedding, tags, created_at） |
-| `configs` | 设置快照 |
+| `tool_events` | 工具调用审计（name, args, duration, ok） |
+| `bg_jobs` | 后台任务跨重启状态 |
 
 ### 7. 记忆系统 (`src/spark/memory/`)
 
@@ -206,7 +206,7 @@ spark test --model xxx         # 连通性测试
 通过 `McpBridge` 桥接外部 MCP 服务器：
 
 ```toml
-[[mcp.servers]]
+[[mcp_servers]]
 name = "filesystem"
 command = "npx"
 args = ["-y", "@modelcontextprotocol/server-filesystem", "/data"]
@@ -214,9 +214,10 @@ readonly_tools = ["ReadFile", "ReadDir", "Glob"]
 ```
 
 安全策略：
-- MCP 工具默认只读
-- 可通过 `readonly_tools` 白名单限制
-- 配置在 `[mcp.servers]` 段中
+- MCP 工具默认走审批门
+- 可通过 `readonly_tools` 白名单声明只读（免审批）
+- 服务端工具集变化时通过 schema revision 检测并剔除失效调用
+- 配置在 `[[mcp_servers]]` 段中（stdio / sse / streamable_http 三种传输）
 
 ## 文件结构
 
@@ -227,15 +228,16 @@ spark/
 │   ├── cli.py               # CLI 入口（typer）
 │   ├── config.py            # 配置加载（pydantic + toml）
 │   ├── core/
-│   │   ├── loop.py          # AgentLoop 主循环
+│   │   ├── loop.py          # AgentLoop 主循环（经典 ReAct）
+│   │   ├── graph.py         # LangGraph 状态机路径
 │   │   ├── context.py       # 上下文引擎
+│   │   ├── compact.py       # 对话压缩（LlamaIndex + 结构化摘要）
 │   │   ├── tokens.py        # Token 估算
 │   │   └── checkpoints.py   # 检查点管理
 │   ├── providers/
 │   │   ├── base.py          # Provider 抽象基类
 │   │   ├── factory.py       # 工厂函数
-│   │   ├── openai_compat.py # OpenAI 兼容实现
-│   │   ├── ollama.py        # Ollama 实现
+│   │   ├── openai_compat.py # LiteLLM 统一实现（openai_compat + ollama 两个类）
 │   │   ├── mock.py          # Mock 实现
 │   │   └── probe.py         # 连通性探测
 │   ├── tools/
@@ -274,7 +276,11 @@ spark/
 │   └── hero.svg
 ├── docs/                    # 文档
 │   ├── ARCHITECTURE.md
-│   ├── CONFIGURATION.md
+│   ├── API.md               # HTTP API 参考
+│   ├── CONFIG.md            # 配置参考
+│   ├── INSTALL.md           # 安装与打包
+│   ├── AUDIT-2026-10-10.md  # 历史审计记录
+│   ├── CONSOLIDATION-PLAN.md# 双树收敛路线图（历史记录）
 │   └── assets/
 │       ├── architecture.svg # 整体架构图
 │       └── turn-flow.svg    # 回合流程图

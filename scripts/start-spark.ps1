@@ -1,9 +1,15 @@
 # Spark Quick Start — launches backend + frontend in one shot
 # Usage: powershell -ExecutionPolicy Bypass -File scripts/start-spark.ps1
+#
+# Backend runs from the project venv when present; frontend from web/ (Vite dev
+# server proxies /api to 127.0.0.1:8000).
 
 $ErrorActionPreference = "SilentlyContinue"
 $PROJECT_ROOT = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
-$FE_DIR = Join-Path $PROJECT_ROOT "spark\web"
+$FE_DIR = Join-Path $PROJECT_ROOT "web"
+
+$VenvPython = Join-Path $PROJECT_ROOT ".venv\Scripts\python.exe"
+$PythonExe = if (Test-Path $VenvPython) { $VenvPython } else { "python" }
 
 function Kill-Port($port) {
     $p = netstat -ano | Select-String ":$port\s+.*LISTING" | ForEach-Object { ($_ -split '\s+')[-1] } | Select-Object -First 1
@@ -18,8 +24,8 @@ function Wait-For($port, $t=15) {
 }
 
 Kill-Port 8000; Kill-Port 5173
-Write-Host "Starting Spark backend..." -ForegroundColor Cyan
-Start-Process python -ArgumentList "-m spark web --host 127.0.0.1 --port 8000" -WindowStyle Hidden
+Write-Host "Starting Spark backend ($PythonExe)..." -ForegroundColor Cyan
+Start-Process $PythonExe -ArgumentList "-m spark web --host 127.0.0.1 --port 8000" -WorkingDirectory $PROJECT_ROOT -WindowStyle Hidden
 if (Wait-For 8000 15) { Write-Host "  backend  OK  http://127.0.0.1:8000" -ForegroundColor Green } else { Write-Host "  backend  FAILED" -ForegroundColor Red; exit 1 }
 
 Write-Host "Starting Spark frontend..." -ForegroundColor Cyan
@@ -29,4 +35,4 @@ if (Wait-For 5173 15) { Write-Host "  frontend OK  http://localhost:5173" -Foreg
 Write-Host "`nSpark is ready!" -ForegroundColor Yellow
 Write-Host "  Web UI:      http://localhost:5173"
 Write-Host "  API backend: http://127.0.0.1:8000"
-Write-Host "Stop with: taskkill //PID (netstat -ano | findstr :8000 | ForEach{ (\$_ -split '\s+')[-1] }) //F"
+Write-Host "Stop with: taskkill //PID (netstat -ano | findstr :8000 | ForEach{ (`$_ -split '\s+')[-1] }) //F"

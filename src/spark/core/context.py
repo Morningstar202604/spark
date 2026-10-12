@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 from importlib.resources import files
 from pathlib import Path
 
@@ -11,6 +12,35 @@ from spark.skills import discover_skills, inject_skills
 
 def load_system_prompt() -> str:
     return files("spark.prompts").joinpath("system.md").read_text(encoding="utf-8")
+
+
+_ENV_BLOCK_CACHE: list[str] = []
+
+
+def environment_block(workdir: Path) -> str:
+    """Host platform plus the runtimes that are actually installed.
+
+    The prompt used to assert a Linux toolchain unconditionally, so on Windows
+    every command the model issued started with a `python3`/`pip3` that does not
+    exist there. Probed once per process: PATH contents do not depend on the
+    workdir, and each probe spawns a subprocess.
+    """
+    if _ENV_BLOCK_CACHE:
+        return _ENV_BLOCK_CACHE[0]
+    from spark.tools.shell import detect_env  # deferred: tools pull in sandbox/config
+
+    detected = detect_env(workdir)
+    runtime_text = (
+        ", ".join(f"{name} {version}" for name, version in sorted(detected.items()))
+        or "none detected on PATH"
+    )
+    block = (
+        "## Detected environment\n"
+        f"Platform: {sys.platform}. Use the runtimes listed below with exactly these "
+        f"names; do not assume a POSIX toolchain. Detected: {runtime_text}"
+    )
+    _ENV_BLOCK_CACHE.append(block)
+    return block
 
 
 def load_agents_md(workdir: Path, cfg: SparkConfig) -> str | None:
@@ -36,10 +66,24 @@ def load_agents_md(workdir: Path, cfg: SparkConfig) -> str | None:
 
 MODE_HINTS = {
     "sandbox-only": "Access mode: sandbox-only. You can read files inside the workdir and plan, but shell execution and file writes are disabled. Focus on analysis, exploration and recommendations.",
-    "workspace": "Access mode: workspace. You may read/write files and run shell commands inside the workdir only. Operations escaping the workdir or touching protected paths (including the Spark agent's own code under /workspace/src/spark) are blocked.",
+    "workspace": "Access mode: workspace. You may read/write files and run shell commands inside the workdir only. Operations escaping the workdir or touching protected paths (including Spark's own source tree and its config under ~/.spark) are blocked.",
     "full-access": "Access mode: full-access. You may operate beyond the workdir, except protected system paths and the Spark agent's own code. Use with care.",
     "unrestricted": "Access mode: unrestricted. All safeguards are off, including protection of Spark's own code and configuration. Any operation is permitted. Be deliberate: mistakes here can damage the agent itself.",
 }
+
+
+def system_prompt(workdir: Path, cfg: SparkConfig) -> str:
+    """The single system message: base prompt + workdir + environment + mode + skills.
+
+    Shared by :func:`build_messages` and :func:`history_token_usage` so the token
+    estimate can never be computed against a different prompt than the one sent.
+    """
+    text = load_system_prompt() + f"\n\nWorkdir: {workdir.resolve()}"
+    text += f"\n\n{environment_block(workdir)}"
+    mode_hint = MODE_HINTS.get(getattr(cfg.agent, "sandbox_mode", "workspace"))
+    if mode_hint:
+        text += f"\n{mode_hint}"
+    return inject_skills(text, discover_skills(workdir))
 
 
 def build_messages(
@@ -56,13 +100,9 @@ def build_messages(
     Compactor's token-aware implementation; otherwise the original
     char-based budget logic is used (preserved for backward compatibility).
     """
-    system = load_system_prompt() + f"\n\nWorkdir: {workdir.resolve()}"
-    mode_hint = MODE_HINTS.get(getattr(cfg.agent, "sandbox_mode", "workspace"))
-    if mode_hint:
-        system += f"\n{mode_hint}"
-    skills = discover_skills(workdir)
-    system = inject_skills(system, skills)
-    messages: list[ChatMessage] = [ChatMessage(role="system", content=system)]
+    messages: list[ChatMessage] = [
+        ChatMessage(role="system", content=system_prompt(workdir, cfg))
+    ]
     agents = load_agents_md(workdir, cfg)
     if agents:
         messages.append(
@@ -139,9 +179,7 @@ def history_token_usage(
     tool_overhead_tokens: int = 0,
 ) -> dict:
     """Estimate total request size: system + agents.md + memory slot + history + tool schemas."""
-    system = load_system_prompt() + f"\n\nWorkdir: {workdir.resolve()}"
-    skills = discover_skills(workdir)
-    system = inject_skills(system, skills)
+    system = system_prompt(workdir, cfg)
     total = estimate_message_tokens(ChatMessage(role="system", content=system))
     agents = load_agents_md(workdir, cfg)
     if agents:

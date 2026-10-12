@@ -1,87 +1,72 @@
 # Spark HTTP API 参考
 
 > English: [docs/en/API.md](en/API.md)
+> 实现源：`src/spark/web/routes.py`（GET 路由 + POST dispatch 表）、`src/spark/web/_handlers.py`（POST 业务逻辑）。
 
 ## 认证
 
-服务默认监听 `0.0.0.0`（便于外部代理/预览访问；仅本机使用可 `--host 127.0.0.1`）。
+服务默认只监听本机 `127.0.0.1`（`spark web --host 0.0.0.0` 可显式开放到局域网，风险自负）。
 
-- 鉴权逻辑见 `spark/web/api_common.py::check_token`，令牌取自配置项 `token`。
-- **未配置 `token`（或为空）= 免登录**，所有请求直接放行（默认状态）。
-- **配置了 `token` 后**：除 `GET /` 静态资源外，所有 `/api/*` 接口都必须带令牌，否则返回 `401`。令牌可用两种方式之一提供：
-  - 请求头 `X-Spark-Token: <token>`，或
-  - 查询参数 `?token=<token>`
-  > 注意：实现使用自定义头 `X-Spark-Token`（或 `?token=`），**不使用** `Authorization: Bearer`。
-- WebSocket `/ws/pty` 无法自定义请求头，令牌**只能**走查询参数 `?token=<token>`；不正确时以关闭码 `4401` 断开。
-- 流式接口 `/api/chat/stream` 走 SSE（`text/event-stream`）。
+- 鉴权实现位于 `routes.py` 的 `_guard` / `_authorized`；非回环来源必须带控制令牌。
+- 令牌在服务启动时随机生成（`SparkWebState.control_token`），只在控制台对象上提供，不会写进日志。
+- 本机（127.0.0.1 / ::1 / localhost）请求免令牌；其他来源一律 `401`，需带 `X-Spark-Token` 请求头。
+- 额外防护：Host 头非本机 → `403`；带 Origin 头且非本机来源 → `403`（防 CSRF）；POST 的 Content-Type 必须是 `application/json`，否则 `415`。
 
-## 根 / 静态资源
+## 静态资源
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| `GET` | `/` | 返回前端单页（`spark/web/dist/index.html`，缺失时回落 `spark/web/index.html`）；静态资源经兜底挂载伺服 |
+| `GET` | `/` | 返回前端单页（优先 `src/spark/web/dist/index.html`，缺失时回落内置 `index.html`） |
+| `GET` | `/<静态文件>` | 伺服 UI 目录内的资源（带路径逃逸检查）；`/assets/*` 带一年 immutable 缓存 |
 
-## 会话
+## 只读 GET 接口
 
-| 方法 | 路径 | 鉴权 | 请求体 / 查询 | 响应 |
-| --- | --- | --- | --- | --- |
-| `POST` | `/api/sessions` | 是 | `{"workdir": "..."}`（可选 `"model"`）；缺省回落全局配置 | 会话元信息 `{id, title, workdir, model, ...}`；无工作目录 → `400` |
-| `GET` | `/api/sessions` | 是 | `?q=关键词`（有则全文搜索，否则列表） | `[{...会话元信息, "running": bool}]` |
-| `GET` | `/api/sessions/{sid}` | 是 | — | `{meta, messages}`；不存在 → `404` |
-| `PATCH` | `/api/sessions/{sid}` | 是 | `{"title": "..."}`（截断 60 字，非空） | `{ok: true, title}`；标题空 → `400`，会话不存在 → `404` |
-| `DELETE` | `/api/sessions/{sid}` | 是 | — | `{ok: true}`；运行中 → `409`，不存在 → `404` |
-| `POST` | `/api/sessions/{sid}/fork` | 是 | 无请求体（分叉参数不读 body） | 新会话元信息；源不存在 → `404` |
-| `POST` | `/api/sessions/{sid}/truncate` | 是 | `{"message_id": "..."}`（为空则清空整个会话） | `{ok: true, messages}`；运行中 → `409`，消息不存在 → `404` |
-| `DELETE` | `/api/sessions/{sid}/messages/{message_id}` | 是 | — | `{ok: true, messages}`；消息不存在 → `404` |
-| `GET` | `/api/sessions/{sid}/context` | 是 | — | `{used, max, compact}`（估算 token / 上限 / 是否超窗） |
-| `GET` | `/api/sessions/{sid}/export` | 是 | `?format=markdown\|json`（默认 `markdown`） | 直接下载文件：Markdown（`text/markdown`，附件名 `session_<ts>_<title>.md`）或 JSON（`{meta, messages}`，附件名 `session_<ts>_<sid>.json`）；会话不存在 → `404` |
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| `GET` | `/api/status` | 会话 / 沙箱模式 / 审批模式 / 上下文用量 / 计划列表 / 环境信息 |
+| `GET` | `/api/config` | 完整配置（密钥打码）：provider、agent、context、mcp_servers、hooks |
+| `GET` | `/api/models` | 模型 profile 列表（api_key 打码，含 `active` 标记） |
+| `GET` | `/api/agents_md` | 读取工作目录内 AGENTS.md 的内容与状态 |
+| `GET` | `/api/memory` | 长期记忆：`items` 全量、`search?q=关键词` 检索（带 score）、`stats` 统计 |
+| `GET` | `/api/sessions` | 当前工作目录的会话列表（最近 50 条）+ `current` 会话 id |
+| `GET` | `/api/checkpoints` | 当前会话的检查点列表 |
+| `GET` | `/api/history` | 当前会话消息历史（含图片的 base64 data URI） |
 
-## 对话
+## POST 接口
 
-| 方法 | 路径 | 鉴权 | 请求体 | 响应 |
-| --- | --- | --- | --- | --- |
-| `POST` | `/api/chat/stream` | 是 | `{session_id, prompt, approval_mode?, workdir?, model?, images?}`；`images` 为 `[{data: base64, mime}]`，≤3 张、单张 base64 ≤2.8MB | SSE 流（见下）；缺 `session_id`/`prompt` → `400`，会话运行中 → `409`，会话不存在 → `404`，无工作目录 → `400` |
-| `POST` | `/api/approval` | 是 | `{request_id, action: "allow"\|"deny"\|"always", tool?, files?}`；`files` 为字符串列表（逐文件放行 apply_patch） | `{ok: true}`；`files` 非字符串列表 → `400`，`action` 非法 → `400`，审批请求不存在/过期 → `404` |
-| `POST` | `/api/cancel` | 是 | `{session_id}` | `{ok: true}`；无运行中的会话 → `404` |
+| 方法 | 路径 | 请求体 | 说明 |
+| --- | --- | --- | --- |
+| `POST` | `/api/chat/stream` | `{prompt, images?}` | SSE 流式对话。事件：`text_delta` / `tool`（含 tool_call 与结果）/ `approval`（含 diff）/ `turn_end` / `turn_error` / `done`；心跳 `: ping` |
+| `POST` | `/api/chat` | `{prompt}` | 非流式对话，返回完整事件数组（调试用） |
+| `POST` | `/api/cancel` | — | 取消当前回合与待审批 |
+| `POST` | `/api/approval` | `{decision}` | 审批决定：`allow` / `allow_always` / `deny` |
+| `POST` | `/api/models/save` | `{name, base_url, model, provider, api_key, id?}` | 新建或更新模型 profile |
+| `POST` | `/api/models/delete` | `{id}` | 删除 profile；若删除的是活跃 profile 则清空 `active_profile_id` |
+| `POST` | `/api/models/activate` | `{id}` | 切换活跃 profile 并重建 AgentLoop；agent 忙时 `409` |
+| `POST` | `/api/agents_md` | `{content}` | 写工作目录内的 AGENTS.md（文件名受白名单校验） |
+| `POST` | `/api/memory` | `{action}` | `add`（content/type/importance）/ `delete`（id）/ `optimize` |
+| `POST` | `/api/sessions/new` | — | 新建会话 |
+| `POST` | `/api/sessions/delete` | `{session_id}` | 删除会话；删当前会话时自动切换 |
+| `POST` | `/api/sessions/switch` | `{session_id}` | 切换会话并返回消息历史 |
+| `POST` | `/api/checkpoints/rollback` | `{checkpoint_id}` | 回滚到检查点（恢复工作区文件 + 对话历史） |
+| `POST` | `/api/settings` | provider/agent/mcp_servers/hooks 各节 | 保存设置并重建 AgentLoop；字段校验失败 `400`，agent 忙 `409` |
+| `POST` | `/api/test` | `{base_url, model, api_key?}` | 探活模型接口（拒绝向与已配置不同的地址发送存储的密钥） |
 
-SSE 事件 `type`：`hello`（含 `session_id`、`user_msg_id`）/ `status` / `plan` / `reasoning` / `text` / `tool_start` / `approval` / `tool_result` / `usage` / `done`（含 `assistant_msg_id`）/ `error` / `close`。所有事件出口统一脱敏（`sanitize.py`）。
+未知路径一律 `404`；请求体超过 32 MiB 返回 `413`；JSON 解析失败 `400`。
 
-## 配置
+## SSE 事件格式
 
-| 方法 | 路径 | 鉴权 | 请求体 / 查询 | 响应 |
-| --- | --- | --- | --- | --- |
-| `GET` | `/api/config` | 是 | — | 配置快照（预设、current 字段、审批档位、MCP、目录、版本等；`api_key`/`embed_api_key` 回显打码，`token` 仅以 `token_set: bool` 表示） |
-| `POST` | `/api/config` | 是 | 全量/增量回写（provider/base_url/model/... 高级项经类型与范围校验后落盘；打码的 `api_key`/`embed_api_key` 不覆盖真值；`mcp_servers` 逐项清洗；`token` 空串=清除） | 保存后的同一份配置快照 |
-| `POST` | `/api/test-connection` | 是 | `{base_url?, model?, proxy?, api_key?}`（`api_key` 全为 `*` 视为未提供） | `{ok: bool, message: str}` |
-| `GET` | `/api/slash-commands` | 是 | — | `{commands: [...]}`（前端输入框提示用） |
+`/api/chat/stream` 返回 `text/event-stream`，每条事件为 `data: {JSON}\n\n`：
 
-## 用量 / 插件 / 最近目录
+```jsonc
+{"type": "text_delta", "text": "…"}                       // 增量文本（已脱敏）
+{"type": "tool", "tool": {…}, "ok": true, "result": {…}}  // 工具调用与结果
+{"type": "approval", "approval": {"summary": "…", "diff": "…"}}  // 等待审批
+{"type": "turn_end", "text": "…"}                         // 回合结束
+{"type": "turn_error", "text": "…"}                       // 回合出错
+{"type": "done"}                                          // 流结束
+```
 
-| 方法 | 路径 | 鉴权 | 请求体 / 查询 | 响应 |
-| --- | --- | --- | --- | --- |
-| `GET` | `/api/usage` | 是 | `?session_id=xxx`（单会话）或省略（全局总览） | 对应汇总对象 |
-| `GET` | `/api/plugins` | 是 | — | `{dir, plugins: [{name, tools, error}], tool_count}` |
-| `GET` | `/api/recent-dirs` | 是 | — | `{dirs: [...]}`（最多 8 条） |
+连接断开（写失败或对端关闭）会自动取消当前回合；15 秒无数据发送 `: ping` 心跳。
 
-## 记忆
-
-实现见 `spark/web/api_data.py`（记忆按工作目录隔离，`MemoryStore`）。
-
-| 方法 | 路径 | 鉴权 | 请求体 / 查询 | 响应 |
-| --- | --- | --- | --- | --- |
-| `GET` | `/api/memory` | 是 | `?workdir=...`（缺省回落全局配置） | `{workdir, count, items: [...]}`；无工作目录 → `400` |
-| `POST` | `/api/memory` | 是 | `{workdir, key, value, level?}`；`key`/`value` 必填且分别 ≤200/≤5000 字符；`level` 可选 ∈ `semantic`（默认）/`situational`/`episodic`/`procedural`，非法值回落 `semantic` | `{ok: true, count}`；无工作目录 / key 或 value 缺 / 超长 → `400` |
-| `DELETE` | `/api/memory/{memory_id}` | 是 | 路径参数 `memory_id`（整数） | `{ok: true}`；不存在 → `404` |
-
-## 文件 / git / 终端
-
-文件与 git 工作目录来源：优先 `?sid=`/body `sid` 对应会话的 workdir，其次全局配置。
-
-| 方法 | 路径 | 鉴权 | 请求体 / 查询 | 响应 |
-| --- | --- | --- | --- | --- |
-| `GET` | `/api/fs` | 是 | `?sid=...`、`?path=相对子路径` | `{workdir, path, entries: [{name, dir}]}`（只读列表，跳过 node_modules/dist 等）；越界/目录不存在 → `400`/`404`，无工作目录 → `400` |
-| `GET` | `/api/git` | 是 | `?sid=...` | `{repo, branch, changes, checkpoints:[{hash,time,message}]}` 或 `{repo: false, reason}`；无工作目录 → `400` |
-| `POST` | `/api/git/checkpoint` | 是 | `{sid?, message?}`（message 截断 120 字，缺省自动填） | `{ok: true, message}`；git 失败 → `400`，无工作目录 → `400` |
-| `POST` | `/api/git/reset` | 是 | `{sid?, confirm: "yes"}`（破坏性操作，必须 `confirm=yes`） | `{ok: true, message}`；缺确认 → `400`，git 失败 → `400` |
-| `POST` | `/api/pty/close` | 是 | `{sid, tab}` | `{ok: true}`（终止该 tab 的 shell 子进程） |
-| `WS` | `/ws/pty` | 令牌走 `?token=` | 查询 `?sid=&tab=&token=`；消息 `{type:"in"|"resize", ...}`，服务端回 `{type:"out"|"exit"|"err"}` | 持久 PTY 双向流；令牌错误 → `4401`，无工作目录/后端不可用 → `4400` |
+> AI生成

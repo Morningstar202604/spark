@@ -3,27 +3,28 @@ from __future__ import annotations
 import asyncio
 import sys
 from pathlib import Path
-from typing import Optional
+from typing import cast
 
 import typer
 
 from spark.config import (
     ApprovalMode,
     ProviderName,
+    SandboxMode,
+    SparkConfig,
     default_home,
     ensure_home,
     load_config,
     require_api_key,
     write_config_template,
 )
-from spark.providers.factory import create_provider
-from spark.providers.probe import probe_provider
 from spark.core.loop import AgentLoop
 from spark.errors import ConfigError, SparkError
 from spark.onboard import (
     SetupError,
     apply_setup,
     banner,
+    check_health,
     config_as_dict,
     ensure_skeleton,
     friendly_config_error,
@@ -33,10 +34,10 @@ from spark.onboard import (
     render_health,
     save,
     set_value,
-    check_health,
     version_line,
 )
-
+from spark.providers.factory import create_provider
+from spark.providers.probe import probe_provider
 from spark.sandbox import WorkdirSandbox
 from spark.store import SessionStore
 from spark.tools.mcp_bridge import McpBridge
@@ -61,7 +62,7 @@ def _store() -> SessionStore:
 
 
 def _resolve_session(
-    store: SessionStore, workdir: Path, cfg, resume: str | None
+    store: SessionStore, workdir: Path, cfg: SparkConfig, resume: str | None
 ) -> str:
     if resume:
         row = store.get_session(resume)
@@ -71,7 +72,7 @@ def _resolve_session(
     return store.create_session(workdir, cfg.provider.model)
 
 
-async def _boot_mcp(cfg, registry: ToolRegistry) -> McpBridge:
+async def _boot_mcp(cfg: SparkConfig, registry: ToolRegistry) -> McpBridge:
     bridge = McpBridge()
     if cfg.mcp_servers:
         await bridge.start(cfg.mcp_servers, registry)
@@ -81,18 +82,18 @@ async def _boot_mcp(cfg, registry: ToolRegistry) -> McpBridge:
 def _common_cfg(
     workdir: Path,
     config: Path | None,
-    approval: ApprovalMode | None,
+    approval: str | None,
     model: str | None,
-    provider: ProviderName | None,
-    sandbox_mode=None,
-):
+    provider: str | None,
+    sandbox_mode: str | None = None,
+) -> SparkConfig:
     cfg = load_config(
         config_path=config,
         workdir=workdir,
-        approval=approval,
+        approval=cast(ApprovalMode, approval),
         model=model,
-        provider=provider,
-        sandbox_mode=sandbox_mode,
+        provider=cast(ProviderName, provider),
+        sandbox_mode=cast(SandboxMode, sandbox_mode),
     )
     if cfg.provider.name == "openai_compat":
         try:
@@ -105,7 +106,7 @@ def _common_cfg(
 def _launch_tui(
     *,
     workdir: Path,
-    cfg,
+    cfg: SparkConfig,
     store: SessionStore,
     session_id: str,
     initial_prompt: str | None,
@@ -136,11 +137,11 @@ def main(
     workdir: Path = typer.Option(
         Path("."), "--workdir", dir_okay=True, file_okay=False
     ),
-    approval: Optional[str] = typer.Option(None, "--approval"),
-    model: Optional[str] = typer.Option(None, "--model"),
-    provider: Optional[str] = typer.Option(None, "--provider"),
-    config: Optional[Path] = typer.Option(None, "--config"),
-    sandbox_mode: Optional[str] = typer.Option(
+    approval: str | None = typer.Option(None, "--approval"),
+    model: str | None = typer.Option(None, "--model"),
+    provider: str | None = typer.Option(None, "--provider"),
+    config: Path | None = typer.Option(None, "--config"),
+    sandbox_mode: str | None = typer.Option(
         None,
         "--sandbox-mode",
         help="sandbox-only | workspace | full-access | unrestricted",
@@ -152,7 +153,7 @@ def main(
         workdir = workdir.resolve()
         cfg = _common_cfg(
             workdir, config, approval, model, provider, sandbox_mode=sandbox_mode
-        )  # type: ignore[arg-type]
+        )
         prompt = " ".join(ctx.args).strip() or None
         store = _store()
         session_id = _resolve_session(store, workdir, cfg, None)
@@ -172,11 +173,11 @@ def main(
 def exec_cmd(
     prompt: str = typer.Argument(...),
     workdir: Path = typer.Option(Path("."), "--workdir"),
-    approval: Optional[str] = typer.Option(None, "--approval"),
-    model: Optional[str] = typer.Option(None, "--model"),
-    provider: Optional[str] = typer.Option(None, "--provider"),
-    config: Optional[Path] = typer.Option(None, "--config"),
-    sandbox_mode: Optional[str] = typer.Option(
+    approval: str | None = typer.Option(None, "--approval"),
+    model: str | None = typer.Option(None, "--model"),
+    provider: str | None = typer.Option(None, "--provider"),
+    config: Path | None = typer.Option(None, "--config"),
+    sandbox_mode: str | None = typer.Option(
         None,
         "--sandbox-mode",
         help="sandbox-only | workspace | full-access | unrestricted",
@@ -186,7 +187,7 @@ def exec_cmd(
         workdir = workdir.resolve()
         cfg = _common_cfg(
             workdir, config, approval, model, provider, sandbox_mode=sandbox_mode
-        )  # type: ignore[arg-type]
+        )
         if cfg.agent.approval == "suggest":
             raise ConfigError(
                 "spark exec cannot collect approvals; use --approval auto-edit or full-auto"
@@ -202,7 +203,7 @@ def exec_cmd(
 
 
 async def _exec_async(
-    prompt: str, workdir: Path, cfg, store: SessionStore, session_id: str
+    prompt: str, workdir: Path, cfg: SparkConfig, store: SessionStore, session_id: str
 ) -> None:
     prov = create_provider(cfg)
     sandbox = WorkdirSandbox(workdir, cfg)
@@ -237,15 +238,15 @@ async def _exec_async(
 @app.command("web")
 def web_cmd(
     workdir: Path = typer.Option(Path("."), "--workdir"),
-    approval: Optional[str] = typer.Option(
+    approval: str | None = typer.Option(
         None,
         "--approval",
         help="suggest | auto-edit | full-auto（默认逐项询问，确认后再执行）",
     ),
-    model: Optional[str] = typer.Option(None, "--model"),
-    provider: Optional[str] = typer.Option(None, "--provider"),
-    config: Optional[Path] = typer.Option(None, "--config"),
-    sandbox_mode: Optional[str] = typer.Option(
+    model: str | None = typer.Option(None, "--model"),
+    provider: str | None = typer.Option(None, "--provider"),
+    config: Path | None = typer.Option(None, "--config"),
+    sandbox_mode: str | None = typer.Option(
         None,
         "--sandbox-mode",
         help="sandbox-only | workspace | full-access | unrestricted",
@@ -261,7 +262,7 @@ def web_cmd(
         workdir = workdir.resolve()
         cfg = _common_cfg(
             workdir, config, approval, model, provider, sandbox_mode=sandbox_mode
-        )  # type: ignore[arg-type]
+        )
         store = _store()
         from spark.web.server import serve_web
 
@@ -271,14 +272,52 @@ def web_cmd(
         raise typer.Exit(exc.exit_code) from exc
 
 
+@app.command("desktop")
+def desktop_cmd(
+    workdir: Path = typer.Option(Path("."), "--workdir"),
+    approval: str | None = typer.Option(
+        None,
+        "--approval",
+        help="suggest | auto-edit | full-auto（默认逐项询问，确认后再执行）",
+    ),
+    model: str | None = typer.Option(None, "--model"),
+    provider: str | None = typer.Option(None, "--provider"),
+    config: Path | None = typer.Option(None, "--config"),
+    sandbox_mode: str | None = typer.Option(
+        None,
+        "--sandbox-mode",
+        help="sandbox-only | workspace | full-access | unrestricted",
+    ),
+    port: int = typer.Option(8000, "--port", help="本机服务监听端口"),
+    width: int = typer.Option(1280, "--width", help="窗口宽度"),
+    height: int = typer.Option(832, "--height", help="窗口高度"),
+) -> None:
+    """在原生窗口中打开 Spark（固定绑定 127.0.0.1；要暴露局域网请用 spark web）。"""
+    try:
+        workdir = workdir.resolve()
+        cfg = _common_cfg(
+            workdir, config, approval, model, provider, sandbox_mode=sandbox_mode
+        )
+        store = _store()
+        from spark.desktop import run_desktop
+
+        code = run_desktop(
+            workdir=workdir, cfg=cfg, store=store, port=port, width=width, height=height
+        )
+        raise typer.Exit(code)
+    except SparkError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(exc.exit_code) from exc
+
+
 @app.command("test")
 def test_cmd(
     workdir: Path = typer.Option(Path("."), "--workdir"),
-    model: Optional[str] = typer.Option(None, "--model"),
-    provider: Optional[str] = typer.Option(None, "--provider"),
-    config: Optional[Path] = typer.Option(None, "--config"),
-    base_url: Optional[str] = typer.Option(None, "--base-url"),
-    api_key: Optional[str] = typer.Option(
+    model: str | None = typer.Option(None, "--model"),
+    provider: str | None = typer.Option(None, "--provider"),
+    config: Path | None = typer.Option(None, "--config"),
+    base_url: str | None = typer.Option(None, "--base-url"),
+    api_key: str | None = typer.Option(
         None, "--api-key", help="User API key for the custom endpoint"
     ),
     rounds: int = typer.Option(2, "--rounds"),
@@ -287,7 +326,10 @@ def test_cmd(
     try:
         workdir = workdir.resolve()
         cfg = load_config(
-            config_path=config, workdir=workdir, model=model, provider=provider
+            config_path=config,
+            workdir=workdir,
+            model=model,
+            provider=cast(ProviderName, provider),
         )
         if base_url:
             cfg.provider.base_url = base_url
@@ -347,14 +389,14 @@ def sessions_cmd() -> None:
 def resume_cmd(
     session_id: str = typer.Argument(...),
     workdir: Path = typer.Option(Path("."), "--workdir"),
-    approval: Optional[str] = typer.Option(None, "--approval"),
-    model: Optional[str] = typer.Option(None, "--model"),
-    provider: Optional[str] = typer.Option(None, "--provider"),
-    config: Optional[Path] = typer.Option(None, "--config"),
+    approval: str | None = typer.Option(None, "--approval"),
+    model: str | None = typer.Option(None, "--model"),
+    provider: str | None = typer.Option(None, "--provider"),
+    config: Path | None = typer.Option(None, "--config"),
 ) -> None:
     try:
         workdir = workdir.resolve()
-        cfg = _common_cfg(workdir, config, approval, model, provider)  # type: ignore[arg-type]
+        cfg = _common_cfg(workdir, config, approval, model, provider)
         store = _store()
         session_id = _resolve_session(store, workdir, cfg, session_id)
         row = store.get_session(session_id)
@@ -386,21 +428,21 @@ def version_cmd() -> None:
 
 @app.command("init")
 def init_cmd(
-    config: Optional[Path] = typer.Option(None, "--config", help="写入的配置文件路径"),
-    base_url: Optional[str] = typer.Option(
+    config: Path | None = typer.Option(None, "--config", help="写入的配置文件路径"),
+    base_url: str | None = typer.Option(
         None, "--base-url", help="模型接口地址，例如 https://api.agnes-ai.cn/v1"
     ),
-    model: Optional[str] = typer.Option(None, "--model", help="模型名"),
-    api_key: Optional[str] = typer.Option(
+    model: str | None = typer.Option(None, "--model", help="模型名"),
+    api_key: str | None = typer.Option(
         None, "--api-key", help="API Key（不会回显）"
     ),
-    provider: Optional[str] = typer.Option(
+    provider: str | None = typer.Option(
         None, "--provider", help="openai_compat | ollama | mock"
     ),
-    approval: Optional[str] = typer.Option(
+    approval: str | None = typer.Option(
         None, "--approval", help="suggest | auto-edit | full-auto"
     ),
-    sandbox_mode: Optional[str] = typer.Option(
+    sandbox_mode: str | None = typer.Option(
         None,
         "--sandbox-mode",
         help="sandbox-only | workspace | full-access | unrestricted",
@@ -461,7 +503,7 @@ def init_cmd(
         raise typer.Exit(2) from exc
 
 
-def _env_key(cfg) -> str:
+def _env_key(cfg: SparkConfig) -> str:
     import os
 
     return (
@@ -471,7 +513,7 @@ def _env_key(cfg) -> str:
     )
 
 
-def _prompt_setup(cfg) -> None:
+def _prompt_setup(cfg: SparkConfig) -> None:
     import getpass
 
     typer.echo("Spark 首次配置（直接回车跳过该项）")
@@ -483,10 +525,25 @@ def _prompt_setup(cfg) -> None:
         cfg.provider.api_key = key
 
 
+def _perm_ok() -> bool:
+    """配置文件权限是否达标：POSIX = 0600；Windows = ACL 收紧到仅当前用户。"""
+    from spark.config import default_config_path, win_acl_restricted
+
+    f = default_config_path()  # 动态：遵守 SPARK_HOME
+    if sys.platform == "win32":
+        return f.exists() and win_acl_restricted(f)
+    import stat
+
+    try:
+        return stat.S_IMODE(f.stat().st_mode) == 0o600
+    except OSError:
+        return False
+
+
 @app.command("doctor")
 def doctor_cmd(
     workdir: Path = typer.Option(Path("."), "--workdir"),
-    config: Optional[Path] = typer.Option(None, "--config"),
+    config: Path | None = typer.Option(None, "--config"),
     probe: bool = typer.Option(True, "--probe/--no-probe", help="实际调用一次模型验证"),
     as_json: bool = typer.Option(False, "--json", help="输出机器可读 JSON"),
 ) -> None:
@@ -540,7 +597,7 @@ app.add_typer(config_app, name="config")
 @config_app.command("show")
 def config_show_cmd(
     workdir: Path = typer.Option(Path("."), "--workdir"),
-    config: Optional[Path] = typer.Option(None, "--config"),
+    config: Path | None = typer.Option(None, "--config"),
     as_json: bool = typer.Option(False, "--json", help="输出机器可读 JSON"),
 ) -> None:
     """Print the effective configuration with secrets masked."""
@@ -562,7 +619,7 @@ def config_set_cmd(
     key: str = typer.Argument(..., help="点号路径，例如 agent.max_repeat_calls"),
     value: str = typer.Argument(..., help="新值"),
     workdir: Path = typer.Option(Path("."), "--workdir"),
-    config: Optional[Path] = typer.Option(None, "--config"),
+    config: Path | None = typer.Option(None, "--config"),
 ) -> None:
     """Set one configuration value and persist it."""
     try:

@@ -15,12 +15,12 @@ import pytest
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows ACL 行为")
 def test_save_config_hardens_acl(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("SPARK_HOME", str(tmp_path))
-    from spark.config import _defaults, config_file, save_config
+    from spark.config import SparkConfig, default_config_path, save_config
 
-    cfg = _defaults()
-    cfg["api_key"] = "sk-test-1234567890"
+    cfg = SparkConfig()
+    cfg.provider.api_key = "sk-test-1234567890"
     save_config(cfg)
-    f = config_file()
+    f = default_config_path()
     out = subprocess.run(
         ["icacls", str(f)], capture_output=True, text=True, timeout=30
     ).stdout
@@ -54,8 +54,7 @@ def test_doctor_perm_check_on_windows(tmp_path, monkeypatch) -> None:
     """doctor 的权限自检在 Windows 上应反映 ACL 状态（收紧后为 True）。"""
     monkeypatch.setenv("SPARK_HOME", str(tmp_path))
     from spark.cli import _perm_ok
-    from spark.config import _defaults, save_config
+    from spark.config import SparkConfig, save_config
 
-    cfg = _defaults()
-    save_config(cfg)
+    save_config(SparkConfig())
     assert _perm_ok() is True

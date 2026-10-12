@@ -19,7 +19,7 @@ test:               ## 全量测试
 	$(PY) -m pytest -q
 
 lint:               ## ruff 静态检查（未安装时自动安装）
-	$(PIP) install -q ruff && .venv/bin/ruff check spark tests
+	$(PIP) install -q ruff && .venv/bin/ruff check src/spark tests
 
 build:              ## 构建 wheel（输出到 dist/）
 	$(PIP) install -q build && $(PY) -m build

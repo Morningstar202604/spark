@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import socket
 from pathlib import Path
 
 import pytest
+
 from spark.config import SparkConfig, load_config
 from spark.tools import gitops
 from spark.tools.registry import ToolContext, ToolRegistry
-
 
 # ---------- 1. Web 默认不得对外暴露且默认不自动放行 ----------
 

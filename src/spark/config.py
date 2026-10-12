@@ -12,22 +12,47 @@
 
 from __future__ import annotations
 
-import json
+import logging
 import os
+import re
+import subprocess
+import sys
 import tomllib
-from pathlib import Path
-from typing import Any, Literal
-
 from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Literal, cast, get_args
 
+import tomlkit
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from spark.errors import ConfigError
 
+logger = logging.getLogger(__name__)
+
 ApprovalMode = Literal["suggest", "auto-edit", "full-auto"]
 ProviderName = Literal["openai_compat", "ollama", "mock"]
 SandboxMode = Literal["sandbox-only", "workspace", "full-access", "unrestricted"]
+# Single source of truth for CLI/config validation — derived from the Literals so
+# a mode can never be added to the type without also being accepted at runtime.
+APPROVAL_MODES: tuple[str, ...] = get_args(ApprovalMode)
+PROVIDER_NAMES: tuple[str, ...] = get_args(ProviderName)
+SANDBOX_MODES: tuple[str, ...] = get_args(SandboxMode)
+
+
+def validate_choice(value: str | None, allowed: tuple[str, ...], label: str) -> str:
+    """Validate a user-supplied enum-ish value against the canonical list.
+
+    Unknown values must never reach the policy layer: ``decide()`` only treats
+    ``"suggest"`` as the strict mode, so a typo would silently fail *open*.
+    """
+    if value is None:
+        return ""
+    if value not in allowed:
+        raise ConfigError(
+            f"unknown {label}: {value!r} (choose one of: {', '.join(allowed)})"
+        )
+    return value
 DisplayConfigKey = Literal[
     "show_thinking",
     "show_tools",
@@ -46,10 +71,14 @@ class PermissionRule:
 
     ``resource`` is a glob pattern (``src/foo/*``, ``**/*.py``, ...).
     ``action`` is one of ``allow``, ``prompt``, ``deny``.
+    ``tool`` optionally restricts the rule to the named tool(s), also a glob
+    (``run_shell``, ``mcp__github__*``).  An empty ``tool`` means "any tool",
+    which is how pre-existing rules keep working.
     """
 
     action: PermissionAction
     resource: str
+    tool: str = ""
 
 
 class ProviderConfig(BaseModel):
@@ -100,8 +129,8 @@ class McpServerConfig(BaseModel):
     command: str = ""  # for stdio transport
     args: list[str] = Field(default_factory=list)  # for stdio transport
     readonly_tools: list[str] = Field(default_factory=list)
-    transport: Literal["stdio", "sse"] = "stdio"
-    http: McpTransportConfig | None = None  # for SSE transport
+    transport: Literal["stdio", "sse", "streamable_http"] = "stdio"
+    http: McpTransportConfig | None = None  # for the sse / streamable_http transports
 
 
 class MemoryConfig(BaseModel):
@@ -141,10 +170,48 @@ class SparkConfig(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="SPARK_",
         env_nested_delimiter="__",
-        env_file=".env",
         env_file_encoding="utf-8",
         extra="ignore",
     )
+
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls,
+        init_settings,
+        env_settings,
+        dotenv_settings,
+        file_secret_settings,
+    ):
+        """Only ``$SPARK_HOME/.env`` may supply settings from a file.
+
+        ``SettingsConfigDict(env_file=".env")`` resolves against the *current
+        working directory*, which for Spark is the repository being worked on.
+        A cloned repo could then ship a ``.env`` that sets
+        ``SPARK_AGENT__APPROVAL=full-auto`` / ``SPARK_AGENT__SANDBOX_MODE=unrestricted``
+        / ``SPARK_HOOKS`` and hand itself code execution plus a free pass on every
+        tool call — the project-level TOML sanitizer would never see it, because
+        this channel is not TOML.
+        """
+        from pydantic_settings import DotEnvSettingsSource
+
+        user_env = default_home() / ".env"
+        if not user_env.is_file():
+            return (init_settings, env_settings, file_secret_settings)
+        cfg = settings_cls.model_config or {}
+        return (
+            init_settings,
+            env_settings,
+            DotEnvSettingsSource(
+                settings_cls,
+                env_file=str(user_env),
+                env_file_encoding=cfg.get("env_file_encoding", "utf-8"),
+                env_prefix=cfg.get("env_prefix", ""),
+                env_nested_delimiter=cfg.get("env_nested_delimiter"),
+                case_sensitive=cfg.get("case_sensitive", False),
+            ),
+            file_secret_settings,
+        )
 
     active_profile_id: str = ""
     provider: ProviderConfig = Field(default_factory=ProviderConfig)
@@ -163,6 +230,11 @@ class SparkConfig(BaseSettings):
 
 
 def default_home() -> Path:
+    # SPARK_HOME 在调用时动态生效（tests/conftest.py 依赖此契约隔离测试，
+    # 避免写坏真实 ~/.spark）；勿在 import 时固化路径。
+    env = os.environ.get("SPARK_HOME")
+    if env and env.strip():
+        return Path(env).expanduser()
     return Path.home() / ".spark"
 
 
@@ -265,10 +337,18 @@ auto_extract = true
 
 
 def _load_toml(path: Path) -> dict[str, Any]:
+    """Read a TOML config file. Malformed TOML surfaces as :class:`ConfigError`
+    so callers get a friendly message + exit code 2 instead of a raw
+    ``tomllib.TOMLDecodeError`` traceback."""
     if not path.exists():
         return {}
-    with path.open("rb") as handle:
-        data = tomllib.load(handle)
+    try:
+        with path.open("rb") as handle:
+            data = tomllib.load(handle)
+    except tomllib.TOMLDecodeError as exc:
+        raise ConfigError(f"invalid TOML in {path}: {exc}") from exc
+    except OSError as exc:
+        raise ConfigError(f"cannot read config file {path}: {exc}") from exc
     servers = (
         data.pop("mcp", {}).get("servers", [])
         if isinstance(data.get("mcp"), dict)
@@ -281,12 +361,19 @@ def _load_toml(path: Path) -> dict[str, Any]:
 
 def _sanitize_project_config(raw: dict[str, Any]) -> dict[str, Any]:
     """A repository-local .spark.toml is untrusted input: it must not be able to
-    execute code, hook tools, or redirect credentials to a third-party endpoint."""
+    execute code, hook tools, self-authorise permissions, or redirect credentials
+    to a third-party endpoint.
+
+    Permission rules are stripped as well — otherwise a cloned repository could
+    ship ``[[permission_rules]] action="allow" resource="**"`` and grant itself
+    permission to run any shell command without asking the user.
+    """
     clean = dict(raw)
     clean.pop("mcp_servers", None)
     clean.pop("mcp", None)
     clean.pop("hooks", None)
     clean.pop("model_profiles", None)
+    clean.pop("permission_rules", None)
     provider = clean.get("provider")
     if isinstance(provider, dict):
         provider = dict(provider)
@@ -299,13 +386,58 @@ def _sanitize_project_config(raw: dict[str, Any]) -> dict[str, Any]:
         agent = dict(agent)
         agent.pop("approval", None)
         agent.pop("sandbox_mode", None)
+        # ``workdir_only`` and ``protected_paths`` decide whether the agent may
+        # leave the repository at all — a repo must not be able to widen them.
+        agent.pop("workdir_only", None)
+        agent.pop("protected_paths", None)
         clean["agent"] = agent
+    # ``context.agents_md`` controls which file is injected into the system
+    # prompt — a malicious repo could point it at a sensitive file.  The
+    # built-in path guard (``load_agents_md``) rejects separators/traversal, but
+    # we strip it from untrusted project configs as defense-in-depth.
+    context = clean.get("context")
+    if isinstance(context, dict):
+        context = dict(context)
+        if "agents_md" in context:
+            context["agents_md"] = "AGENTS.md"
+        clean["context"] = context
     return clean
 
 
 # ---------------------------------------------------------------------------
 # Config assembly
 # ---------------------------------------------------------------------------
+
+
+def _merge_config(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]:
+    """Section-wise merge: nested dicts merge, scalars and lists replace.
+
+    A repository-local ``.spark.toml`` is an *overlay* on the user's global
+    config, never a replacement — otherwise opening a repo would silently drop
+    the user's own ``protected_paths``, hooks and permission rules.
+    """
+    merged = dict(base)
+    for key, value in overlay.items():
+        if isinstance(value, dict) and isinstance(merged.get(key), dict):
+            merged[key] = _merge_config(merged[key], value)
+        else:
+            merged[key] = value
+    return merged
+
+
+def _is_repo_local(path: Path, workdir: Path) -> bool:
+    """True when *path* is a ``.spark.toml`` living in *workdir*.
+
+    Compares *resolved* parents: a symlinked or junctioned workdir must not be
+    able to make its ``.spark.toml`` look like the global config (and vice
+    versa) purely by spelling the path differently.
+    """
+    if path.name != ".spark.toml":
+        return False
+    try:
+        return path.resolve().parent == workdir.resolve()
+    except OSError:
+        return path.parent == workdir
 
 
 def load_config(
@@ -319,25 +451,21 @@ def load_config(
 ) -> SparkConfig:
     raw: dict[str, Any] = {}
     chosen: Path | None = None
-    from_local_workdir = False
-    candidates = []
     if config_path is not None:
-        candidates.append(config_path)
+        chosen = config_path
+        raw = _load_toml(config_path)
+        if _is_repo_local(config_path, workdir):
+            raw = _sanitize_project_config(raw)
     else:
-        candidates.extend([workdir / ".spark.toml", default_config_path()])
-    for candidate in candidates:
-        if candidate.exists():
-            chosen = candidate
-            raw = _load_toml(candidate)
-            from_local_workdir = (
-                candidate.name == ".spark.toml"
-                and candidate.parent == workdir.resolve()
-                if candidate.is_absolute()
-                else candidate.name == ".spark.toml"
-            )
-            break
-    if from_local_workdir:
-        raw = _sanitize_project_config(raw)
+        global_path = default_config_path()
+        if global_path.exists():
+            chosen = global_path
+            raw = _load_toml(global_path)
+        repo_path = workdir / ".spark.toml"
+        if repo_path.exists() and not _is_repo_local(global_path, workdir):
+            raw = _merge_config(raw, _sanitize_project_config(_load_toml(repo_path)))
+            if chosen is None:
+                chosen = repo_path
 
     # SparkConfig (BaseSettings) validates TOML data *and* reads SPARK_* env vars
     # automatically.  Programmatic CLI overrides are applied below.
@@ -347,15 +475,21 @@ def load_config(
         raise ConfigError(f"Invalid config file: {chosen or 'defaults'}") from exc
 
     if approval:
-        cfg.agent.approval = approval
+        cfg.agent.approval = cast(
+            ApprovalMode, validate_choice(approval, APPROVAL_MODES, "approval mode")
+        )
     if sandbox_mode:
-        cfg.agent.sandbox_mode = sandbox_mode
+        cfg.agent.sandbox_mode = cast(
+            SandboxMode, validate_choice(sandbox_mode, SANDBOX_MODES, "sandbox mode")
+        )
     if model:
         cfg.provider.model = model
     elif os.environ.get("SPARK_MODEL"):
         cfg.provider.model = os.environ["SPARK_MODEL"]
     if provider:
-        cfg.provider.name = provider
+        cfg.provider.name = cast(
+            ProviderName, validate_choice(provider, PROVIDER_NAMES, "provider")
+        )
     if os.environ.get("SPARK_BASE_URL"):
         cfg.provider.base_url = os.environ["SPARK_BASE_URL"]
     return cfg
@@ -391,123 +525,198 @@ def mask_secret(value: str | None) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _toml_str(value: str) -> str:
-    return json.dumps(value if value is not None else "", ensure_ascii=False)
-
-
 def save_config(cfg: SparkConfig, path: Path | None = None) -> Path:
+    """Persist configuration as TOML using the official ``tomlkit`` library.
+
+    ``tomlkit`` produces spec-compliant TOML with correct quoting, escaping of
+    special characters, and proper handling of arrays and inline tables — none of
+    which we had to invent.
+    """
     path = path or default_config_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    key_line = (
-        f"api_key = {_toml_str(cfg.provider.api_key or '')}\n"
-        if cfg.provider.api_key
-        else ""
-    )
-    mcp_blocks = []
-    for server in cfg.mcp_servers:
-        if server.transport == "sse":
-            http = server.http
-            url_str = _toml_str(http.url) if http else '""'
-            hdr_pairs = (
-                ", ".join(f'{_toml_str(k)} = {_toml_str(v)}' for k, v in http.headers.items())
-                if http and http.headers
-                else ""
-            )
-            timeout_str = str(http.timeout_sec) if http else "30"
-            mcp_blocks.append(
-                "[[mcp.servers]]\n"
-                f"name = {_toml_str(server.name)}\n"
-                f'transport = "sse"\n'
-                f"readonly_tools = {json.dumps(server.readonly_tools)}\n"
-                f"\n"
-                f"[mcp.servers.http]\n"
-                f"url = {url_str}\n"
-                f"headers = {{{hdr_pairs}}}\n"
-                f"timeout_sec = {timeout_str}\n"
-            )
-        else:
-            mcp_blocks.append(
-                "[[mcp.servers]]\n"
-                f"name = {_toml_str(server.name)}\n"
-                f"command = {_toml_str(server.command)}\n"
-                f"args = {json.dumps(server.args)}\n"
-                f"readonly_tools = {json.dumps(server.readonly_tools)}\n"
-            )
-    mcp_section = ("\n" + "\n".join(mcp_blocks)) if mcp_blocks else ""
-    profile_blocks = []
-    for prof in cfg.model_profiles:
-        profile_blocks.append(
-            "[[model_profiles]]\n"
-            f"id = {_toml_str(prof.id)}\n"
-            f"name = {_toml_str(prof.name)}\n"
-            f"provider = {_toml_str(prof.provider)}\n"
-            f"base_url = {_toml_str(prof.base_url)}\n"
-            f"model = {_toml_str(prof.model)}\n"
-            f"api_key = {_toml_str(prof.api_key)}\n"
-        )
-    profiles_section = ("\n" + "\n".join(profile_blocks)) if profile_blocks else ""
-    hook_blocks = []
-    for hook in cfg.hooks:
-        hook_blocks.append(
-            "[[hooks]]\n"
-            f"event = {_toml_str(hook.event)}\n"
-            f"command = {_toml_str(hook.command)}\n"
-            f"args = {json.dumps(list(hook.args))}\n"
-            f"name = {_toml_str(hook.name)}\n"
-            f"timeout_sec = {hook.timeout_sec}\n"
-            f"on_deny = {_toml_str(hook.on_deny)}\n"
-        )
-    hooks_section = ("\n" + "\n".join(hook_blocks)) if hook_blocks else ""
-    permission_blocks = []
-    for rule in cfg.permission_rules:
-        permission_blocks.append(
-            "[[permission_rules]]\n"
-            f"action = {_toml_str(rule.action)}\n"
-            f"resource = {_toml_str(rule.resource)}\n"
-        )
-    permissions_section = ("\n" + "\n".join(permission_blocks)) if permission_blocks else ""
-    memory_section = (
-        f"\n[memory]\nenabled = {str(cfg.memory.enabled).lower()}\n"
-        f"top_k = {cfg.memory.top_k}\ncapacity = {cfg.memory.capacity}\n"
-        f"embedding_model = {_toml_str(cfg.memory.embedding_model)}\n"
-        f"auto_extract = {str(cfg.memory.auto_extract).lower()}\n"
-    )
-    body = f"""active_profile_id = {_toml_str(cfg.active_profile_id)}
-[provider]
-name = {_toml_str(cfg.provider.name)}
-base_url = {_toml_str(cfg.provider.base_url)}
-model = {_toml_str(cfg.provider.model)}
-api_key_env = {_toml_str(cfg.provider.api_key_env)}
-{key_line}[agent]
-approval = {_toml_str(cfg.agent.approval)}
-workdir_only = {str(cfg.agent.workdir_only).lower()}
-sandbox_mode = {_toml_str(cfg.agent.sandbox_mode)}
-protected_paths = {json.dumps(list(cfg.agent.protected_paths))}
-shell_timeout_sec = {cfg.agent.shell_timeout_sec}
-max_tool_rounds = {cfg.agent.max_tool_rounds}
-max_repeat_calls = {cfg.agent.max_repeat_calls}
-max_turn_tokens = {cfg.agent.max_turn_tokens}
-max_output_chars = {cfg.agent.max_output_chars}
-show_thinking = {str(cfg.agent.show_thinking).lower()}
-show_tools = {str(cfg.agent.show_tools).lower()}
-show_plan = {str(cfg.agent.show_plan).lower()}
-show_context = {str(cfg.agent.show_context).lower()}
-show_keywords = {str(cfg.agent.show_keywords).lower()}
-show_notices = {str(cfg.agent.show_notices).lower()}
 
-[context]
-agents_md = {_toml_str(cfg.context.agents_md)}
-max_fragment_chars = {cfg.context.max_fragment_chars}
-history_budget_chars = {cfg.context.history_budget_chars}
-max_context_tokens = {cfg.context.max_context_tokens}
-compact_threshold = {cfg.context.compact_threshold}
-keep_recent_messages = {cfg.context.keep_recent_messages}{memory_section}{mcp_section}{profiles_section}{hooks_section}{permissions_section}
-"""
+    doc = tomlkit.document()
+    doc.add("active_profile_id", cfg.active_profile_id or "")
+    doc.add(tomlkit.comment("Spark agent configuration — edit with: spark config set <key> <value>"))
+    doc.add(tomlkit.nl())
+
+    # [provider]
+    provider = tomlkit.table()
+    provider.add("name", cfg.provider.name)
+    provider.add("base_url", cfg.provider.base_url or "")
+    provider.add("model", cfg.provider.model or "")
+    provider.add("api_key_env", cfg.provider.api_key_env or "")
+    if cfg.provider.api_key:
+        provider.add("api_key", cfg.provider.api_key)
+    doc.add("provider", provider)
+
+    # [agent]
+    agent = tomlkit.table()
+    agent.add("approval", cfg.agent.approval)
+    agent.add("workdir_only", cfg.agent.workdir_only)
+    agent.add("sandbox_mode", cfg.agent.sandbox_mode)
+    agent.add("protected_paths", list(cfg.agent.protected_paths))
+    agent.add("shell_timeout_sec", cfg.agent.shell_timeout_sec)
+    agent.add("max_tool_rounds", cfg.agent.max_tool_rounds)
+    agent.add("max_repeat_calls", cfg.agent.max_repeat_calls)
+    agent.add("max_turn_tokens", cfg.agent.max_turn_tokens)
+    agent.add("max_output_chars", cfg.agent.max_output_chars)
+    agent.add("show_thinking", cfg.agent.show_thinking)
+    agent.add("show_tools", cfg.agent.show_tools)
+    agent.add("show_plan", cfg.agent.show_plan)
+    agent.add("show_context", cfg.agent.show_context)
+    agent.add("show_keywords", cfg.agent.show_keywords)
+    agent.add("show_notices", cfg.agent.show_notices)
+    doc.add("agent", agent)
+
+    # [context]
+    context = tomlkit.table()
+    context.add("agents_md", cfg.context.agents_md)
+    context.add("max_fragment_chars", cfg.context.max_fragment_chars)
+    context.add("history_budget_chars", cfg.context.history_budget_chars)
+    context.add("max_context_tokens", cfg.context.max_context_tokens)
+    context.add("compact_threshold", cfg.context.compact_threshold)
+    context.add("keep_recent_messages", cfg.context.keep_recent_messages)
+    doc.add("context", context)
+
+    # [memory]
+    memory = tomlkit.table()
+    memory.add("enabled", cfg.memory.enabled)
+    memory.add("top_k", cfg.memory.top_k)
+    memory.add("capacity", cfg.memory.capacity)
+    memory.add("embedding_model", cfg.memory.embedding_model or "")
+    memory.add("auto_extract", cfg.memory.auto_extract)
+    doc.add("memory", memory)
+
+    # [[mcp.servers]]
+    if cfg.mcp_servers:
+        mcp_aot = tomlkit.aot()
+        for server in cfg.mcp_servers:
+            srv_table = tomlkit.table(is_super_table=True)
+            srv_table.add("name", server.name)
+            if server.transport == "sse":
+                srv_table.add("transport", "sse")
+                srv_table.add("readonly_tools", list(server.readonly_tools))
+                if server.http:
+                    http = tomlkit.table()
+                    http.add("url", server.http.url)
+                    if server.http.headers:
+                        http.add("headers", server.http.headers)
+                    http.add("timeout_sec", server.http.timeout_sec)
+                    srv_table.add("http", http)
+            else:
+                srv_table.add("command", server.command)
+                srv_table.add("args", list(server.args))
+                srv_table.add("readonly_tools", list(server.readonly_tools))
+            mcp_aot.append(srv_table)
+        doc.add("mcp", tomlkit.table().add("servers", mcp_aot))
+
+    # [[model_profiles]]
+    if cfg.model_profiles:
+        prof_aot = tomlkit.aot()
+        for prof in cfg.model_profiles:
+            pt = tomlkit.table()
+            pt.add("id", prof.id)
+            pt.add("name", prof.name)
+            pt.add("provider", prof.provider)
+            pt.add("base_url", prof.base_url or "")
+            pt.add("model", prof.model or "")
+            pt.add("api_key", prof.api_key or "")
+            prof_aot.append(pt)
+        doc.add("model_profiles", prof_aot)
+
+    # [[hooks]]
+    if cfg.hooks:
+        hook_aot = tomlkit.aot()
+        for hook in cfg.hooks:
+            ht = tomlkit.table()
+            ht.add("event", hook.event)
+            ht.add("command", hook.command)
+            ht.add("args", list(hook.args))
+            ht.add("name", hook.name or "")
+            ht.add("timeout_sec", hook.timeout_sec)
+            ht.add("on_deny", hook.on_deny or "")
+            hook_aot.append(ht)
+        doc.add("hooks", hook_aot)
+
+    # [[permission_rules]]
+    if cfg.permission_rules:
+        pr_aot = tomlkit.aot()
+        for rule in cfg.permission_rules:
+            rt = tomlkit.table()
+            rt.add("action", rule.action)
+            rt.add("resource", rule.resource)
+            pr_aot.append(rt)
+        doc.add("permission_rules", pr_aot)
+
+    output = tomlkit.dumps(doc)
     tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(body, encoding="utf-8")
+    tmp.write_text(output, encoding="utf-8")  # noqa: E501
     os.replace(tmp, path)
+    _harden_permissions(path)
+    return path
+
+
+def _harden_permissions(f: Path) -> None:
+    """收紧配置文件权限（内含 API Key / 访问令牌）。
+
+    POSIX：chmod 600。Windows：chmod 只拨只读位、不限制其他账户读取，
+    必须用 icacls 移除继承并只保留当前用户 SID。全部失败安全。
+    """
+    if sys.platform == "win32":
+        sid = _win_user_sid()
+        if sid:
+            try:
+                subprocess.run(
+                    ["icacls", str(f), "/inheritance:r", "/grant:r", f"*{sid}:F"],
+                    capture_output=True,
+                    timeout=30,
+                    creationflags=subprocess.CREATE_NO_WINDOW,
+                )
+                return
+            except (OSError, subprocess.SubprocessError):
+                pass
     try:
-        os.chmod(path, 0o600)
+        os.chmod(f, 0o600)
     except OSError:
         pass
-    return path
+
+
+_WIN_SID: str | None = None
+
+
+def _win_user_sid() -> str | None:
+    """当前用户 SID（进程内缓存）；取不到返回 None（调用方回退 chmod）。"""
+    global _WIN_SID
+    if _WIN_SID is None:
+        try:
+            out = subprocess.run(
+                ["whoami", "/user", "/fo", "csv", "/nh"],
+                capture_output=True,
+                text=True,
+                timeout=30,
+                creationflags=subprocess.CREATE_NO_WINDOW,
+            ).stdout
+            m = re.search(r"S-1-\d[\d-]*\d", out)
+            _WIN_SID = m.group(0) if m else ""
+        except (OSError, subprocess.SubprocessError):
+            _WIN_SID = ""
+    return _WIN_SID or None
+
+
+def win_acl_restricted(f: Path) -> bool:
+    """Windows：文件 ACL 是否已收紧到只剩当前用户一条 ACE（供 doctor 展示）。"""
+    if sys.platform != "win32":
+        return False
+    try:
+        out = subprocess.run(
+            ["icacls", str(f)],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            creationflags=subprocess.CREATE_NO_WINDOW,
+        ).stdout
+    except (OSError, subprocess.SubprocessError):
+        return False
+    aces = [ln for ln in out.splitlines() if ":(" in ln]
+    return len(aces) == 1

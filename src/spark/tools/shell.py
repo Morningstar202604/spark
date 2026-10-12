@@ -1,16 +1,19 @@
 from __future__ import annotations
 
+import logging
 import os
 import shutil
 import signal
 import subprocess
 import threading
+
+logger = logging.getLogger(__name__)
+
 from pydantic import BaseModel
 
 from spark.errors import PathEscapeError
 from spark.models import ToolResult
 from spark.sandbox import SandboxPolicyError, WorkdirSandbox
-
 
 MAX_SHELL_OUTPUT_BYTES = 4 * 1024 * 1024
 _READ_CHUNK_BYTES = 8192
@@ -160,12 +163,12 @@ def _kill_process_tree(process: subprocess.Popen) -> None:
             pass
     else:
         try:
-            process_group = os.getpgid(process.pid)
+            process_group = os.getpgid(process.pid)  # type: ignore[attr-defined,arg-type]
         except OSError:
             process_group = None
         if process_group is not None:
             try:
-                os.killpg(process_group, signal.SIGKILL)
+                os.killpg(process_group, signal.SIGKILL)  # type: ignore[attr-defined,arg-type]
             except OSError:
                 pass
     if process.poll() is None:
@@ -197,6 +200,8 @@ def detect_env(workdir) -> dict:
             version = (completed.stdout or completed.stderr).strip().splitlines()
             result[name] = version[0][:60] if version else "installed"
         except Exception:
+            # 版本命令执行失败时降级为 "installed"（仅展示用）
+            logger.debug("检测 %s 版本失败", name, exc_info=True)
             result[name] = "installed"
     result["path"] = str(workdir)
     return result

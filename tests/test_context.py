@@ -1,4 +1,3 @@
-import asyncio
 from pathlib import Path
 
 import pytest
@@ -90,13 +89,26 @@ async def test_auto_compaction_triggers(tmp_path: Path) -> None:
     compaction = next(e for e in events if e.type == "compaction")
     assert compaction.data["before_tokens"] > compaction.data["after_tokens"]
     assert compaction.data["summarized_messages"] > 0
-    assert loop.history[0].role == "summary"
-    assert loop.history[1].role == "user"
+    # Compaction must not swallow the recent tail: the cursor is the id of the
+    # first *retained* message. Asserting retention here is what keeps the
+    # summary-from-own-id regression from coming back.
+    keep = loop.cfg.context.keep_recent_messages
+    assert any(m.role == "summary" for m in loop.history)
+    assert len([m for m in loop.history if m.role != "summary"]) >= keep
     assert loop.history[-1].role == "assistant"
     assert events[-1].type == "turn_end"
     reloaded = loop.store.load_messages(loop.session_id)
-    assert reloaded[0].role == "summary"
+    assert any(m.role == "summary" for m in reloaded)
+    assert len([m for m in reloaded if m.role != "summary"]) >= keep
     assert any(m.role == "user" and m.content == "new question" for m in reloaded)
+    # The summary is still hoisted ahead of the retained tail in the prompt that
+    # actually reaches the provider (spark.core.context.build_messages).
+    sent = build_messages(workdir=tmp_path, cfg=loop.cfg, history=loop.history)
+    roles = [m.role for m in sent]
+    assert "summary" in roles
+    assert roles.index("summary") < min(
+        i for i, r in enumerate(roles) if r in {"user", "assistant"}
+    )
 
 
 @pytest.mark.asyncio

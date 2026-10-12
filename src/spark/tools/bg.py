@@ -1,15 +1,19 @@
 from __future__ import annotations
 
 import atexit
+import logging
 import os
 import signal
 import subprocess
 import threading
 import time
 import uuid
+from typing import Any
 
 from spark.models import ToolResult
 from spark.sandbox import WorkdirSandbox
+
+logger = logging.getLogger(__name__)
 
 MAX_BUFFER = 200_000
 MAX_JOBS = 8
@@ -31,6 +35,7 @@ def attach_store(store) -> None:
 
 
 _PERSIST_ERRORS: list[str] = []
+_PERSIST_MAX_ERRORS = 100  # 最多保留最近 100 条持久化错误（防止无界增长）
 
 
 def _persist_new(job: dict, cwd: str) -> None:
@@ -41,7 +46,10 @@ def _persist_new(job: dict, cwd: str) -> None:
     try:
         store.upsert_bg_job(job["id"], job["command"], cwd, job["started_at"])
     except Exception as exc:
+        # 修复：append 后限制长度，超过上限丢弃最旧的（只增不减 → 有界环形）
         _PERSIST_ERRORS.append(f"new:{job['id']}:{exc}")
+        if len(_PERSIST_ERRORS) > _PERSIST_MAX_ERRORS:
+            del _PERSIST_ERRORS[:len(_PERSIST_ERRORS) - _PERSIST_MAX_ERRORS]
 
 
 def _persist_state(job: dict) -> None:
@@ -57,7 +65,10 @@ def _persist_state(job: dict) -> None:
             exit_code=job["exit_code"],
         )
     except Exception as exc:
+        # 修复：append 后限制长度，超过上限丢弃最旧的
         _PERSIST_ERRORS.append(f"state:{job['id']}:{exc}")
+        if len(_PERSIST_ERRORS) > _PERSIST_MAX_ERRORS:
+            del _PERSIST_ERRORS[:len(_PERSIST_ERRORS) - _PERSIST_MAX_ERRORS]
 
 
 def _clip(text: str) -> str:
@@ -73,7 +84,8 @@ def _kill_all_running() -> None:
         try:
             _kill_job(job)
         except Exception:
-            pass
+            # atexit 回收后台作业失败时记录，不影响退出
+            logger.warning("atexit 终止后台作业失败", exc_info=True)
 
 
 atexit.register(_kill_all_running)
@@ -85,17 +97,20 @@ def _start_background(sandbox: WorkdirSandbox, command: str, cwd: str | None) ->
         running_n = sum(1 for j in JOBS.values() if j["finished_at"] is None)
         if running_n >= MAX_JOBS:
             raise RuntimeError(f"too many running background jobs (max {MAX_JOBS})")
-    job_id = uuid.uuid4().hex[:8]
+    job_id = uuid.uuid4().hex  # 修复：完整 128-bit 熵（hex[:8] 仅 32-bit，碰撞概率过高）
     proc = subprocess.Popen(
         command,
-        shell=True,
+        # shell=True is the tool's purpose (same as run_shell) — the command
+        # has already passed sandbox.check_shell above. Job lifecycle is
+        # managed via start_new_session + process-group kill.
+        shell=True,  # nosec B602
         cwd=str(cwd_path),
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
         start_new_session=True,
     )
-    job = {
+    job: dict[str, Any] = {
         "id": job_id,
         "command": command,
         "process": proc,
@@ -107,11 +122,15 @@ def _start_background(sandbox: WorkdirSandbox, command: str, cwd: str | None) ->
 
     def reader() -> None:
         try:
-            for line in proc.stdout:  # type: ignore[attr-defined]
+            stdout = proc.stdout
+            assert stdout is not None
+            for line in stdout:
                 with JOBS_LOCK:
                     job["output"] = _clip(job["output"] + line)
         except Exception:
-            pass
+            # 进程输出流异常时强制标记失败，避免任务卡在 running 状态
+            logger.warning("后台作业 %s 输出流读取失败，标记为失败", job.get("id"), exc_info=True)
+            job["exit_code"] = job["exit_code"] if job["exit_code"] is not None else -1
         proc.wait()
         job["exit_code"] = proc.returncode
         job["finished_at"] = time.time()
@@ -217,7 +236,7 @@ def _kill_job(job: dict) -> None:
             pass
     else:
         try:
-            os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+            os.killpg(os.getpgid(proc.pid), signal.SIGTERM)  # type: ignore[attr-defined,arg-type]
         except (ProcessLookupError, PermissionError):
             try:
                 proc.terminate()
@@ -230,7 +249,7 @@ def _kill_job(job: dict) -> None:
             if os.name == "nt":
                 proc.kill()
             else:
-                os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+                os.killpg(os.getpgid(proc.pid), signal.SIGKILL)  # type: ignore[attr-defined,arg-type]
         except (ProcessLookupError, PermissionError, OSError):
             try:
                 proc.kill()
@@ -291,5 +310,6 @@ def bg_list_tool() -> ToolResult:
                     }
                 )
         except Exception:
-            pass
+            # status 查询失败时保留已有 jobs 数据
+            logger.warning("后台作业状态查询失败", exc_info=True)
     return ToolResult(ok=True, payload={"jobs": jobs})

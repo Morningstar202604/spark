@@ -1,5 +1,4 @@
 """Tests for Spark structured compaction (Compactor.summarize / merge_summaries)."""
-from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -8,7 +7,6 @@ from spark.config import SparkConfig
 from spark.core.compact import STRUCTURED_SUMMARY_PROMPT, Compactor
 from spark.models import ChatDelta, ChatMessage
 from spark.providers.mock import MockProvider
-
 
 # ---------------------------------------------------------------------------
 # Helpers

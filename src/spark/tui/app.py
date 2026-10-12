@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 from rich.markup import escape as rich_escape
 from textual.app import App, ComposeResult
@@ -13,14 +16,13 @@ from textual.widgets import Button, Footer, Header, Input, RichLog, Static
 
 from spark.config import SparkConfig, require_api_key
 from spark.core.loop import AgentLoop
-from spark.models import ApprovalDecision, ApprovalRequest, TurnEvent
+from spark.models import ApprovalAction, ApprovalDecision, ApprovalRequest, TurnEvent
 from spark.providers.base import Provider
 from spark.providers.probe import probe_provider
 from spark.store import SessionStore
-from spark.tui.welcome import error_hint, help_text, status_text, welcome_text
 from spark.tools.mcp_bridge import McpBridge
 from spark.tools.registry import ToolRegistry
-
+from spark.tui.welcome import error_hint, help_text, status_text, welcome_text
 
 _NARROW_TERMINAL_WIDTH = 32
 _TOOLBAR_LABELS = {
@@ -47,7 +49,8 @@ class HelpScreen(ModalScreen[None]):
         try:
             self.query_one("#help-body", RichLog).write(help_text())
         except NoMatches:
-            pass
+            # help 组件可能尚未挂载，跳过不阻塞
+            return
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         self.dismiss(None)
@@ -70,7 +73,6 @@ class ApprovalScreen(ModalScreen[ApprovalDecision]):
     #title {
         width: 100%;
         height: auto;
-        text-wrap: wrap;
     }
     #detail {
         width: 100%;
@@ -129,7 +131,8 @@ class ApprovalScreen(ModalScreen[ApprovalDecision]):
         try:
             self.query_one("#deny", Button).focus()
         except Exception:
-            pass
+            # 按钮聚焦失败时用户可以手动点击
+            logger.debug("无法聚焦 deny 按钮", exc_info=True)
 
     def on_resize(self, event: Resize) -> None:
         self._set_narrow(event.size.width <= _NARROW_TERMINAL_WIDTH)
@@ -151,7 +154,7 @@ class ApprovalScreen(ModalScreen[ApprovalDecision]):
             )
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
-        mapping = {
+        mapping: dict[str, ApprovalAction] = {
             "allow": "allow",
             "deny": "deny",
             "always": "allow_always",
@@ -181,7 +184,6 @@ class SessionPicker(ModalScreen[str | None]):
     #title {
         width: 100%;
         height: auto;
-        text-wrap: wrap;
     }
     #picker-list {
         width: 100%;
@@ -232,8 +234,6 @@ class SparkApp(App):
         max-width: 100%;
         height: 1;
         overflow-x: hidden;
-        text-overflow: ellipsis;
-        text-wrap: nowrap;
         color: #ff7a3d;
         text-style: bold;
     }
@@ -322,7 +322,11 @@ class SparkApp(App):
         return status_text(self.cfg, self.session_id, str(self.workdir))
 
     def _set_toolbar_compact(self, compact: bool) -> None:
-        toolbar = self.query_one("#toolbar", Horizontal)
+        try:
+            toolbar = self.query_one("#toolbar", Horizontal)
+        except NoMatches:
+            # toolbar 组件可能尚未挂载，后续 _update_status 会重试
+            return
         toolbar.set_class(compact, "narrow")
         for button_id, labels in _TOOLBAR_LABELS.items():
             button = self.query_one(f"#{button_id}", Button)
@@ -476,7 +480,10 @@ class SparkApp(App):
             pass
 
     def _update_status(self, spinner_frame: str = "") -> None:
-        status = self.query_one("#status", Static)
+        try:
+            status = self.query_one("#status", Static)
+        except NoMatches:
+            return
         base = self._status_text()
         if self._running and spinner_frame:
             status.update(f"Spark {spinner_frame} {base}")
@@ -530,7 +537,8 @@ class SparkApp(App):
         try:
             self.loop_engine.cancel()
         except Exception:
-            pass
+            # finally 块中取消运行中的 loop，失败仅记录不影响退出
+            logger.debug("on_unmount 取消 loop_engine 失败", exc_info=True)
         if self.bridge:
             await self.bridge.close()
         self.store.close()

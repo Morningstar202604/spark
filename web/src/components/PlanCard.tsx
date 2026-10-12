@@ -28,13 +28,22 @@ export default function PlanCard({ steps }: { steps: PlanStep[] }) {
         <span className="rounded bg-spark-line px-1.5 py-0.5 text-[10px] tabular-nums text-spark-muted">
           {done}/{steps.length}
         </span>
-        <span className="ml-auto text-[10px] text-spark-muted">{collapsed ? "展开" : "收起"}</span>
+        {/* progress bar mirrors the done/total count */}
+        <span className="hidden h-1 flex-1 overflow-hidden rounded-full bg-spark-line sm:block">
+          <span
+            className="block h-full rounded-full bg-spark-accent transition-all duration-500 ease-out"
+            style={{ width: `${(done / steps.length) * 100}%` }}
+          />
+        </span>
+        <span className="ml-auto text-[10px] text-spark-muted sm:ml-2">{collapsed ? "展开" : "收起"}</span>
       </button>
       {!collapsed && (
         <ul className="mt-1.5 flex flex-col gap-1">
           {steps.map((s, i) => (
-            <li key={i} className="flex items-start gap-2">
-              <span className={`shrink-0 ${COLORS[s.status]}`}>{ICONS[s.status]}</span>
+            <li key={i} className="animate-plan-item flex items-start gap-2" style={{ animationDelay: `${Math.min(i * 40, 240)}ms` }}>
+              <span className={`shrink-0 ${COLORS[s.status]} ${s.status === "in_progress" ? "animate-spin-slow" : ""}`}>
+                {ICONS[s.status]}
+              </span>
               <span className={s.status === "completed" ? "text-spark-muted line-through" : "text-spark-text"}>
                 {s.title}
               </span>

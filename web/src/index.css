@@ -134,6 +134,17 @@ html, body, #root {
 .animate-in { animation: fade-slide-in 0.22s ease-out; }
 .animate-fade { animation: fade-in 0.18s ease-out; }
 
+/* plan items cascade in one by one */
+@keyframes plan-item-in {
+  from { opacity: 0; transform: translateX(-6px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+.animate-plan-item { opacity: 0; animation: plan-item-in 0.24s ease-out forwards; }
+
+/* in-progress plan step spinner (the ◐ glyph rotates) */
+@keyframes spin-slow { to { transform: rotate(360deg); } }
+.animate-spin-slow { display: inline-block; animation: spin-slow 1.4s linear infinite; }
+
 /* smooth scrollbars */
 * { scrollbar-width: thin; scrollbar-color: var(--color-spark-line) transparent; }
 *::-webkit-scrollbar { width: 8px; height: 8px; }
@@ -159,6 +170,7 @@ html, body, #root {
 
 /* reduced motion */
 @media (prefers-reduced-motion: reduce) {
-  .animate-in, .animate-fade { animation: none; }
+  .animate-in, .animate-fade, .animate-plan-item, .animate-spin-slow { animation: none; }
+  .animate-plan-item { opacity: 1; }
   * { transition-duration: 0.01ms !important; }
 }

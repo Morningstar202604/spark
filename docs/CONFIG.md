@@ -1,83 +1,112 @@
 # Spark 配置文档（config.toml）
 
 > English: [docs/en/CONFIG.md](en/CONFIG.md)
+> 字段的唯一事实来源：`src/spark/config.py`（`SparkConfig` 及嵌套模型，含全部默认值与边界）。
 
-配置文件位于 `~/.spark/config.toml`（可用 `SPARK_HOME` 环境变量覆盖目录）。
-绝大多数字段可在网页「设置」面板中修改并保存，本文件列出全部字段与默认值。
+配置文件位于 `~/.spark/config.toml`（可用 `SPARK_HOME` 环境变量覆盖目录），由 `spark init` 生成模板。
+绝大多数字段可在网页「设置」面板中修改并保存，本文件按 `[section]` 列出全部字段与默认值。
 
-## 核心字段
-
-| 字段 | 默认 | 说明 |
-| --- | --- | --- |
-| `provider` | `mock` | 模型服务预设：`deepseek` / `deepseek-flash` / `qwen` / `glm` / `kimi` / `doubao` / `unisound` / `ollama` / `custom` / `mock` |
-| `base_url` | `""` | OpenAI 兼容接口地址（`custom` 预设必须填） |
-| `model` | `mock` | 主模型名 |
-| `api_key` | `""` | API 密钥（网页回显打码，写入时不受影响） |
-| `workdir` | 启动目录 | 默认工作目录 |
-| `approval_mode` | `suggest` | 审批模式：`suggest` 建议（写类询问）/ `auto-edit` 自动改文件 / `full-auto` 全自动 / `plan` 只读规划 |
-| `max_context_tokens` | `32000` | 上下文窗口上限，超限自动压缩旧消息 |
-| `token` | `""` | 访问令牌；空 = 免登录（默认监听 0.0.0.0，公网可达时务必开启） |
-
-## 模型路由与容灾
+## `[provider]` — 模型服务
 
 | 字段 | 默认 | 说明 |
 | --- | --- | --- |
-| `model_fast` | `""` | 快速模型名；简单任务自动走它、复杂任务走主模型。留空 = 不启用路由 |
-| `route_enabled` | `true` | 多模型路由开关（`model_fast` 非空时才生效） |
-| `route_keywords` | `""` | 自定义「强任务」关键词（逗号/空格/换行分隔）；空 = 内置词表 |
-| `fallback_model` | `""` | 备用模型：主模型不可用（限流/故障/配置错误）自动切换。留空 = 不启用 |
+| `name` | `openai_compat` | `openai_compat` / `ollama` / `mock` |
+| `base_url` | `https://api.deepseek.com/v1` | OpenAI 兼容接口地址（LiteLLM 承载，支持 100+ 后端） |
+| `model` | `deepseek-chat` | 主模型名 |
+| `api_key_env` | `SPARK_API_KEY` | 密钥所在环境变量名 |
+| `api_key` | `null` | 直接写密钥（网页回显打码）；优先级低于环境变量 |
 
-## 记忆
+## `[agent]` — 行为与安全
 
 | 字段 | 默认 | 说明 |
 | --- | --- | --- |
-| `memory_embedding` | `off` | `off` 仅关键词检索（零依赖）/ `api` 火山方舟 doubao-embedding / `local` 本地模型 |
-| `memory_embed_model` | `""` | 嵌入模型名（`api`/`local` 模式必填） |
+| `approval` | `suggest` | 审批模式：`suggest` 写类逐项询问 / `auto-edit` 自动改文件 / `full-auto` 全自动 |
+| `workdir_only` | `true` | 限制文件访问在工作目录内 |
+| `sandbox_mode` | `workspace` | `sandbox-only` 只读 / `workspace` 工作目录内读写 / `full-access` 可越界（保护路径除外）/ `unrestricted` 无限制 |
+| `protected_paths` | `[]` | 永远拒绝写入的额外路径（Spark 自身代码与配置始终受保护） |
+| `shell_timeout_sec` | `60` | 单条命令超时（1–3600） |
+| `max_tool_rounds` | `30` | 单回合最大工具轮次（1–1000） |
+| `max_repeat_calls` | `4` | 同一 (工具， 参数) 签名的熔断阈值（0 = 关闭） |
+| `max_turn_tokens` | `0` | 单回合 token 预算（0 = 关闭） |
+| `max_output_chars` | `8000` | 工具输出截断长度（200–1,000,000） |
+| `show_thinking` / `show_tools` / `show_plan` / `show_context` / `show_keywords` / `show_notices` | `true` | 前端显示开关 |
+
+## `[context]` — 上下文窗口
+
+| 字段 | 默认 | 说明 |
+| --- | --- | --- |
+| `agents_md` | `AGENTS.md` | 注入的项目说明文件名（仅裸文件名，防路径逃逸） |
+| `max_fragment_chars` | `8000` | AGENTS.md 注入截断长度 |
+| `history_budget_chars` | `96000` | 历史消息字符预算 |
+| `max_context_tokens` | `32768` | 上下文窗口上限，超过 `compact_threshold` 自动压缩 |
+| `compact_threshold` | `0.85` | 触发压缩的用量比例（0.1–0.99） |
+| `keep_recent_messages` | `8` | 压缩时保留的最近消息数 |
+
+## `[memory]` — 长期记忆
+
+| 字段 | 默认 | 说明 |
+| --- | --- | --- |
+| `enabled` | `true` | 总开关（ChromaDB 向量持久化 + 关键词检索） |
+| `top_k` | `6` | 检索条数（1–50） |
+| `capacity` | `500` | 记忆容量上限（1–100,000） |
+| `embedding_model` | `text-embedding-3-small` | 嵌入模型 |
+| `auto_extract` | `true` | 每回合后自动抽取事实入记忆 |
 
 ## MCP 服务器
 
 ```toml
 [[mcp_servers]]
 name = "filesystem"
-command = "npx"
+command = "npx"                      # stdio 传输
 args = ["-y", "@modelcontextprotocol/server-filesystem", "."]
-transport = "stdio"   # stdio | http
-env = {}              # 环境变量（JSON 对象）
-# transport = "http" 时：
-# url = "http://127.0.0.1:8000/mcp"
-# headers = {}        # HTTP 头（JSON 对象）
+readonly_tools = []                  # 声明为只读的工具名（免审批）
+
+# 远程传输（SSE / streamable HTTP）：
+# [[mcp_servers]]
+# name = "remote"
+# transport = "sse"                  # stdio | sse | streamable_http
+# [mcp_servers.http]
+# url = "http://127.0.0.1:3000/sse"
+# headers = {}
+# timeout_sec = 30
 ```
 
-## 高级可调项
+## `[[hooks]]` — 生命周期钩子
 
-| 字段 | 默认 | 说明 |
-| --- | --- | --- |
-| `system_prompt` | `""` | 自定义系统提示词；空 = 内置默认。支持 `{workdir}` `{protected}` 占位符 |
-| `protected_paths` | `[]` | 额外保护路径（TOML 数组）：这些路径下永远拒绝写入 |
-| `max_turns` | `25` | 单次对话最大工具轮次 |
-| `tool_timeout` | `180` | 单个工具执行超时（秒） |
-| `auto_verify` | `true` | `apply_patch` 成功后自动跑 pytest 验证（可关） |
-| `temperature` | `""` | 采样温度；空 = 不传（用服务端默认） |
-| `max_tokens` | `""` | 单次回复最大 tokens；空 = 不传 |
-| `usage_pricing` | `{}` | 成本单价覆盖：`{模型名: {input: 元/百万, output: 元/百万}}` |
-| `proxy` | `""` | HTTP(S) 代理（如 `http://127.0.0.1:7890`）；空 = 尊重环境变量 |
+```toml
+[[hooks]]
+event = "pre_tool"                   # 见 spark/hooks.py 的 HookRegistry.EVENTS
+command = "python"
+args = ["check.py"]
+timeout_sec = 15
+on_deny = "warn"                     # warn | block
+```
+
+## 模型 profiles（多模型切换）
+
+```toml
+active_profile_id = "a1b2c3d4"
+
+[[model_profiles]]
+id = "a1b2c3d4"
+name = "DeepSeek"
+provider = "openai_compat"
+base_url = "https://api.deepseek.com/v1"
+model = "deepseek-chat"
+# api_key 字段存在但示例留空：密钥请写入配置或环境变量，勿提交到仓库
+```
+
+网页「设置 → 模型」的增删切换即读写这一节。
 
 ## 环境变量
 
+- 所有字段都可用 `SPARK_` 前缀 + 双下划线嵌套覆盖：`SPARK_AGENT__MAX_TOOL_ROUNDS=50`、`SPARK_PROVIDER__BASE_URL=…`
+- `.env` 只从 `$SPARK_HOME/.env` 读取（项目目录内的 `.env` 一律忽略——防止克隆来的仓库给自己开 full-auto）
 - `SPARK_HOME`：覆盖配置/数据目录（默认 `~/.spark`）
-- `<PROVIDER>_API_KEY`：provider 对应的密钥环境变量（`DEEPSEEK_API_KEY` / `DASHSCOPE_API_KEY` / `ZHIPU_API_KEY` / `MOONSHOT_API_KEY` / `ARK_API_KEY` / `UNISOUND_API_KEY` / `OLLAMA_API_KEY`）
-- `HTTPS_PROXY` / `HTTP_PROXY`：未设 `proxy` 字段时由 httpx 自动尊重
+- `LITELLM_LOCAL_MODEL_COST_MAP`：Spark 默认设为 `True`（使用 LiteLLM 内置模型价格表，跳过 raw.githubusercontent.com 拉取；国内网络拉不到会白等约 9 秒）
 
-## 示例（云知声 u2-flash）
+## 项目级配置（`.spark.toml`）
 
-```toml
-provider = "unisound"
-base_url = "https://maas-api.unisound.com/v1"
-model = "u2-flash"
-api_key = "sk-xxx"          # 或设环境变量 UNISOUND_API_KEY
-workdir = "/path/to/proj"
-approval_mode = "suggest"
-fallback_model = "u2-pro"   # 可选：主模型故障自动切换
-```
+放在工作目录的 `.spark.toml` 会与全局配置合并，但会经过安全清洗：provider、MCP、hooks 等可执行配置项不允许由项目文件注入（防提示注入提权）。细节见 `config.py` 的 `_sanitize_project_config`。
 
 > AI生成

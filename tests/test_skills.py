@@ -1,6 +1,6 @@
-import pytest
 from pathlib import Path
-from spark.skills import discover_skills, inject_skills, format_skill_invocation, SkillInfo
+
+from spark.skills import SkillInfo, discover_skills, format_skill_invocation, inject_skills
 
 
 def _write_skill(dir_path, name, content):

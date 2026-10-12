@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+from spark.config import PermissionRule
 from spark.models import ToolCall
 from spark.policy import NEVER_PERSIST_ALLOW, call_signature, decide
 
@@ -48,11 +49,68 @@ def test_tool_name_alone_is_not_enough() -> None:
 
 
 def test_readonly_tools_never_prompt() -> None:
-    for name in ("read_file", "grep", "glob", "git_status", "run_tests"):
+    for name in ("read_file", "grep", "glob", "git_status", "list_dir"):
         target = call(name)
         assert (
             decide("suggest", target, allow_always=set(), readonly_mcp=set()) == "allow"
         )
+
+
+def test_tools_that_execute_or_reach_out_always_prompt() -> None:
+    """``run_tests`` runs the repo's own declared test command, ``task`` spawns
+    sub-agents and ``web_fetch`` can be aimed at internal endpoints — none of
+    them is read-only, so ``suggest`` must not auto-approve them."""
+    for name in ("run_tests", "task", "web_fetch"):
+        target = call(name, command="npm test", prompt="x", url="http://example.com")
+        assert (
+            decide("suggest", target, allow_always=set(), readonly_mcp=set()) == "prompt"
+        )
+        assert (
+            decide("full-auto", target, allow_always=set(), readonly_mcp=set()) == "allow"
+        )
+
+
+def test_wildcard_rule_cannot_approve_a_tool_without_a_resource() -> None:
+    """A blanket ``allow **`` rule must not silently disable approvals for tools
+    whose resource cannot be derived from their arguments."""
+    rules = [PermissionRule(action="allow", resource="**")]
+    for name in ("task", "web_fetch"):
+        target = call(name, prompt="x", url="http://example.com")
+        assert (
+            decide(
+                "suggest",
+                target,
+                allow_always=set(),
+                readonly_mcp=set(),
+                rules=rules,
+            )
+            == "prompt"
+        )
+
+
+def test_permission_rule_tool_axis_scopes_the_grant() -> None:
+    rules = [PermissionRule(action="allow", resource="git *", tool="run_shell")]
+    assert (
+        decide(
+            "suggest",
+            call("run_shell", command="git status"),
+            allow_always=set(),
+            readonly_mcp=set(),
+            rules=rules,
+        )
+        == "allow"
+    )
+    # Same string, different tool: the grant must not leak across tools.
+    assert (
+        decide(
+            "suggest",
+            call("write_file", path="git status"),
+            allow_always=set(),
+            readonly_mcp=set(),
+            rules=rules,
+        )
+        == "prompt"
+    )
 
 
 # ---------- SSRF ----------

@@ -17,18 +17,21 @@ READONLY_TOOLS = {
     "grep",
     "glob",
     "web_search",
-    "web_fetch",
     "read_notebook",
-    "task",
     "bg_output",
     "bg_list",
     "git_status",
     "git_diff",
     "git_log",
     "git_branch",
-    "run_tests",
     "worktree_list",
 }
+# These run code, spawn agents, or reach the network on behalf of the repository
+# being edited, so they are not read-only: ``run_tests`` executes whatever the
+# cloned repo declares as its test command, ``task`` fans out sub-agents that
+# inherit the caller's grants, and ``web_fetch`` can be aimed at internal
+# endpoints. They prompt unless the user opted into ``full-auto``.
+EXECUTE_TOOLS = {"run_tests", "task", "web_fetch"}
 WRITE_TOOLS = {"write_file", "apply_patch", "notebook_edit", "git_add", "git_commit"}
 SHELL_TOOLS = {"run_shell", "bg_start", "bg_kill"}
 # Shell and worktree-mutating tools can have unbounded blast radius, so they may
@@ -53,11 +56,16 @@ def _wildcard_match(pattern: str, value: str) -> bool:
     return _glob_match(normalized_pattern, normalized_value)
 
 
+_GLOB_MAX_DEPTH = 64  # Guard against adversarial **/**/**... patterns
+
+
 def _glob_match(pattern: str, value: str) -> bool:
     """Glob matcher: '*' stays within a single path segment, '**' crosses '/'."""
     p_len, v_len = len(pattern), len(value)
 
-    def _m(pi: int, vi: int) -> bool:  # noqa: E501
+    def _m(pi: int, vi: int, depth: int = 0) -> bool:
+        if depth > _GLOB_MAX_DEPTH:
+            return False  # Refuse to match pathological patterns
         while pi < p_len:
             c = pattern[pi]
             if c == "*" and pi + 1 < p_len and pattern[pi + 1] == "*":  # '**'
@@ -67,7 +75,7 @@ def _glob_match(pattern: str, value: str) -> bool:
                 for vn in range(vi, v_len + 1):
                     if vn not in (vi, v_len) and value[vn - 1] != "/":
                         continue
-                    if _m(pn, vn):
+                    if _m(pn, vn, depth + 1):
                         return True
                 return False
             if c == "*":  # single-segment '*', stops at '/'
@@ -75,9 +83,9 @@ def _glob_match(pattern: str, value: str) -> bool:
                 for vn in range(vi, v_len):
                     if value[vn] == "/":
                         break
-                    if _m(pn, vn + 1):
+                    if _m(pn, vn + 1, depth + 1):
                         return True
-                return _m(pn, vi)
+                return _m(pn, vi, depth + 1)
             if c == "?":
                 if vi >= v_len or value[vi] == "/":
                     return False
@@ -101,11 +109,19 @@ def evaluate_permission(
 ) -> PermissionAction:
     """Return the decision from the last matching rule, or ``"prompt"`` default.
 
-    Rules are evaluated in order; the *last* rule whose ``resource`` glob matches
-    ``resource`` wins.  If no rule matches, ``"prompt"`` is returned.
+    A rule matches when its ``tool`` glob accepts *action* (the tool name) and
+    its ``resource`` glob accepts *resource*.  An empty *resource* matches
+    nothing: without this, a single ``allow **`` rule would silently approve
+    every tool whose resource cannot be derived (``task``, ``web_fetch``, MCP
+    tools), turning the rule list into a global approval kill-switch.
+    Rules are evaluated in order and the *last* match wins.
     """
     matched: PermissionAction = "prompt"
     for rule in rules:
+        if not resource:
+            continue
+        if rule.tool and not _wildcard_match(rule.tool, action):
+            continue
         if _wildcard_match(rule.resource, resource):
             matched = rule.action
     return matched
@@ -199,7 +215,7 @@ def decide(
         if mode == "suggest":
             return "prompt"
         return "allow"
-    if tool.name in SHELL_TOOLS or is_mcp_tool(tool.name):
+    if tool.name in EXECUTE_TOOLS or tool.name in SHELL_TOOLS or is_mcp_tool(tool.name):
         if mode == "full-auto":
             return "allow"
         return "prompt"

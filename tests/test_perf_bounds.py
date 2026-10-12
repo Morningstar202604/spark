@@ -8,7 +8,7 @@ import pytest
 from spark.config import SparkConfig
 from spark.sandbox import WorkdirSandbox
 from spark.store import SessionStore
-from spark.tools.search import GrepArgs, GlobArgs, grep_tool, glob_tool
+from spark.tools.search import GlobArgs, GrepArgs, glob_tool, grep_tool
 
 
 def make_repo(tmp_path: Path, files: int = 60) -> Path:

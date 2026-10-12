@@ -1,32 +1,72 @@
 # Spark 配置示例 —— 复制为 ~/.spark/config.toml 后按需修改
-# 完整字段说明见 docs/CONFIG.md
+# 完整字段说明见 docs/CONFIG.md；模板由 `spark init` 自动生成。
+# 字段的唯一事实来源：src/spark/config.py
 
-provider = "deepseek"                # deepseek / qwen / glm / kimi / doubao / unisound / ollama / custom / mock
-base_url = ""                        # custom 预设必填，如 https://api.deepseek.com/v1
-model = "deepseek-v4-pro"            # 主模型
-api_key = ""                         # 密钥；也可用环境变量 <PROVIDER>_API_KEY
-workdir = "/home/you/projects/my-app"  # 默认工作目录
-approval_mode = "suggest"            # suggest / auto-edit / full-auto / plan
-max_context_tokens = 32000
-# token = ""                         # 设置后访问需带 X-Spark-Token（空 = 本机免登录）
+[provider]
+name = "openai_compat"                 # openai_compat / ollama / mock
+base_url = "https://api.deepseek.com/v1"  # 任意 OpenAI 兼容端点（LiteLLM 承载）
+model = "deepseek-chat"
+# api_key 行存在但示例保持无密钥：把密钥写进你本地的配置或 SPARK_API_KEY 环境变量
+api_key_env = "SPARK_API_KEY"
 
-# ---- 模型路由与容灾 ----
-model_fast = "deepseek-flash"        # 简单任务走快速模型；留空 = 不启用路由
-fallback_model = ""                  # 主模型故障自动切换的备用模型；留空 = 不启用
+[agent]
+approval = "suggest"                   # suggest / auto-edit / full-auto
+workdir_only = true
+sandbox_mode = "workspace"             # sandbox-only / workspace / full-access / unrestricted
+shell_timeout_sec = 60
+max_tool_rounds = 30
+max_repeat_calls = 4                   # 同参数重复调用熔断；0 = 关闭
+max_turn_tokens = 0                    # 单回合 token 预算；0 = 关闭
+max_output_chars = 8000
 
-# ---- 记忆 ----
-memory_embedding = "off"             # off / api / local
-# memory_embed_model = "doubao-embedding"
+[context]
+agents_md = "AGENTS.md"
+max_fragment_chars = 8000
+history_budget_chars = 96000
+max_context_tokens = 32768
+compact_threshold = 0.85               # 上下文用量超过此比例自动压缩
+keep_recent_messages = 8
 
-# ---- 高级 ----
-# system_prompt = ""                 # 自定义系统提示词（支持 {workdir} {protected}）
-# protected_paths = ["/etc"]         # 永远拒绝写入的路径
-# auto_verify = true                 # 改完自动跑 pytest 验证
-# proxy = "http://127.0.0.1:7890"    # HTTP 代理
+[memory]
+enabled = true                         # ChromaDB 向量 + 关键词检索
+top_k = 6
+capacity = 500
+embedding_model = "text-embedding-3-small"
+auto_extract = true
 
 # ---- MCP 服务器 ----
 # [[mcp_servers]]
 # name = "filesystem"
 # command = "npx"
 # args = ["-y", "@modelcontextprotocol/server-filesystem", "."]
-# transport = "stdio"
+# readonly_tools = []                  # 声明为只读的工具名（免审批）
+#
+# 远程传输：
+# [[mcp_servers]]
+# name = "remote"
+# transport = "sse"                    # stdio | sse | streamable_http
+# [mcp_servers.http]
+# url = "http://127.0.0.1:3000/sse"
+
+# ---- 生命周期钩子 ----
+# [[hooks]]
+# event = "pre_tool"
+# command = "python"
+# args = ["check.py"]
+# timeout_sec = 15
+# on_deny = "warn"                     # warn | block
+
+# ---- 多模型 profiles（网页设置 → 模型 读写这一节）----
+# active_profile_id = "a1b2c3d4"
+# [[model_profiles]]
+# id = "a1b2c3d4"
+# name = "DeepSeek"
+# provider = "openai_compat"
+# base_url = "https://api.deepseek.com/v1"
+# model = "deepseek-chat"
+# api_key 字段留空则回退 [provider] 的密钥
+
+# ---- 环境变量覆盖（双下划线嵌套）----
+#   SPARK_AGENT__MAX_TOOL_ROUNDS=50
+#   SPARK_PROVIDER__BASE_URL=https://api.deepseek.com/v1
+# 注意：.env 只从 ~/.spark/.env 读取，项目目录内的 .env 会被忽略（防克隆仓库提权）

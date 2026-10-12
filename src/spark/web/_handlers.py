@@ -19,7 +19,6 @@ import base64 as _b64mod
 import logging
 import socket
 import threading
-from http.server import BaseHTTPRequestHandler
 from typing import cast
 
 from spark.config import (
@@ -33,6 +32,7 @@ from spark.errors import ConfigError, SparkError
 from spark.models import ApprovalAction, ImageRef
 from spark.providers.probe import probe_provider
 from spark.sandbox import WorkdirSandbox
+from spark.web._httpbase import HandlerBase
 from spark.web._routing import _route_state
 from spark.web.sse import SSE_DISCONNECT_ERRORS, _SSESession
 from spark.web.state import _generate_session_meta_async
@@ -58,7 +58,7 @@ def _save_config(cfg) -> None:
 # ---------------------------------------------------------------------------
 # Models
 # ---------------------------------------------------------------------------
-def _handle_models_save(handler: BaseHTTPRequestHandler, body: dict) -> None:
+def _handle_models_save(handler: HandlerBase, body: dict) -> None:
     import uuid
 
     from spark.config import ModelProfile
@@ -102,7 +102,7 @@ def _handle_models_save(handler: BaseHTTPRequestHandler, body: dict) -> None:
     handler._json(200, {"ok": True, "id": existing.id})
 
 
-def _handle_models_delete(handler: BaseHTTPRequestHandler, body: dict) -> None:
+def _handle_models_delete(handler: HandlerBase, body: dict) -> None:
     state = _route_state(handler)
     pid = str(body.get("id") or "").strip()
     before = len(state.cfg.model_profiles)
@@ -118,7 +118,7 @@ def _handle_models_delete(handler: BaseHTTPRequestHandler, body: dict) -> None:
     handler._json(200, {"ok": True})
 
 
-def _handle_models_activate(handler: BaseHTTPRequestHandler, body: dict) -> None:
+def _handle_models_activate(handler: HandlerBase, body: dict) -> None:
     state = _route_state(handler)
     if state.busy:
         handler._json(409, {"error": "agent is busy"})
@@ -149,7 +149,7 @@ def _handle_models_activate(handler: BaseHTTPRequestHandler, body: dict) -> None
 # ---------------------------------------------------------------------------
 # Agents.md / memory
 # ---------------------------------------------------------------------------
-def _handle_agents_md(handler: BaseHTTPRequestHandler, body: dict) -> None:
+def _handle_agents_md(handler: HandlerBase, body: dict) -> None:
     state = _route_state(handler)
     if state.busy:
         handler._json(409, {"error": "agent is busy"})
@@ -182,7 +182,7 @@ def _handle_agents_md(handler: BaseHTTPRequestHandler, body: dict) -> None:
     )
 
 
-def _handle_memory(handler: BaseHTTPRequestHandler, body: dict) -> None:
+def _handle_memory(handler: HandlerBase, body: dict) -> None:
     state = _route_state(handler)
     action = str(body.get("action") or "").strip()
     if action == "add":
@@ -221,7 +221,7 @@ def _handle_memory(handler: BaseHTTPRequestHandler, body: dict) -> None:
 # ---------------------------------------------------------------------------
 # Cancel / approval
 # ---------------------------------------------------------------------------
-def _handle_cancel(handler: BaseHTTPRequestHandler, body: dict) -> None:
+def _handle_cancel(handler: HandlerBase, body: dict) -> None:
     state = _route_state(handler)
     if state.loop:
         state.loop.cancel()
@@ -230,7 +230,7 @@ def _handle_cancel(handler: BaseHTTPRequestHandler, body: dict) -> None:
     handler._json(200, {"ok": True})
 
 
-def _handle_approval(handler: BaseHTTPRequestHandler, body: dict) -> None:
+def _handle_approval(handler: HandlerBase, body: dict) -> None:
     state = _route_state(handler)
     if state.approver is None:
         handler._json(400, {"error": "approval disabled (full-auto)"})
@@ -246,7 +246,7 @@ def _handle_approval(handler: BaseHTTPRequestHandler, body: dict) -> None:
 # ---------------------------------------------------------------------------
 # Sessions / checkpoints
 # ---------------------------------------------------------------------------
-def _handle_sessions_new(handler: BaseHTTPRequestHandler, body: dict) -> None:
+def _handle_sessions_new(handler: HandlerBase, body: dict) -> None:
     state = _route_state(handler)
     if state.busy:
         handler._json(409, {"error": "agent is busy"})
@@ -256,7 +256,7 @@ def _handle_sessions_new(handler: BaseHTTPRequestHandler, body: dict) -> None:
     handler._json(200, {"ok": True, "status": state.status()})
 
 
-def _handle_sessions_delete(handler: BaseHTTPRequestHandler, body: dict) -> None:
+def _handle_sessions_delete(handler: HandlerBase, body: dict) -> None:
     state = _route_state(handler)
     session_id = str(body.get("session_id") or "").strip()
     if not session_id:
@@ -285,7 +285,7 @@ def _handle_sessions_delete(handler: BaseHTTPRequestHandler, body: dict) -> None
     handler._json(200, {"ok": True, "status": state.status()})
 
 
-def _handle_sessions_switch(handler: BaseHTTPRequestHandler, body: dict) -> None:
+def _handle_sessions_switch(handler: HandlerBase, body: dict) -> None:
     state = _route_state(handler)
     session_id = str(body.get("session_id") or "").strip()
     row = state.store.get_session(session_id)
@@ -315,7 +315,7 @@ def _handle_sessions_switch(handler: BaseHTTPRequestHandler, body: dict) -> None
 
 def _history_messages(state) -> list[dict]:
     """Extract serializable message list from current loop history."""
-    messages = []
+    messages: list[dict] = []
     if state.loop is None:
         return messages
     for msg in state.loop.history or []:
@@ -332,7 +332,7 @@ def _history_messages(state) -> list[dict]:
     return messages
 
 
-def _handle_checkpoints_rollback(handler: BaseHTTPRequestHandler, body: dict) -> None:
+def _handle_checkpoints_rollback(handler: HandlerBase, body: dict) -> None:
     state = _route_state(handler)
     cp_id = body.get("checkpoint_id")
     if not isinstance(cp_id, int):
@@ -367,7 +367,7 @@ def _handle_checkpoints_rollback(handler: BaseHTTPRequestHandler, body: dict) ->
 # ---------------------------------------------------------------------------
 # Chat (non-streaming)
 # ---------------------------------------------------------------------------
-def _handle_chat(handler: BaseHTTPRequestHandler, body: dict) -> None:
+def _handle_chat(handler: HandlerBase, body: dict) -> None:
     state = _route_state(handler)
     prompt = str(body.get("prompt") or "").strip()
     if not prompt:
@@ -388,7 +388,7 @@ def _handle_chat(handler: BaseHTTPRequestHandler, body: dict) -> None:
 # ---------------------------------------------------------------------------
 # Chat (streaming via SSE)
 # ---------------------------------------------------------------------------
-def _handle_chat_stream(handler: BaseHTTPRequestHandler, body: dict) -> None:
+def _handle_chat_stream(handler: HandlerBase, body: dict) -> None:
     import json as _json
 
     state = _route_state(handler)
@@ -548,7 +548,7 @@ def _handle_chat_stream(handler: BaseHTTPRequestHandler, body: dict) -> None:
 # ---------------------------------------------------------------------------
 # Settings
 # ---------------------------------------------------------------------------
-def _handle_settings(handler: BaseHTTPRequestHandler, body: dict) -> None:
+def _handle_settings(handler: HandlerBase, body: dict) -> None:
     state = _route_state(handler)
     if state.busy:
         handler._json(409, {"error": "agent is busy"})
@@ -767,7 +767,7 @@ def _handle_settings(handler: BaseHTTPRequestHandler, body: dict) -> None:
 # ---------------------------------------------------------------------------
 # Test (provider probe)
 # ---------------------------------------------------------------------------
-def _handle_test(handler: BaseHTTPRequestHandler, body: dict) -> None:
+def _handle_test(handler: HandlerBase, body: dict) -> None:
     state = _route_state(handler)
     base_url = str(
         body.get("base_url") or state.cfg.provider.base_url

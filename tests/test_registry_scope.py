@@ -1,9 +1,8 @@
-import pytest
-from pathlib import Path
 from spark.config import SparkConfig
 from spark.models import ToolCall
 from spark.sandbox import WorkdirSandbox
 from spark.tools.registry import ToolContext, ToolRegistry
+
 
 def make_registry(tmp_path):
     cfg = SparkConfig()

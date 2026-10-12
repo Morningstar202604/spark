@@ -23,13 +23,22 @@ Capabilities preserved from the original
 
 from __future__ import annotations
 
+import asyncio
 import json
+import logging
 from typing import Any, AsyncIterator
 
 import litellm
 
 from spark.models import ChatDelta, ChatMessage, ToolCall
 
+logger = logging.getLogger(__name__)
+
+# HTTP status codes that warrant a retry (transient / rate-limit)
+_RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}
+
+# LiteLLM/httpx exception types that indicate transient failures
+_RETRYABLE_EXCEPTIONS = (TimeoutError, ConnectionError, OSError)
 
 # ---------------------------------------------------------------------------
 # Message format conversion  (preserved verbatim from the original impl)
@@ -149,6 +158,20 @@ class OpenAICompatProvider:
 
     # -- public interface (Provider protocol) ----------------------------------
 
+    @staticmethod
+    def _extract_status_code(exc: Exception) -> int | None:
+        """Best-effort extraction of an HTTP status code from an exception."""
+        # LiteLLM wraps httpx errors; the status code may live in
+        # exc.status_code or in the underlying HTTPStatusError.
+        code = getattr(exc, "status_code", None)
+        if isinstance(code, int):
+            return code
+        # Check args for numeric status codes
+        for arg in getattr(exc, "args", ()):
+            if isinstance(arg, int) and 100 <= arg <= 599:
+                return arg
+        return None
+
     async def stream(
         self,
         messages: list[ChatMessage],
@@ -156,30 +179,69 @@ class OpenAICompatProvider:
     ) -> AsyncIterator[ChatDelta]:
         """Stream completion deltas.
 
-        Uses LiteLLM's native retry, timeout, and provider-mapping machinery.
+        Uses LiteLLM's retry, timeout, and provider-mapping machinery
+        with an outer retry loop that handles 429/5xx with exponential
+        backoff (1s / 2s / 4s).  Client errors (4xx except 429) are NOT
+        retried — they indicate a problem with the request itself.
         Yields :class:`~spark.models.ChatDelta` chunks identical to the previous
         implementation so upstream consumers (``AgentLoop``) are unaffected.
         """
-        try:
-            response = await litellm.acompletion(
-                model=self.model,
-                messages=_to_openai(messages),
-                tools=tools or None,
-                stream=True,
-                api_base=self.base_url or None,
-                api_key=self.api_key or None,
-                num_retries=self.max_retries,
-                drop_params=True,  # pass through non-standard fields (e.g. reasoning_content)
-                timeout=120.0,
-            )
-        except Exception as exc:
-            msg = str(exc)
-            # Never leak credentials into error output
+        last_exc: Exception | None = None
+        for attempt in range(self.max_retries + 1):
+            try:
+                response = await litellm.acompletion(
+                    model=self.model,
+                    messages=_to_openai(messages),
+                    tools=tools or None,
+                    stream=True,
+                    api_base=self.base_url or None,
+                    api_key=self.api_key or None,
+                    num_retries=0,  # we handle retries explicitly for fine-grained control
+                    drop_params=True,  # pass through non-standard fields (e.g. reasoning_content)
+                    timeout=120.0,  # httpx.Timeout(120.0) equivalent for LiteLLM
+                )
+            except Exception as exc:
+                last_exc = exc
+                status = self._extract_status_code(exc)
+                is_retryable = (
+                    status in _RETRYABLE_STATUS_CODES
+                    or (
+                        status is None
+                        and isinstance(exc, _RETRYABLE_EXCEPTIONS)
+                    )
+                )
+                if is_retryable and attempt < self.max_retries:
+                    backoff = 2**attempt  # 1, 2, 4 seconds
+                    logger.warning(
+                        "provider_retry attempt=%d/%d status=%s base_url=%s backoff=%ds error=%s",
+                        attempt + 1,
+                        self.max_retries,
+                        status,
+                        self.base_url,
+                        backoff,
+                        str(exc)[:200],
+                    )
+                    await asyncio.sleep(backoff)
+                    continue
+                msg = str(exc)
+                # Never leak credentials into error output
+                if self.api_key and self.api_key in msg:
+                    msg = msg.replace(self.api_key, "***")
+                raise RuntimeError(
+                    f"Provider request to '{self.base_url}' failed: {msg}"
+                ) from exc
+            # Successful request — proceed to stream
+            last_exc = None
+            break
+        # If all retries exhausted without success
+        if last_exc is not None:
+            msg = str(last_exc)
             if self.api_key and self.api_key in msg:
                 msg = msg.replace(self.api_key, "***")
             raise RuntimeError(
-                f"Provider request to '{self.base_url}' failed: {msg}"
-            ) from exc
+                f"Provider request to '{self.base_url}' failed after "
+                f"{self.max_retries} retries: {msg}"
+            ) from last_exc
 
         tool_acc: dict[int, dict[str, str]] = {}
         think_state: dict[str, bool] = {"open": False, "closed": False}

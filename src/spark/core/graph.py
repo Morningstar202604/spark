@@ -27,12 +27,16 @@ Usage (from ``AgentLoop.iter_turn``)::
 
 from __future__ import annotations
 
+import json
+import logging
 from typing import Annotated, Any, Optional
 
+from langgraph.checkpoint.base import BaseCheckpointSaver
+
+logger = logging.getLogger(__name__)
 from langgraph.graph import END, StateGraph
 from langgraph.graph.message import add_messages
-from langgraph.checkpoint.base import BaseCheckpointSaver
-from langgraph.types import Command, Interrupt, interrupt
+from langgraph.types import interrupt
 
 from spark.core.compact import Compactor
 from spark.core.context import build_messages
@@ -41,7 +45,6 @@ from spark.models import (
     ChatMessage,
     ToolCall,
     ToolResult,
-    TurnEvent,
 )
 from spark.providers.base import Provider
 from spark.tools.registry import ToolRegistry
@@ -49,7 +52,7 @@ from spark.tools.registry import ToolRegistry
 try:
     from langgraph.checkpoint.memory import MemorySaver
 except ImportError:  # older langgraph
-    MemorySaver = None  # type: ignore[assignment,misc]
+    MemorySaver = None
 
 
 # ---------------------------------------------------------------------------
@@ -62,20 +65,13 @@ class ReActState(dict):
 
     LangGraph passes this between nodes; each node mutates-and-returns a patch
     dictionary that LangGraph merges into the live state.
+
+    Only msgpack-serializable fields live here.  Non-serializable collaborators
+    (provider / registry / store / cfg / ...) are bound to the node callables
+    by closure so LangGraph never tries to serialise them.
     """
 
-    # Inherited from AgentLoop (read-only in graph nodes)
-    provider: Provider
-    registry: ToolRegistry
-    workdir: Any  # pathlib.Path
-    cfg: Any  # SparkConfig
-    approver: Any  # Callable | None
-    compactor: Compactor | None
-    store: Any  # SessionStore
-    session_id: str
-    memory_obj: Any | None  # MemoryService
-
-    # Mutable turn state
+    # Mutable turn state (serialisable)
     messages: Annotated[list[ChatMessage], add_messages]  # LLM input
     history: list[ChatMessage]                          # full conversation history
     tool_calls: list[ToolCall]
@@ -87,6 +83,7 @@ class ReActState(dict):
     compacted_this_turn: bool
     pending_approval: ApprovalRequest | None
     pending_tool_call: ToolCall | None
+    allow_always: set[str]
 
 
 # ---------------------------------------------------------------------------
@@ -94,111 +91,154 @@ class ReActState(dict):
 # ---------------------------------------------------------------------------
 
 
-async def _node_llm(state: ReActState) -> dict:
-    """Call the LLM provider and accumulate streamed deltas.
+def _make_node_llm(
+    *,
+    provider: Provider,
+    registry: ToolRegistry,
+    workdir: Any,
+    cfg: Any,
+    compactor: Compactor | None,
+    memory_obj: Any | None,
+):
+    async def _node_llm(state: ReActState) -> dict:
+        """Call the LLM provider and accumulate streamed deltas.
 
-    In the original ``iter_turn`` this is the inner loop of
-    ``async for delta in provider.stream(...)``.  Here we run that same code as
-    a LangGraph node so that LangGraph's streaming/checkpoint machinery can
-    observe the state transitions.
-    """
-    provider: Provider = state["provider"]
-    history: list[ChatMessage] = state["history"]
-    compactor: Compactor | None = state.get("compactor")
-    memory_obj = state.get("memory_obj")
+        Collaborators (provider/registry/cfg/...) come from the closure, not the
+        state, so LangGraph never tries to serialise them.
+        """
+        history: list[ChatMessage] = state["history"]
 
-    # Ask memory for context block (mirrors AgentLoop.iter_turn)
-    memory_block = None
-    if memory_obj is not None:
+        # Ask memory for context block (mirrors AgentLoop.iter_turn)
+        memory_block = None
+        if memory_obj is not None:
+            try:
+                last_user_content = next(
+                    (m.content for m in reversed(history) if m.role == "user"),
+                    None,
+                )
+                if last_user_content:
+                    memory_block = memory_obj.retrieve_context(last_user_content)
+            except Exception:
+                # memory 检索失败不影响主流程，仅降级为无记忆注入
+                logger.debug("memory 上下文检索失败，跳过本次记忆注入", exc_info=True)
+                memory_block = None
+
+        # Check whether compaction turned over during this turn (AgentLoop does it)
+        if state.get("compacted_this_turn"):
+            yield_patch = {"compacted_this_turn": False}
+        else:
+            yield_patch = {}
+
+        # Build LLM messages using the existing context/compactor helpers
+        messages = build_messages(
+            workdir=workdir,
+            cfg=cfg,
+            history=history,
+            memory_block=memory_block,
+            _compactor=compactor,
+        )
+
+        text_parts: list[str] = []
+        reasoning_parts: list[str] = []
+        tool_calls: list[ToolCall] = []
+
         try:
-            last_user_content = next(
-                (m.content for m in reversed(history) if m.role == "user"),
-                None,
-            )
-            if last_user_content:
-                memory_block = memory_obj.retrieve_context(last_user_content)
-        except Exception:
-            memory_block = None
+            async for delta in provider.stream(messages, registry.schemas()):
+                if delta.type == "reasoning" and delta.text:
+                    reasoning_parts.append(delta.text)
+                elif delta.type == "text" and delta.text:
+                    text_parts.append(delta.text)
+                elif delta.type == "tool_call" and delta.tool_call:
+                    tool_calls.append(delta.tool_call)
+        except Exception as exc:
+            return {
+                **yield_patch,
+                "text_parts": text_parts,
+                "reasoning_parts": reasoning_parts,
+                "tool_calls": tool_calls,
+                "tool_results": [],  # reset to prevent stale-result loop
+                "_error": str(exc),
+            }
 
-    # Check whether compaction turned over during this turn (AgentLoop does it)
-    if state.get("compacted_this_turn"):
-        yield_patch = {"compacted_this_turn": False}
-    else:
-        yield_patch = {}
-
-    # Build LLM messages using the existing context/compactor helpers
-    messages = build_messages(
-        workdir=state["workdir"],
-        cfg=state["cfg"],
-        history=history,
-        memory_block=memory_block,
-        _compactor=compactor,
-    )
-
-    text_parts: list[str] = []
-    reasoning_parts: list[str] = []
-    tool_calls: list[ToolCall] = []
-
-    try:
-        async for delta in provider.stream(messages, state["registry"].schemas()):
-            if delta.type == "reasoning" and delta.text:
-                reasoning_parts.append(delta.text)
-            elif delta.type == "text" and delta.text:
-                text_parts.append(delta.text)
-            elif delta.type == "tool_call" and delta.tool_call:
-                tool_calls.append(delta.tool_call)
-    except Exception as exc:
         return {
             **yield_patch,
             "text_parts": text_parts,
             "reasoning_parts": reasoning_parts,
             "tool_calls": tool_calls,
-            "_error": str(exc),
+            "tool_results": [],  # reset — ensures route decisions use fresh data
         }
 
-    return {
-        **yield_patch,
-        "text_parts": text_parts,
-        "reasoning_parts": reasoning_parts,
-        "tool_calls": tool_calls,
-    }
+    return _node_llm
 
 
-async def _node_tools(state: ReActState) -> dict:
-    """Check approval for each tool call using LangGraph's interrupt mechanism.
+def _make_node_tools(
+    *,
+    cfg: Any,
+    registry: ToolRegistry,
+    store: Any = None,
+    session_id: str = "",
+):
+    async def _node_tools(state: ReActState) -> dict:
+        """Execute tool calls and collect results.
 
-    When a tool call requires approval (as decided by ``spark.policy.decide``),
-    we call :func:`langgraph.types.interrupt` which suspends the graph until the
-    caller provides a ``Command(resume=...)``.  This mirrors Spark's existing
-    ``approval_needed`` event flow but rides LangGraph's first-class HIL
-    protocol.
-    """
-    calls: list[ToolCall] = state.get("tool_calls", [])
-    if not calls:
-        return {}
+        Each tool call is invoked via ``registry.execute`` — the same execution
+        engine used by the classic ``loop.py`` path — so behaviour is identical.
+        Approval checks (via ``policy.decide``) are performed before execution.
+        After execution, tool calls + results are appended to ``history`` so the
+        next LLM round sees them.
+        """
+        calls: list[ToolCall] = state.get("tool_calls", [])
+        if not calls:
+            return {}
 
-    # For each call that needs approval, trigger LangGraph interrupt
-    for call in calls:
-        from spark.policy import decide
+        results: list[ToolResult] = []
+        history: list[ChatMessage] = list(state.get("history", []))
 
-        verdict = decide(
-            state["cfg"].agent.approval,
-            call,
-            state.get("allow_always", set()),
-            state["registry"].readonly_mcp if hasattr(state["registry"], "readonly_mcp") else set(),
-        )
-        if verdict == "prompt":
-            # Build ApprovalRequest and interrupt
-            # The graph runner will catch this interrupt and emit
-            # TurnEvent("approval_needed")
-            req = ApprovalRequest(
-                tool_call=call,
-                summary=f"{call.name}({call.arguments})",
+        for call in calls:
+            from spark.policy import decide
+
+            verdict = decide(
+                cfg.agent.approval,
+                call,
+                allow_always=state.get("allow_always", set()),
+                readonly_mcp=(
+                    registry.readonly_mcp
+                    if hasattr(registry, "readonly_mcp")
+                    else set()
+                ),
+                rules=cfg.permission_rules or None,
             )
-            # interrupt() raises GraphInterrupt; we expect the runner to catch
-            interrupt(req.model_dump())
+            if verdict == "prompt":
+                # Approval required — interrupt via LangGraph's HIL protocol.
+                req = ApprovalRequest(
+                    tool_call=call,
+                    summary=f"{call.name}({call.arguments})",
+                )
+                interrupt(req.model_dump())
 
-    return {"_ready_to_execute": True}
+            try:
+                result = await registry.execute(call)
+            except Exception as exc:  # noqa: BLE001
+                result = ToolResult(ok=False, payload={"error": str(exc)})
+            results.append(result)
+            # Mirror how the classic loop builds history: assistant(tool_calls) + tool
+            history.append(ChatMessage(role="assistant", tool_calls=[call]))
+            history.append(
+                ChatMessage(
+                    role="tool",
+                    content=json.dumps(result.payload, default=str, ensure_ascii=False),
+                    tool_call_id=call.id,
+                )
+            )
+
+        return {
+            "tool_results": results,
+            "history": history,
+            "rounds": int(state.get("rounds", 0)) + 1,
+            "tool_calls": [],  # consumed — next LLM call should not re-see them
+        }
+
+    return _node_tools
 
 
 # ---------------------------------------------------------------------------
@@ -224,20 +264,57 @@ def build_react_graph(
     Parameters mirror the fields that ``AgentLoop`` exposes so the outer
     orchestrator can build the graph per-turn (the graph itself is
     stateless across turns — ``history`` / store live in ``AgentLoop``).
+
+    Non-serializable collaborators (provider/registry/cfg/...) are bound to the
+    node callables by closure, so the LangGraph state only carries msgpack-safe
+    data and ``astream`` never fails on serialisation.
     """
     graph = StateGraph(ReActState)
 
-    graph.add_node("llm", _node_llm)
-    graph.add_node("tools", _node_tools)
+    graph.add_node(
+        "llm",
+        _make_node_llm(
+            provider=provider,
+            registry=registry,
+            workdir=workdir,
+            cfg=cfg,
+            compactor=compactor,
+            memory_obj=memory_obj,
+        ),
+    )
+    graph.add_node(
+        "tools",
+        _make_node_tools(cfg=cfg, registry=registry, store=store, session_id=session_id),
+    )
 
     graph.set_entry_point("llm")
     graph.add_edge("llm", "tools")
-    # After tools we END; the outer loop re-enters if more rounds are needed.
-    graph.add_edge("tools", END)
+    # After tools: cycle back to LLM if the turn should continue, else END.
+    # ``_route_tools`` inspects the current state to decide.
+    graph.add_conditional_edges("tools", _route_tools, ["llm", END])
 
     if checkpointer is not None:
         return graph.compile(checkpointer=checkpointer)
     return graph.compile()
+
+
+def _route_tools(state: ReActState) -> str:
+    """Decide whether to continue the ReAct cycle after the tools node.
+
+    Returns ``"llm"`` to drive another call→execute round, or ``"END"`` to
+    terminate the turn.  Checks the same stop conditions as the classic loop.
+    """
+    max_rounds = int(state.get("__max_rounds", 30))
+    rounds = int(state.get("rounds", 0))
+    if rounds >= max_rounds:
+        return END
+    # If the LLM terminated with an error, do not cycle.
+    if state.get("_error"):
+        return END
+    # Fresh tool results → the LLM produced actionable calls, continue.
+    if state.get("tool_results"):
+        return "llm"
+    return END
 
 
 def build_react_graph_with_memory(checkpointer: Optional[BaseCheckpointSaver] = None):

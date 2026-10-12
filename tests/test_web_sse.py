@@ -13,8 +13,8 @@ from spark.models import ApprovalRequest, ToolCall, TurnEvent
 from spark.store import SessionStore
 from spark.web.server import (
     WebApprover,
-    _SSESession,
     _cache_control,
+    _SSESession,
     serve_web,
     ui_dir_for,
 )

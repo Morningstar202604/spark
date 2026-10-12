@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import math
 import re
 import sqlite3 as _sqlite3_module
@@ -13,6 +14,8 @@ from pathlib import Path
 import chromadb
 
 from spark.config import MemoryConfig
+
+logger = logging.getLogger(__name__)
 
 _DEFAULT_DIM = 1536  # placeholder dim for memories without real embeddings
 
@@ -180,12 +183,39 @@ class MemoryStore:
             self._maybe_migrate_sqlite(db_path)
         self._detect_dimension()
 
+        # 修复 (Fix 1): 时间戳 + 单调计数器，替代 "max(existing)+1" 的并发不安全模式。
+        # 锁内递增保证同一进程多线程下不会产出重复 id。
+        self._id_lock = threading.Lock()
+        self._next_id = self._compute_next_start_id()
+
+        # Health tracking: timestamp of last exception (for degraded status)
+        self._last_error_time: float | None = None
+
     # ------------------------------------------------------------------
     # helpers
     # ------------------------------------------------------------------
 
     def _now(self) -> int:
         return int(time.time())
+
+    def _compute_next_start_id(self) -> int:
+        """扫描现有 id，取 (max, 当前秒时间戳*1000) 的较大值，作为单调计数起点。
+        这样即使数据库已有数据、或被外部程序写入了更大的 id，我们也不会冲突。"""
+        existing = self._collection.get()
+        max_id = 0
+        for id_str in existing.get("ids", []):
+            try:
+                max_id = max(max_id, int(id_str))
+            except (ValueError, TypeError):
+                pass
+        time_based = int(time.time() * 1000)  # ms 级时间戳，与现有 id 空间明显拉开
+        return max(max_id + 1, time_based)
+
+    def _next_monotonic_id(self) -> int:
+        """返回一个新的、严格递增的 id；线程安全（锁内操作）。"""
+        with self._id_lock:
+            self._next_id += 1
+            return self._next_id
 
     def _detect_dimension(self) -> None:
         if self._dim is not None:
@@ -275,7 +305,8 @@ class MemoryStore:
                     embeddings=embeddings,
                 )
         except Exception:
-            pass
+            # 批量添加失败时记录，数据可能部分丢失
+            logger.warning("memory 批量写入 ChromaDB 失败", exc_info=True)
 
     # ------------------------------------------------------------------
     # Transaction support (ChromaDB has no native transactions)
@@ -297,6 +328,8 @@ class MemoryStore:
             try:
                 yield
             except Exception:
+                # 事务失败回滚快照后重新抛出
+                logger.warning("memory 事务失败，已回滚快照", exc_info=True)
                 self._restore_snapshot(snapshot)
                 raise
             finally:
@@ -325,14 +358,64 @@ class MemoryStore:
     def _restore_snapshot(
         self, snapshot: tuple[list[str], list[dict], list[list[float]], list[str]]
     ) -> None:
+        """Copy-on-write 风格的回滚：先 diff 快照与当前集合，再按 添加 → 更新 → 删除
+        三步退化改动，确保在快照中任意记录未恢复前不删除旧数据。
+
+        旧实现 (先 delete all 再 add) 在 add 失败时会清空集合；新实现永远
+        先写入新增部分，确认原集合数据完整后才清除多余数据。
+        """
         ids, metas, embs, docs = snapshot
-        existing = self._collection.get()
-        if existing.get("ids"):
-            self._collection.delete(ids=existing["ids"])
-        if ids:
+        # 构建快照 lookup
+        snap_map: dict[str, tuple[str, dict, list[float] | None]] = {
+            sid: (doc, meta, emb)
+            for sid, doc, meta, emb in zip(ids, docs, metas, embs)
+        }
+
+        # 当前集合状态（事务开始后可能已被 add/update/delete 污染）
+        cur = self._collection.get(include=["metadatas", "embeddings", "documents"])
+        cur_ids = cur.get("ids", [])
+        cur_docs = cur.get("documents") or []
+        cur_metas = cur.get("metadatas") or []
+        cur_embs_raw = cur.get("embeddings")
+        cur_map: dict[str, tuple[str, dict, list[float] | None]] = {}
+        for i, sid in enumerate(cur_ids):
+            d = cur_docs[i] if i < len(cur_docs) else ""
+            m = cur_metas[i] if i < len(cur_metas) else {}
+            e = None
+            if cur_embs_raw is not None and i < len(cur_embs_raw) and cur_embs_raw[i] is not None:
+                e = self._numpy_to_list(cur_embs_raw[i])
+            cur_map[sid] = (d, m, e)
+
+        # 三步退化：先补缺（安全），再纠偏（安全），最后删冗余（确认快照数据已全部恢复）
+        snap_set = set(snap_map)
+        cur_set = set(cur_map)
+
+        # 1) ADD: 快照有、当前没有 → 先追加到原集合
+        missing = [sid for sid in ids if sid not in cur_set]
+        if missing:
             self._collection.add(
-                ids=ids, documents=docs, metadatas=metas, embeddings=embs
+                ids=missing,
+                documents=[snap_map[sid][0] for sid in missing],
+                metadatas=[snap_map[sid][1] for sid in missing],
+                embeddings=[snap_map[sid][2] for sid in missing],
             )
+
+        # 2) UPDATE: 两边都有但内容有差异 → 用快照值覆盖
+        common = [sid for sid in ids if sid in cur_set]
+        changed = [sid for sid in common if cur_map[sid] != snap_map[sid]]
+        if changed:
+            self._collection.update(
+                ids=changed,
+                documents=[snap_map[sid][0] for sid in changed],
+                metadatas=[snap_map[sid][1] for sid in changed],
+                embeddings=[snap_map[sid][2] for sid in changed],
+            )
+
+        # 3) DELETE: 当前有、快照没有（事务中途新增的冗余数据）
+        extra = [sid for sid in cur_ids if sid not in snap_set]
+        if extra:
+            self._collection.delete(ids=extra)
+
 
     # ------------------------------------------------------------------
     # Read helpers
@@ -403,11 +486,38 @@ class MemoryStore:
     # Public API — must stay test-compatible
     # ------------------------------------------------------------------
 
+    def _record_error(self) -> None:
+        """Record that an error occurred (for health check degradation)."""
+        self._last_error_time = time.time()
+
+    def health_check(self) -> dict:
+        """Return health status of the memory store.
+
+        Returns a dict with:
+            - status: "ok" or "degraded" (degraded if an error occurred within 60s)
+            - count: total number of memories in the store
+            - dim: detected embedding dimension (or default)
+        """
+        try:
+            data = self._collection.get(include=["metadatas"])
+            count = len(data.get("ids", []))
+            dim = self._dim or _DEFAULT_DIM
+            status = "ok"
+            if self._last_error_time is not None and (time.time() - self._last_error_time) < 60:
+                status = "degraded"
+            return {"status": status, "count": count, "dim": dim}
+        except Exception:
+            # status 查询失败返回 degraded，调用方可据此降级
+            self._record_error()
+            logger.warning("memory 状态查询失败，返回 degraded", exc_info=True)
+            return {"status": "degraded", "count": -1, "dim": self._dim or _DEFAULT_DIM}
+
     def close(self) -> None:
         try:
             self._client.reset()
         except Exception:
-            pass
+            # reset 失败不影响进程退出
+            logger.debug("ChromaDB client reset 失败", exc_info=True)
 
     def _apply_metadata_update(self, memory_id: int, set_pairs: list[tuple[str, str]]) -> int:
         """Apply a sequence of (column, value) assignments to the metadata of
@@ -464,15 +574,8 @@ class MemoryStore:
         }
         emb = self._ensure_dim(embedding if embedding else None)
 
-        # Acquire an id: max(existing) + 1
-        existing = self._collection.get()
-        max_id = 0
-        for id_str in existing.get("ids", []):
-            try:
-                max_id = max(max_id, int(id_str))
-            except (ValueError, TypeError):
-                pass
-        new_id = max_id + 1
+        # 修复：不再用 "max+1"（并发不安全），改用单调计数器
+        new_id = self._next_monotonic_id()
 
         self._collection.add(
             ids=[str(new_id)],

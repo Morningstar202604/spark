@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from spark.config import (
+    ApprovalMode,
+    ProviderName,
+    SandboxMode,
     SparkConfig,
     default_home,
     load_config,
@@ -90,7 +93,7 @@ def apply_setup(
     """Apply non-empty values onto cfg; return the list of changed field names."""
     changed: list[str] = []
     if provider:
-        cfg.provider.name = provider  # type: ignore[assignment]
+        cfg.provider.name = cast(ProviderName, provider)
         changed.append("provider.name")
     if base_url:
         cfg.provider.base_url = base_url.rstrip("/")
@@ -106,14 +109,14 @@ def apply_setup(
             raise SetupError(
                 f"未知审批模式 {approval!r}，可选：{', '.join(sorted(APPROVAL_MODES))}"
             )
-        cfg.agent.approval = approval  # type: ignore[assignment]
+        cfg.agent.approval = cast(ApprovalMode, approval)
         changed.append("agent.approval")
     if sandbox_mode:
         if sandbox_mode not in SANDBOX_MODES:
             raise SetupError(
                 f"未知访问级别 {sandbox_mode!r}，可选：{', '.join(sorted(SANDBOX_MODES))}"
             )
-        cfg.agent.sandbox_mode = sandbox_mode  # type: ignore[assignment]
+        cfg.agent.sandbox_mode = cast(SandboxMode, sandbox_mode)
         changed.append("agent.sandbox_mode")
     return changed
 
@@ -216,10 +219,11 @@ def _revalidate(cfg: SparkConfig, section: str) -> None:
     try:
         SparkConfig.model_validate(cfg.model_dump())
     except ValidationError as exc:
-        first = exc.errors()[0] if exc.errors() else None
-        field = ".".join(str(p) for p in (first or {}).get("loc", ())) or section
+        errors = exc.errors()
+        first: dict[str, Any] = dict(errors[0]) if errors else {}
+        field = ".".join(str(p) for p in first.get("loc", ())) or section
         raise SetupError(
-            f"{field} 取值不被接受：{(first or {}).get('msg', 'invalid value')}"
+            f"{field} 取值不被接受：{first.get('msg', 'invalid value')}"
         ) from exc
 
 

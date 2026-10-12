@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import json
+import logging
 import time
 from dataclasses import dataclass, field
 
 import httpx
+
+logger = logging.getLogger(__name__)
 
 PROBE_PROMPT = (
     "Reply with exactly the token SPARK_OK followed by one short sentence "
@@ -197,7 +200,8 @@ async def list_models(base_url: str, api_key: str, client: httpx.AsyncClient | N
         payload = resp.json()
         data = payload.get("data") or []
         return [str(item.get("id")) for item in data if item.get("id")]
-    except Exception:
+    except Exception as exc:
+        logger.debug("list_models failed: %s", exc)
         return []
     finally:
         if own:

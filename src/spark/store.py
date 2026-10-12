@@ -13,11 +13,15 @@ from spark.models import ChatMessage, ToolCall, ToolResult
 
 class SessionStore:
     def __init__(self, db_path: Path | str) -> None:
+        # 修复：统一用 str() 比较，避免 Path(":memory:") != ":memory:" (str) 判空失效
         db_path = (
             Path(db_path)
             if isinstance(db_path, str) and db_path != ":memory:"
             else db_path
         )
+        if isinstance(db_path, Path) and str(db_path) == ":memory:":
+            # Path(":memory:") 不应触发父目录创建，转回字符串统一处理
+            db_path = ":memory:"
         if isinstance(db_path, Path):
             db_path.parent.mkdir(parents=True, exist_ok=True)
         self.db_path = db_path
@@ -78,7 +82,8 @@ class SessionStore:
             )
             # WAL + composite indexes: long sessions otherwise degrade to full
             # table scans on every load and pay two fsyncs per appended message.
-            if self.db_path != ":memory:":
+            # 修复：用 str() 统一比较，防止 Path(":memory:") != ":memory:" 误判
+            if str(self.db_path) != ":memory:":
                 self._conn.execute("PRAGMA journal_mode=WAL")
             self._conn.execute("PRAGMA synchronous=NORMAL")
             self._conn.execute("PRAGMA busy_timeout=5000")
@@ -102,6 +107,10 @@ class SessionStore:
                 pass
             try:
                 self._conn.execute("ALTER TABLE sessions ADD COLUMN keywords TEXT")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                self._conn.execute("ALTER TABLE sessions ADD COLUMN forked_from TEXT")
             except sqlite3.OperationalError:
                 pass
             self._conn.commit()
@@ -197,7 +206,13 @@ class SessionStore:
                 "INSERT INTO messages (session_id, role, content, created_at, payload_json) VALUES (?, ?, ?, ?, ?)",
                 (session_id, message.role, message.content, now, json.dumps(payload)),
             )
-            last_id = int(cur.lastrowid)
+            last_id = int(cur.lastrowid or 0)
+            # 自动标题：首个 user 消息取前 24 字，替代 "untitled"（与会话搜索的标题命中配套）
+            if message.role == "user" and message.content:
+                self._conn.execute(
+                    "UPDATE sessions SET title = ? WHERE id = ? AND title = 'untitled'",
+                    (message.content.strip()[:24], session_id),
+                )
             # The message and its session timestamp must land together, otherwise a
             # crash between the two commits leaves a message with stale ordering.
             self._conn.execute(
@@ -250,6 +265,23 @@ class SessionStore:
             ).fetchone()
             return int(row["compact_from"]) if row and row["compact_from"] else 0
 
+    def load_message_ids(self, session_id: str) -> list[int]:
+        """Row ids of exactly the messages :meth:`load_messages` would return.
+
+        Compaction needs this to store the cursor as *the id of the first
+        retained message*; the in-memory history and the table must be index
+        aligned for that to be safe, so the caller compares lengths.
+        """
+        with self._lock:
+            rows = self._conn.execute(
+                """SELECT id FROM messages
+                   WHERE session_id = ?
+                     AND id >= COALESCE((SELECT compact_from FROM sessions WHERE id = ?), 0)
+                   ORDER BY id""",
+                (session_id, session_id),
+            ).fetchall()
+        return [int(row["id"]) for row in rows]
+
     def load_messages(self, session_id: str) -> list[ChatMessage]:
         """Return messages for a session, honouring the compact-from cut-off."""
         with self._lock:
@@ -263,6 +295,9 @@ class SessionStore:
         messages: list[ChatMessage] = []
         for row in rows:
             payload = json.loads(row["payload_json"] or "{}")
+            # 修复：json.loads 可能解析出 list/str/number，需校验为 dict 才可 .get()
+            if not isinstance(payload, dict):
+                payload = {}
             tool_calls = None
             if payload.get("tool_calls"):
                 tool_calls = [ToolCall.model_validate(c) for c in payload["tool_calls"]]
@@ -295,7 +330,7 @@ class SessionStore:
                 (session_id, label, message_id, snapshot_json, now),
             )
             self._conn.commit()
-            return int(cur.lastrowid)
+            return int(cur.lastrowid or 0)
 
     def list_checkpoints(self, session_id: str) -> list[dict]:
         with self._lock:
@@ -372,3 +407,137 @@ class SessionStore:
                 "SELECT * FROM bg_jobs WHERE id = ?", (job_id,)
             ).fetchone()
             return dict(row) if row else None
+
+    # ---- fork / message ops / search ----
+
+    def fork(self, session_id: str) -> dict | None:
+        """从指定会话分叉出新会话：复制全部消息与工作目录，标题标注"分叉"。
+
+        返回新会话 meta；源会话不存在返回 None。
+        """
+        with self._lock:
+            src = self.get_session(session_id)
+            if src is None:
+                return None
+            new_sid = uuid.uuid4().hex[:12]
+            now = int(time.time())
+            self._conn.execute(
+                "INSERT INTO sessions (id, workdir, model, created_at, updated_at, title, keywords, forked_from)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    new_sid,
+                    src["workdir"],
+                    src["model"],
+                    now,
+                    now,
+                    f"{src['title']}（分叉）",
+                    src.get("keywords"),
+                    session_id,
+                ),
+            )
+            self._conn.execute(
+                "INSERT INTO messages (session_id, role, content, created_at, payload_json)"
+                " SELECT ?, role, content, created_at, payload_json FROM messages WHERE session_id = ?",
+                (new_sid, session_id),
+            )
+            self._conn.commit()
+            return self.get_session(new_sid)
+
+    def truncate_messages(self, session_id: str, message_id: int) -> list[ChatMessage] | None:
+        """截断：删除指定消息及其后全部消息（编辑重发用）。返回剩余消息；消息不存在返回 None。"""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT 1 FROM messages WHERE session_id = ? AND id = ?",
+                (session_id, message_id),
+            ).fetchone()
+            if row is None:
+                return None
+            self._conn.execute(
+                "DELETE FROM messages WHERE session_id = ? AND id >= ?",
+                (session_id, message_id),
+            )
+            self._conn.execute(
+                "DELETE FROM tool_events WHERE session_id = ? AND message_id >= ?",
+                (session_id, message_id),
+            )
+            self._conn.commit()
+        return self.load_messages(session_id)
+
+    def delete_message(self, session_id: str, message_id: int) -> list[ChatMessage] | None:
+        """删除单条消息（持久生效）。返回剩余消息；消息不存在返回 None。"""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT 1 FROM messages WHERE session_id = ? AND id = ?",
+                (session_id, message_id),
+            ).fetchone()
+            if row is None:
+                return None
+            self._conn.execute(
+                "DELETE FROM messages WHERE session_id = ? AND id = ?",
+                (session_id, message_id),
+            )
+            self._conn.execute(
+                "DELETE FROM tool_events WHERE session_id = ? AND message_id = ?",
+                (session_id, message_id),
+            )
+            self._conn.commit()
+        return self.load_messages(session_id)
+
+    def search(self, q: str, limit: int = 20) -> list[dict]:
+        """会话搜索：标题命中 kind=title，消息正文命中 kind=content（含 snippet 片段）。
+
+        本地单用户库规模下用 LIKE 子串匹配（对中文友好且零分词配置）；
+        数据量上来后可升级 SQLite FTS5 trigram。
+        """
+        needle = q.strip()
+        if not needle:
+            return []
+        like = f"%{needle}%"
+        rows: list[dict] = []
+        with self._lock:
+            sessions = self._conn.execute(
+                "SELECT id, workdir, title, updated_at FROM sessions"
+                " WHERE title LIKE ? ORDER BY updated_at DESC LIMIT ?",
+                (like, limit),
+            ).fetchall()
+            for r in sessions:
+                rows.append(
+                    {
+                        "id": r["id"],
+                        "workdir": r["workdir"],
+                        "title": r["title"],
+                        "updated_at": r["updated_at"],
+                        "match": {"kind": "title", "snippet": r["title"]},
+                    }
+                )
+            if len(rows) < limit:
+                msg_rows = self._conn.execute(
+                    "SELECT m.session_id, m.content, s.workdir, s.title, s.updated_at"
+                    " FROM messages m JOIN sessions s ON s.id = m.session_id"
+                    " WHERE m.content LIKE ? AND s.title NOT LIKE ?"
+                    " ORDER BY s.updated_at DESC LIMIT ?",
+                    (like, like, limit - len(rows)),
+                ).fetchall()
+                seen: set[str] = set()
+                for r in msg_rows:
+                    if r["session_id"] in seen:
+                        continue
+                    seen.add(r["session_id"])
+                    content = r["content"] or ""
+                    pos = content.find(needle)
+                    start = max(0, pos - 20)
+                    snippet = (
+                        ("…" if start > 0 else "")
+                        + content[start : pos + len(needle) + 20]
+                        + ("…" if start + len(needle) + 20 < len(content) else "")
+                    )
+                    rows.append(
+                        {
+                            "id": r["session_id"],
+                            "workdir": r["workdir"],
+                            "title": r["title"],
+                            "updated_at": r["updated_at"],
+                            "match": {"kind": "content", "snippet": snippet},
+                        }
+                    )
+        return rows[:limit]

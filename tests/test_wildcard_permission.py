@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from spark.models import ToolCall
 from spark.policy import (
     PermissionRule,
@@ -11,7 +9,6 @@ from spark.policy import (
     decide,
     evaluate_permission,
 )
-
 
 # ---------------------------------------------------------------------------
 # _wildcard_match

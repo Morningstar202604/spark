@@ -1,51 +1,91 @@
 # -*- mode: python ; coding: utf-8 -*-
-# Spark — PyInstaller spec
+# Spark — PyInstaller spec（单文件形式，dist/spark.exe 单二进制分发）
 # 用法：
-#   Windows:  pyinstaller spark.spec --distpath dist --workpath build
+#   Windows:  pyinstaller spark-onefile.spec --distpath dist --workpath build
 #   Linux/macOS 同命令（产出对应平台二进制）
 # 构建说明见 docs/INSTALL.md（中英双语）
+# 打包对象是 src/spark（pip 发行与 pytest 实测的同一棵树）。
+
+import importlib.util
+from pathlib import Path
+
+# litellm 在 import 时通过 importlib.resources 读取包内 JSON 数据（模型价格表、
+# tokenizer 词表、endpoints 配置等），PyInstaller 静态分析覆盖不到这类资源读取，
+# 冻结后会 FileNotFoundError；这里在 spec 解析期递归收集全部 JSON + tokenizers 包。
+_litellm_dir = Path(importlib.util.find_spec("litellm").origin).parent
+_LITELLM_DATA = []
+for _p in sorted(_litellm_dir.rglob("*.json")):
+    _rel = _p.parent.relative_to(_litellm_dir)
+    _dest = "litellm" if str(_rel) == "." else f"litellm/{_rel.as_posix()}"
+    _LITELLM_DATA.append((str(_p), _dest))
+_LITELLM_TOKENIZERS = _litellm_dir / "litellm_core_utils" / "tokenizers"
+if _LITELLM_TOKENIZERS.is_dir():
+    _LITELLM_DATA.append(
+        (str(_LITELLM_TOKENIZERS), "litellm/litellm_core_utils/tokenizers")
+    )
 
 a = Analysis(
-    ['spark/__main__.py'],
+    ['src/spark/__main__.py'],
     pathex=[],
     binaries=[],
     datas=[
-        ('spark/web', 'spark/web'),          # 前端静态资源（index.html / js / css / vendor）
-        ('assets/logo.svg', 'assets'),         # 品牌 logo
+        ('src/spark/web/dist', 'spark/web/dist'),  # 前端构建产物（仅 dist，不含 node_modules，控制体积）
+        ('src/spark/prompts', 'spark/prompts'),    # 系统提示词模板
+        ('assets/logo.svg', 'assets'),             # 品牌 logo
+        *_LITELLM_DATA,                            # litellm 运行时数据（importlib.resources 读取）
     ],
     hiddenimports=[
-        # uvicorn 动态导入的子系统（[standard] 全家）
-        'uvicorn.logging',
-        'uvicorn.loops.auto',
-        'uvicorn.loops.asyncio',
-        'uvicorn.lifespan.on',
-        'uvicorn.protocols.http.auto',
-        'uvicorn.protocols.http.h11_impl',
-        'uvicorn.protocols.websockets.auto',
-        'uvicorn.protocols.websockets.ws_impl',
-        'uvicorn.protocols.websockets.websockets_impl',
-        'websockets',
-        'httptools',
-        # CLI / 配置 / 工具
+        # CLI / 配置 / 序列化
         'typer',
-        'tomlkit',
+        'click',
+        'pydantic',
+        'pydantic_settings',
+        'shellingham',
+        # 网络（provider / MCP bridge）
         'httpx',
+        'httpx._transports',
         'anyio',
         'sniffio',
         'certifi',
-        # Web Speech / MCP 等可选能力不硬依赖，缺失时优雅降级
+        'httpcore',
+        'h11',
+        # TUI（textual + rich）
+        'textual',
+        'textual.app',
+        'textual.widgets',
+        'rich',
+        'rich.markup',
+        # LLM / 检索栈（PyInstaller 动态导入多，显式兜底）
+        'litellm',
+        'chromadb',
+        'chromadb.api',
+        'chromadb.api.segment',
+        # chromadb 的 Settings 用配置项动态解析组件类（import_module），静态分析看不到；
+        # 默认实现全部显式声明，含 Rust 绑定扩展
+        'chromadb.api.rust',
+        'chromadb_rust_bindings',
+        'chromadb.db.impl.sqlite',
+        'chromadb.execution.executor.local',
+        'chromadb.segment.impl.manager.local',
+        'chromadb.segment.impl.distributed.segment_directory',
+        'chromadb.quota.simple_quota_enforcer',
+        'chromadb.rate_limit.simple_rate_limit',
+        'chromadb.ingest.impl.simple_policy',
+        'chromadb.telemetry.product.posthog',
+        'llama_index.core',
+        'langgraph',
+        'langgraph.graph',
+        # spark 内部延迟导入（桌面壳 / Web / 技能）
         'spark.web',
         'spark.web.server',
-        'spark.web.api_common',
-        'spark.web.api_sessions',
-        'spark.web.api_config',
-        'spark.web.api_data',
+        'spark.desktop',
         'spark.tools',
         'spark.tools.web',
-        'spark.subagent',
-        'spark.memory',
-        'spark.codeindex',
-        'spark.plugins',
+        # litellm 资源目录（空 __init__.py + JSON 数据，仅经 importlib.resources 触达）
+        'litellm.litellm_core_utils.tokenizers',
+        # 桌面壳（可选依赖，安装后打进二进制；未装则由运行时报缺失）
+        'webview',
+        'clr',
     ],
     hookspath=[],
     hooksconfig={},
@@ -59,7 +99,6 @@ a = Analysis(
         'PyQt6',
         'IPython',
         'matplotlib',
-        'numpy',
     ],
     noarchive=False,
 )
@@ -86,4 +125,3 @@ exe = EXE(
     entitlements_file=None,
     icon='assets/logo.ico' if os.path.exists('assets/logo.ico') else None,
 )
-

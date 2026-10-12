@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import json as _json
 import logging
-from http.server import BaseHTTPRequestHandler
 from typing import Any
 from urllib.parse import urlparse
 
@@ -36,6 +35,7 @@ from spark.web._handlers import (  # noqa: F401  (re-export for backward-compat)
     _handle_settings,
     _handle_test,
 )
+from spark.web._httpbase import HandlerBase
 from spark.web._routing import _route_state  # noqa: E402
 
 logger = logging.getLogger(__name__)
@@ -44,7 +44,7 @@ logger = logging.getLogger(__name__)
 def build_handler_class(html: str):
     """Build a BaseHTTPRequestHandler subclass bound to *html* content."""
 
-    class Handler(BaseHTTPRequestHandler):
+    class Handler(HandlerBase):
         def end_headers(self) -> None:
             self.send_header("X-Content-Type-Options", "nosniff")
             self.send_header("X-Frame-Options", "DENY")

@@ -2,9 +2,12 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import re
 import threading
 import time
+
+logger = logging.getLogger(__name__)
 
 from spark.config import SparkConfig
 from spark.memory.extractor import (
@@ -36,6 +39,22 @@ class MemoryService:
         self.embedding_available: bool | None = None
         self.embedding_checked_at = 0.0
         self._lock = threading.RLock()
+
+    @staticmethod
+    def _safe_async_run(coro):
+        """Run *coroutine* safely from a sync context.
+
+        If called from a running event loop (e.g. nested in async code),
+        fall back to a new thread + asyncio.run to avoid
+        ``asyncio.run() cannot be called from a running event loop``.
+        """
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            return asyncio.run(coro)
+        import concurrent.futures
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            return pool.submit(lambda: asyncio.run(coro)).result(timeout=120)
 
     # ---------- embeddings ----------
 
@@ -91,6 +110,8 @@ class MemoryService:
                 else:
                     vecs = result[0]
         except Exception:
+            # 线程超时或异常时降级为不可用
+            logger.warning("embedding 可用性检查失败", exc_info=True)
             vecs = None
         self.embedding_checked_at = now
         if vecs is None:
@@ -148,7 +169,7 @@ class MemoryService:
         explicit = bool(EXPLICIT_RE.search(user_text))
         p = self.cfg.provider
         try:
-            candidates = asyncio.run(
+            candidates = self._safe_async_run(
                 extract_facts(
                     transcript="\n".join(pieces),
                     base_url=p.base_url,
@@ -176,7 +197,7 @@ class MemoryService:
                 for row, _score in hits:
                     target_versions[row.id] = row
             try:
-                ops = asyncio.run(
+                ops = self._safe_async_run(
                     resolve_operations(
                         candidates=candidates,
                         similar=similar,
@@ -334,7 +355,7 @@ class MemoryService:
                 for cluster in clusters:
                     contents = [r.content for r in cluster]
                     try:
-                        merged = asyncio.run(
+                        merged = self._safe_async_run(
                             consolidate_group(
                                 contents=contents,
                                 base_url=p.base_url,

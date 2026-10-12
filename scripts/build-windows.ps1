@@ -6,7 +6,7 @@ Set-Location (Split-Path $PSScriptRoot -Parent)
 Write-Host "[1/3] 创建虚拟环境..." -ForegroundColor Cyan
 if (-not (Test-Path ".venv")) { python -m venv .venv }
 & ".venv\Scripts\python.exe" -m pip install --upgrade pip | Out-Null
-& ".venv\Scripts\python.exe" -m pip install -e ".[dev]" pyinstaller | Out-Null
+& ".venv\Scripts\python.exe" -m pip install -e ".[dev,desktop]" pyinstaller | Out-Null
 
 Write-Host "[2/3] 运行测试门禁..." -ForegroundColor Cyan
 & ".venv\Scripts\python.exe" -m pytest -q | Out-Null

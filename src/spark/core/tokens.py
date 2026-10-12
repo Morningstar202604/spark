@@ -1,7 +1,7 @@
 """Heuristic token counting for chat messages and tool schemas."""
 from __future__ import annotations
 
-from spark.models import ChatMessage, ToolCall
+from spark.models import ChatMessage
 
 
 def estimate_tokens(text: str) -> int:

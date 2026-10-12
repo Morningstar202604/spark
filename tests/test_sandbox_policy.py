@@ -4,8 +4,21 @@ import pytest
 
 from spark.config import AgentConfig, SparkConfig
 from spark.errors import PathEscapeError
-from spark.sandbox import SandboxPolicyError, WorkdirSandbox
+from spark.sandbox import SandboxPolicyError, WorkdirSandbox, self_protected
 from spark.tools.shell import RunShellArgs, run_shell
+
+
+def spark_source_dir() -> str:
+    """Spark's own package directory — the path SELF protection must cover.
+
+    Tests used to hardcode ``/workspace/src/spark``, a container path that exists
+    on no developer machine, so they passed while the protection was a no-op.
+    """
+    return self_protected()[0].replace("\\", "/")
+
+
+def spark_config_file() -> str:
+    return self_protected()[1].replace("\\", "/")
 
 
 def _cfg(mode: str, protected: list[str] | None = None) -> SparkConfig:
@@ -67,7 +80,7 @@ def test_protected_relative_token_resolved_against_workdir(tmp_path: Path) -> No
 def test_full_access_shell_blocks_protected_allows_rest(tmp_path: Path) -> None:
     sb = WorkdirSandbox(tmp_path, _cfg("full-access"))
     assert sb.check_shell("cat /etc/passwd") is not None
-    assert sb.check_shell("cat /workspace/src/spark/config.py") is not None
+    assert sb.check_shell(f"cat {spark_source_dir()}") is not None
     assert sb.check_shell("ls /opt/whatever") is None
     assert sb.check_shell("npm run fetch") is None
 
@@ -80,18 +93,17 @@ def test_full_access_allows_anything(tmp_path: Path) -> None:
 def test_full_access_still_protects_spark_self(tmp_path: Path) -> None:
     sb = WorkdirSandbox(tmp_path, _cfg("full-access"))
     with pytest.raises(SandboxPolicyError):
-        sb.resolve("/workspace/src/spark/config.py")
-    reason = sb.check_write_path(Path("/root/.spark/config.toml"))
-    assert reason is not None
+        sb.resolve(f"{spark_source_dir()}/policy.py")
+    assert sb.check_write_path(Path(spark_config_file())) is not None
 
 
 def test_unrestricted_allows_self_and_system(tmp_path: Path) -> None:
     sb = WorkdirSandbox(tmp_path, _cfg("unrestricted"))
-    got = sb.resolve("/workspace/src/spark/config.py")
-    assert got.as_posix().endswith("/workspace/src/spark/config.py")
+    got = sb.resolve(f"{spark_source_dir()}/policy.py")
+    assert got.as_posix().endswith("spark/policy.py")
     assert sb.check_shell("sudo anything") is None
     assert sb.check_shell("printenv") is None
-    assert sb.check_write_path(Path("/root/.spark/config.toml")) is None
+    assert sb.check_write_path(Path(spark_config_file())) is None
     assert sb.check_write_path(Path("/etc/hosts")) is None
 
 

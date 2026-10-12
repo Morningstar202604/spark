@@ -5,13 +5,42 @@ import os
 import shlex
 from pathlib import Path
 
-from spark.config import SparkConfig
+from spark.config import SparkConfig, default_home
 from spark.errors import PathEscapeError
 
-DEFAULT_PROTECTED = ["/etc", "/root/.spark", "/usr", "/bin", "/sbin", "/boot", "/proc", "/sys", "/dev"]
+# ``_logical()`` strips the drive letter, so these POSIX-shaped entries also
+# match C:/Windows, D:/Program Files and friends on Windows.
+DEFAULT_PROTECTED = [
+    "/etc",
+    "/root/.spark",
+    "/usr",
+    "/bin",
+    "/sbin",
+    "/boot",
+    "/proc",
+    "/sys",
+    "/dev",
+    "/windows",
+    "/program files",
+    "/program files (x86)",
+]
 
 # Spark's own code and config: protected in every mode except unrestricted.
-SELF_PROTECTED = ["/workspace/src/spark", "/root/.spark/config.toml"]
+
+
+def self_protected() -> list[str]:
+    """Paths Spark must never let a tool write to.
+
+    These used to be hardcoded container paths (``/workspace/src/spark``) that
+    matched nothing on a real machine, so "the agent protects its own code" was
+    silently a no-op. Resolved per call so ``SPARK_HOME`` overrides apply.
+    """
+    import spark as _spark_pkg
+
+    paths = [str(Path(_spark_pkg.__file__).resolve().parent)]
+    config_toml = default_home() / "config.toml"
+    paths.append(str(config_toml))
+    return paths
 
 # Commands that read sensitive material or modify system state; blocked outside full-access.
 DENY_PATTERNS = (
@@ -34,6 +63,25 @@ DENY_PATTERNS = (
     "rm -rf ~",
     "rm -rf $home",
     "/etc/shadow",
+    # Git history rewrite / remote side effects. The system prompt promises the
+    # agent never runs these, so the promise has to be enforced, not aspirational.
+    "git push",
+    "git pull",
+    "git reset --hard",
+    "git clean -f",
+    "git checkout .",
+    "git restore .",
+    # Windows-native equivalents of the destructive POSIX commands above; the
+    # list used to be POSIX-only, so it did not protect this platform at all.
+    "remove-item -recurse",
+    "ri -recurse",
+    "del /s",
+    "rd /s",
+    "rmdir /s",
+    "format ",
+    "net user ",
+    "reg delete",
+    "vssadmin delete",
 )
 
 
@@ -80,7 +128,7 @@ class WorkdirSandbox:
     def _protected_effective(self) -> list[str]:
         if self.unrestricted:
             return self.protected_paths
-        return self.protected_paths + DEFAULT_PROTECTED + SELF_PROTECTED
+        return self.protected_paths + DEFAULT_PROTECTED + self_protected()
 
     @staticmethod
     def _logical(path: Path) -> Path:
@@ -100,12 +148,26 @@ class WorkdirSandbox:
             raise SandboxPolicyError(f"Blocked protected path: {raw}")
 
     def _command_tokens(self, command: str) -> list[str]:
-        cleaned = command.replace("|", " ").replace(";", " ").replace("&&", " ").replace("\n", " ")
+        """Sanitise a shell command into safe tokens.
+
+        Replaces shell metacharacters, command substitutions, and chaining
+        operators with spaces before tokenising. Best-effort — not a security
+        boundary; the real boundary is ``check_shell`` which decides allow/deny.
+        """
+        cleaned = command
+        # Block-process substitution: <(cmd) and >(cmd)
+        for pat in ("<(", ">(", "$(", "${"):
+            cleaned = cleaned.replace(pat, " ")
+        # Command chaining and redirection
+        for ch in ("|", ";", "&&", "||", "\n", "\r", "\t"):
+            cleaned = cleaned.replace(ch, " ")
+        # Backticks and bare $
+        cleaned = cleaned.replace("`", " ").replace("$", " ")
         try:
             tokens = shlex.split(cleaned, posix=os.name != "nt")
         except ValueError:
             tokens = cleaned.split()
-        return [tok.strip("\"'") for tok in tokens if tok.strip("\"'")]
+        return [tok for tok in tokens if tok]
 
     def _command_hits_protected(self, command: str) -> str | None:
         """Return the protected path entry hit by a path token in the command, if any."""

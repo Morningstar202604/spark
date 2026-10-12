@@ -158,10 +158,14 @@ def test_bg_start_disabled_in_sandbox_only(tmp_path: Path) -> None:
 def test_bg_running_jobs_capped(tmp_path: Path) -> None:
     sb = WorkdirSandbox(tmp_path, _cfg("workspace"))
     bg.JOBS.clear()
-    # exceed MAX_JOBS with finished jobs then verify running cap logic exposed
+    # 启动 MAX_JOBS+2 个：瞬时 running 达上限时新任务被拒（RuntimeError）；
+    # echo 完成很快，名额可能已被释放（收割竞态）。规格核心：任意时刻 running <= MAX_JOBS。
     for i in range(bg.MAX_JOBS + 2):
-        job = bg._start_background(sb, f"echo job{i}", ".")
-        assert job["id"]
+        try:
+            job = bg._start_background(sb, f"echo job{i}", ".")
+            assert job["id"]
+        except RuntimeError:
+            pass
     running = [j for j in bg.JOBS.values() if j["finished_at"] is None]
     assert len(running) <= bg.MAX_JOBS
 

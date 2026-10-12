@@ -98,7 +98,10 @@ class ToolRegistry:
 
     def schemas(self) -> list[dict[str, Any]]:
         builtin = [
-            _schema("read_file", "Read a UTF-8 file inside workdir.",
+            _schema("read_file",
+                "Read a UTF-8 file inside workdir. Returns at most 2000 lines from offset "
+                "(default first 200) plus total_lines and truncated, so you know whether to "
+                "continue with a larger offset.",
                 {"path": {"type": "string"}, "offset": {"type": "integer"}, "limit": {"type": "integer"}},
                 ["path"]),
             _schema("list_dir", "List a directory inside workdir.",
@@ -249,9 +252,12 @@ class ToolRegistry:
         if call.name == "write_file":
             path = str(call.arguments.get("path", ""))
             content = str(call.arguments.get("content", ""))
-            return fs.write_summary(path, content), fs.write_summary(path, content)
+            return fs.write_summary(path, content), fs.diff_for_write(
+                self.ctx.sandbox, path, content
+            )
         if call.name == "apply_patch":
             diff = fs.patch_diff(
+                self.ctx.sandbox,
                 str(call.arguments.get("path", "")),
                 str(call.arguments.get("old_text", "")),
                 str(call.arguments.get("new_text", "")),
@@ -269,112 +275,116 @@ class ToolRegistry:
             return text, None
         return f"{call.name} {call.arguments}", None
 
+    def _build_dispatch_table(self) -> dict[str, Callable]:
+        """Return name→handler map.
+
+        Handlers are plain callables: sync functions return ToolResult directly,
+        async functions return a coroutine. ``execute`` detects which is which.
+        """
+        ctx = self.ctx
+
+        out: dict[str, Callable] = {
+            # --- fs ---
+            "read_file": lambda a: fs.read_file(ctx.sandbox, fs.ReadFileArgs.model_validate(a)),
+            "list_dir": lambda a: fs.list_dir(ctx.sandbox, fs.ListDirArgs.model_validate(a)),
+            "write_file": lambda a: fs.write_file(ctx.sandbox, fs.WriteFileArgs.model_validate(a)),
+            "apply_patch": lambda a: fs.apply_patch(ctx.sandbox, fs.ApplyPatchArgs.model_validate(a)),
+            # --- shell ---
+            "run_shell": lambda a: shell.run_shell(
+                ctx.sandbox, shell.RunShellArgs.model_validate(a),
+                timeout_sec=ctx.config.agent.shell_timeout_sec,
+                max_output_chars=ctx.config.agent.max_output_chars,
+            ),
+            # --- bg ---
+            "bg_start": lambda a: bg.bg_start_tool(ctx.sandbox, a),
+            "bg_output": lambda a: bg.bg_output_tool(a),
+            "bg_kill": lambda a: bg.bg_kill_tool(a),
+            "bg_list": lambda a: bg.bg_list_tool(),
+            # --- git ---
+            "git_status": lambda a: gitops.git_status(ctx.sandbox, gitops.GitStatusArgs.model_validate(a)),
+            "git_diff": lambda a: gitops.git_diff(ctx.sandbox, gitops.GitDiffArgs.model_validate(a)),
+            "git_log": lambda a: gitops.git_log(ctx.sandbox, gitops.GitLogArgs.model_validate(a)),
+            "git_branch": lambda a: gitops.git_branch(ctx.sandbox, gitops.GitBranchArgs.model_validate(a)),
+            "git_add": lambda a: gitops.git_add(ctx.sandbox, gitops.GitAddArgs.model_validate(a)),
+            "git_commit": lambda a: gitops.git_commit(ctx.sandbox, gitops.GitCommitArgs.model_validate(a)),
+            "run_tests": lambda a: gitops.run_tests(ctx.sandbox, gitops.RunTestsArgs.model_validate(a)),
+            "worktree_list": lambda a: gitops.worktree_list(ctx.sandbox, gitops.WorktreeListArgs.model_validate(a)),
+            "worktree_create": lambda a: gitops.worktree_create(ctx.sandbox, gitops.WorktreeCreateArgs.model_validate(a)),
+            "worktree_remove": lambda a: gitops.worktree_remove(ctx.sandbox, gitops.WorktreeRemoveArgs.model_validate(a)),
+            # --- search ---
+            "grep": lambda a: search.grep_tool(ctx.sandbox, search.GrepArgs.model_validate(a)),
+            "glob": lambda a: search.glob_tool(ctx.sandbox, search.GlobArgs.model_validate(a)),
+            # --- web ---
+            "web_search": lambda a: web.web_search_tool(web.WebSearchArgs.model_validate(a)),
+            "web_fetch": lambda a: web.web_fetch_tool(web.WebFetchArgs.model_validate(a)),
+            # --- notebook ---
+            "read_notebook": lambda a: notebook.read_notebook(ctx.sandbox, notebook.ReadNotebookArgs.model_validate(a)),
+            "notebook_edit": lambda a: notebook.notebook_edit(ctx.sandbox, notebook.NotebookEditArgs.model_validate(a)),
+        }
+        return out
+
     async def execute(self, call: ToolCall) -> ToolResult:
+        name = call.name
         try:
-            if call.name.startswith(MCP_PREFIX) and not self._mcp_name_available(call.name):
+            if name.startswith(MCP_PREFIX) and not self._mcp_name_available(name):
                 return ToolResult(
                     ok=False,
-                    payload={"error": f"Stale tool call: {call.name} is no longer available"},
+                    payload={"error": f"Stale tool call: {name} is no longer available"},
                 )
-            if call.name == "read_file":
-                return fs.read_file(
-                    self.ctx.sandbox, fs.ReadFileArgs.model_validate(call.arguments))
-            if call.name == "list_dir":
-                return fs.list_dir(
-                    self.ctx.sandbox, fs.ListDirArgs.model_validate(call.arguments))
-            if call.name == "write_file":
-                return fs.write_file(
-                    self.ctx.sandbox, fs.WriteFileArgs.model_validate(call.arguments))
-            if call.name == "apply_patch":
-                return fs.apply_patch(
-                    self.ctx.sandbox, fs.ApplyPatchArgs.model_validate(call.arguments))
-            if call.name == "run_shell":
-                return shell.run_shell(
-                    self.ctx.sandbox,
-                    shell.RunShellArgs.model_validate(call.arguments),
-                    timeout_sec=self.ctx.config.agent.shell_timeout_sec,
-                    max_output_chars=self.ctx.config.agent.max_output_chars,
-                )
-            if call.name == "bg_start":
-                return bg.bg_start_tool(self.ctx.sandbox, call.arguments)
-            if call.name == "bg_output":
-                return bg.bg_output_tool(call.arguments)
-            if call.name == "bg_kill":
-                return bg.bg_kill_tool(call.arguments)
-            if call.name == "bg_list":
-                return bg.bg_list_tool()
-            if call.name == "git_status":
-                return gitops.git_status(
-                    self.ctx.sandbox, gitops.GitStatusArgs.model_validate(call.arguments))
-            if call.name == "git_diff":
-                return gitops.git_diff(
-                    self.ctx.sandbox, gitops.GitDiffArgs.model_validate(call.arguments))
-            if call.name == "git_log":
-                return gitops.git_log(
-                    self.ctx.sandbox, gitops.GitLogArgs.model_validate(call.arguments))
-            if call.name == "git_branch":
-                return gitops.git_branch(
-                    self.ctx.sandbox, gitops.GitBranchArgs.model_validate(call.arguments))
-            if call.name == "git_add":
-                return gitops.git_add(
-                    self.ctx.sandbox, gitops.GitAddArgs.model_validate(call.arguments))
-            if call.name == "git_commit":
-                return gitops.git_commit(
-                    self.ctx.sandbox, gitops.GitCommitArgs.model_validate(call.arguments))
-            if call.name == "run_tests":
-                return gitops.run_tests(
-                    self.ctx.sandbox, gitops.RunTestsArgs.model_validate(call.arguments))
-            if call.name == "worktree_list":
-                return gitops.worktree_list(
-                    self.ctx.sandbox, gitops.WorktreeListArgs.model_validate(call.arguments))
-            if call.name == "worktree_create":
-                return gitops.worktree_create(
-                    self.ctx.sandbox, gitops.WorktreeCreateArgs.model_validate(call.arguments))
-            if call.name == "worktree_remove":
-                return gitops.worktree_remove(
-                    self.ctx.sandbox, gitops.WorktreeRemoveArgs.model_validate(call.arguments))
-            if call.name == "grep":
-                return search.grep_tool(
-                    self.ctx.sandbox, search.GrepArgs.model_validate(call.arguments))
-            if call.name == "glob":
-                return search.glob_tool(
-                    self.ctx.sandbox, search.GlobArgs.model_validate(call.arguments))
-            if call.name == "web_search":
-                return web.web_search_tool(web.WebSearchArgs.model_validate(call.arguments))
-            if call.name == "web_fetch":
-                return web.web_fetch_tool(web.WebFetchArgs.model_validate(call.arguments))
-            if call.name == "read_notebook":
-                return notebook.read_notebook(
-                    self.ctx.sandbox, notebook.ReadNotebookArgs.model_validate(call.arguments))
-            if call.name == "notebook_edit":
-                return notebook.notebook_edit(
-                    self.ctx.sandbox, notebook.NotebookEditArgs.model_validate(call.arguments))
-            if call.name == "load_skill":
-                from pathlib import Path as _Path
-                from spark.skills import discover_skills, format_skill_invocation
-                name = call.arguments.get("name", "")
-                workdir = self.ctx.sandbox.root
-                skills = discover_skills(_Path(workdir))
-                for s in skills:
-                    if s.name == name:
-                        return ToolResult(ok=True, payload={"content": format_skill_invocation(s)})
-                return ToolResult(ok=False, payload={"error": f"skill not found: {name}"})
-            if call.name == "update_plan":
-                steps = call.arguments.get("steps")
-                if not isinstance(steps, list):
-                    return ToolResult(ok=False, payload={"error": "steps must be a list"})
-                clean: list[dict[str, Any]] = []
-                for step in steps:
-                    if not isinstance(step, dict) or not str(step.get("title", "")).strip():
-                        continue
-                    status = step.get("status", "pending")
-                    clean.append(
-                        {"title": str(step["title"]).strip(),
-                         "status": status if status in {"pending", "in_progress", "completed"} else "pending"})
-                self.plan = clean
-                return ToolResult(ok=True, payload={"steps": clean})
-            if call.name.startswith("mcp__") and self.ctx.mcp_call is not None:
-                return await self.ctx.mcp_call(call.name, call.arguments)
+
+            if name == "update_plan":
+                return self._handle_update_plan(call.arguments)
+
+            if name == "load_skill":
+                return self._handle_load_skill(call.arguments)
+
+            if name == "task":
+                return await self._handle_task(call)
+
+            if name.startswith("mcp__") and self.ctx.mcp_call is not None:
+                return await self.ctx.mcp_call(name, call.arguments)
+
+            # Built-in tools dispatched via table
+            table = self._build_dispatch_table()
+            handler = table.get(name)
+            if handler is not None:
+                result = handler(call.arguments)
+                if hasattr(result, "__await__"):
+                    result = await result
+                return result
+
         except Exception as exc:
             return ToolResult(ok=False, payload={"error": str(exc)})
-        return ToolResult(ok=False, payload={"error": f"Unknown tool: {call.name}"})
+        return ToolResult(ok=False, payload={"error": f"Unknown tool: {name}"})
+
+    def _handle_update_plan(self, arguments: dict[str, Any]) -> ToolResult:
+        steps = arguments.get("steps")
+        if not isinstance(steps, list):
+            return ToolResult(ok=False, payload={"error": "steps must be a list"})
+        clean: list[dict[str, Any]] = []
+        for step in steps:
+            if not isinstance(step, dict) or not str(step.get("title", "")).strip():
+                continue
+            status = step.get("status", "pending")
+            clean.append({
+                "title": str(step["title"]).strip(),
+                "status": status if status in {"pending", "in_progress", "completed"} else "pending",
+            })
+        self.plan = clean
+        return ToolResult(ok=True, payload={"steps": clean})
+
+    def _handle_load_skill(self, arguments: dict[str, Any]) -> ToolResult:
+        from pathlib import Path as _Path
+
+        from spark.skills import discover_skills, format_skill_invocation
+
+        name = arguments.get("name", "")
+        skills = discover_skills(_Path(self.ctx.sandbox.root))
+        for s in skills:
+            if s.name == name:
+                return ToolResult(ok=True, payload={"content": format_skill_invocation(s)})
+        return ToolResult(ok=False, payload={"error": f"skill not found: {name}"})
+
+    async def _handle_task(self, call: ToolCall) -> ToolResult:
+        """Placeholder: task tool is handled specially by AgentLoop before reach here."""
+        return ToolResult(ok=False, payload={"error": "task should be intercepted by AgentLoop"})

@@ -153,7 +153,9 @@ async def test_tui_narrow_terminal_fits_toolbar_and_status(tmp_path) -> None:
             widget.region.x >= 0 and widget.region.x + widget.region.width <= 20
             for widget in app.screen.walk_children()
         )
-        assert app.query_one("#status").styles.text_overflow == "ellipsis"
+        status = app.query_one("#status")
+        assert status.styles.overflow_x == "hidden"
+        assert status.styles.height is not None
         assert app.query_one("#test-model").label.plain == "T"
         assert app.query_one("#help").label.plain == "?"
     store.close()

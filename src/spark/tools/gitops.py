@@ -259,14 +259,15 @@ def worktree_create(sandbox: WorkdirSandbox, args: WorktreeCreateArgs) -> ToolRe
         return ToolResult(
             ok=False, payload={"error": f"branch already exists: {branch}"}
         )
-    git_args = ["worktree", "add", "-b", branch]
+    # git worktree add -b <new-branch> <path> [<start-point>]
+    # The path is where the worktree lives; base is the optional start commit.
+    target = (repo / branch).resolve()
+    git_args = ["worktree", "add", "-b", branch, str(target)]
     if base:
         git_args.append(base)
-    git_args.append(branch)
     result = _run_git(sandbox, args.path, git_args)
     if not result.ok:
         return result
-    target = (repo / branch).resolve()
     return ToolResult(
         ok=True,
         payload={

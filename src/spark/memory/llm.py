@@ -2,11 +2,14 @@
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any
 
 import httpx
 
 from spark.models import ChatMessage
+
+logger = logging.getLogger(__name__)
 
 
 def _headers(api_key: str) -> dict[str, str]:
@@ -33,7 +36,7 @@ async def chat_complete(
         "temperature": temperature,
         "max_tokens": max_tokens,
     }
-    async with httpx.AsyncClient(timeout=60.0) as client:
+    async with httpx.AsyncClient(timeout=httpx.Timeout(60.0, connect=10.0)) as client:
         resp = await client.post(url, headers=_headers(api_key), json=body)
         resp.raise_for_status()
         data = resp.json()
@@ -65,11 +68,12 @@ async def embed_texts(
     url = f"{base_url.rstrip('/')}/embeddings"
     body = {"model": model, "input": texts}
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(30.0, connect=10.0)) as client:
             resp = await client.post(url, headers=_headers(api_key), json=body)
             resp.raise_for_status()
             data = resp.json()
-    except Exception:
+    except Exception as exc:
+        logger.warning("Embedding request failed: %s", exc)
         return None
     out: list[list[float]] = []
     items = data.get("data") or []
@@ -83,11 +87,19 @@ async def embed_texts(
 
 
 def parse_json_object(text: str) -> dict | None:
+    """Extract the first JSON object from *text*, stripping fences if present."""
     text = text.strip()
+    # Strip fenced code blocks ("```json" / "```")
     if text.startswith("```"):
-        text = text.strip("`")
-        if text.startswith("json"):
-            text = text[4:]
+        # Remove the opening fence (``` or ```json)
+        end_fence = text.find("\n", 3)
+        if end_fence != -1:
+            fence_tag = text[3:end_fence].strip().lower()
+            if fence_tag in ("", "json"):
+                text = text[end_fence + 1 :]
+        # Remove closing ```
+        if text.rstrip().endswith("```"):
+            text = text.rstrip()[:-3].rstrip()
     start = text.find("{")
     end = text.rfind("}")
     if start < 0 or end <= start:

@@ -10,7 +10,7 @@
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-0f766e.svg)]()
 [![Tests](https://img.shields.io/badge/tests-216%20passed-14b8a6.svg)]()
 
-[English](README.md) · [中文](README.zh.md) · **日本語** · [Español](README.es.md)
+[English](README.md) · [中文](README_zh.md) · **日本語** · [Español](README.es.md)
 
 </div>
 

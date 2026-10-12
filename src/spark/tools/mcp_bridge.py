@@ -1,249 +1,174 @@
+"""MCP bridge — thin wrapper over the official ``mcp`` Python SDK.
+
+Replaces the hand-rolled JSON-RPC/SSE implementation with the official SDK.  The
+SDK provides production-grade transports, protocol negotiation, session
+management and reconnection — none of which we need to reinvent.
+
+Supported transports (all official SDK):
+
+* ``stdio`` → :func:`mcp.client.stdio.stdio_client`
+* ``sse`` → :func:`mcp.client.sse.sse_client` (legacy SSE servers)
+* ``streamable_http`` → :func:`mcp.client.streamable_http.streamable_http_client`
+  (modern replacement for SSE; preferred when available)
+"""
+
 from __future__ import annotations
 
 import asyncio
-import json
-from typing import Any
+import logging
+import threading
+from contextlib import AbstractAsyncContextManager, AsyncExitStack
+from typing import Any, Coroutine
 
 import httpx
+from mcp import ClientSession, StdioServerParameters
+from mcp.client.sse import sse_client
+from mcp.client.stdio import stdio_client
+from mcp.client.streamable_http import streamable_http_client
 
 from spark.config import McpServerConfig
 from spark.models import ToolResult
 from spark.tools.registry import ToolRegistry
 
+logger = logging.getLogger(__name__)
+
+
 # ---------------------------------------------------------------------------
-# Stdio transport (existing)
+# Per-server connection — one MCP server session
 # ---------------------------------------------------------------------------
 
 
-class McpServerProcess:
+class _McpConnection:
+    """Wraps a single MCP server connection using the official SDK."""
+
     def __init__(self, cfg: McpServerConfig) -> None:
         self.cfg = cfg
-        self.proc: asyncio.subprocess.Process | None = None
-        self._id = 0
         self.tools: list[dict[str, Any]] = []
+        self._exit_stack = AsyncExitStack()
+        self._session: ClientSession | None = None
 
     async def start(self) -> None:
-        self.proc = await asyncio.create_subprocess_exec(
-            self.cfg.command,
-            *self.cfg.args,
-            stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        await self._rpc("initialize", {"protocolVersion": "2024-11-05", "capabilities": {}, "clientInfo": {"name": "spark", "version": "0.1.0"}})
-        await self._notify("notifications/initialized", {})
-        listed = await self._rpc("tools/list", {})
-        self.tools = listed.get("tools") or []
+        """Connect, negotiate protocol version, and enumerate tools."""
+        transport: AbstractAsyncContextManager[Any]
+        if self.cfg.transport == "stdio":
+            params = StdioServerParameters(
+                command=self.cfg.command,
+                args=self.cfg.args or [],
+            )
+            transport = stdio_client(params)
+        elif self.cfg.http is not None:
+            url = self.cfg.http.url
+            headers = self.cfg.http.headers or {}
+            timeout = self.cfg.http.timeout_sec or 30
+            if self.cfg.transport == "sse":
+                transport = sse_client(url=url, headers=headers, sse_read_timeout=timeout * 5)
+            else:  # streamable_http
+                http_client = httpx.AsyncClient(
+                    base_url=url,
+                    headers=headers,
+                    timeout=timeout,
+                )
+                transport = streamable_http_client(url=url, http_client=http_client)
+        else:
+            raise RuntimeError(
+                f"MCP server {self.cfg.name} requires http transport but none configured"
+            )
 
-    async def close(self) -> None:
-        if self.proc and self.proc.returncode is None:
-            self.proc.terminate()
-            try:
-                await asyncio.wait_for(self.proc.wait(), timeout=2)
-            except TimeoutError:
-                self.proc.kill()
+        read, write = await self._exit_stack.enter_async_context(transport)
+        session = await self._exit_stack.enter_async_context(ClientSession(read, write))
+        await session.initialize()
+        self._session = session
 
-    async def call(self, name: str, arguments: dict[str, Any]) -> ToolResult:
-        try:
-            result = await self._rpc("tools/call", {"name": name, "arguments": arguments})
-        except Exception as exc:
-            return ToolResult(ok=False, payload={"error": str(exc)})
-        is_error = bool(result.get("isError"))
-        return ToolResult(ok=not is_error, payload=result)
-
-    async def _notify(self, method: str, params: dict[str, Any]) -> None:
-        self._id += 1
-        msg = {"jsonrpc": "2.0", "method": method, "params": params}
-        await self._write(msg)
-
-    async def _rpc(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
-        if self.proc is None or self.proc.stdin is None or self.proc.stdout is None:
-            raise RuntimeError(f"MCP server {self.cfg.name} is not running")
-        self._id += 1
-        req_id = self._id
-        await self._write({"jsonrpc": "2.0", "id": req_id, "method": method, "params": params})
-        while True:
-            raw = await asyncio.wait_for(self.proc.stdout.readline(), timeout=30)
-            if not raw:
-                raise RuntimeError(f"MCP server {self.cfg.name} closed")
-            line = raw.decode("utf-8").strip()
-            if not line:
-                continue
-            payload = json.loads(line)
-            if payload.get("id") != req_id:
-                continue
-            if "error" in payload:
-                raise RuntimeError(str(payload["error"]))
-            return payload.get("result") or {}
-
-    async def _write(self, msg: dict[str, Any]) -> None:
-        if self.proc is None or self.proc.stdin is None:
-            raise RuntimeError(f"MCP server {self.cfg.name} is not running")
-        data = json.dumps(msg).encode("utf-8") + b"\n"
-        self.proc.stdin.write(data)
-        await self.proc.stdin.drain()
-
-
-# ---------------------------------------------------------------------------
-# HTTP/SSE transport (Streamable HTTP / SSE)
-# ---------------------------------------------------------------------------
-
-
-class McpServerHttp:
-    """MCP client over HTTP — supports Streamable HTTP and SSE transports.
-
-    For Streamable HTTP: POST a JSON-RPC body to ``cfg.http.url`` and receive
-    the JSON-RPC response directly in the response body.
-
-    If the server responds with ``text/event-stream``, the response is parsed
-    as SSE and the first ``data:`` frame carrying the matching JSON-RPC id is
-    returned.
-    """
-
-    def __init__(self, cfg: McpServerConfig) -> None:
-        if cfg.http is None:
-            raise RuntimeError(f"MCP server {cfg.name} has no http transport config")
-        self.cfg = cfg
-        self._id = 0
-        self.tools: list[dict[str, Any]] = []
-        self._client = httpx.AsyncClient(
-            base_url=cfg.http.url,
-            headers=cfg.http.headers,
-            timeout=cfg.http.timeout_sec,
-        )
-
-    # -- lifecycle ----------------------------------------------------------
-
-    async def start(self) -> None:
-        await self._rpc(
-            "initialize",
+        listed = await session.list_tools()
+        self.tools = [
             {
-                "protocolVersion": "2024-11-05",
-                "capabilities": {},
-                "clientInfo": {"name": "spark", "version": "0.1.0"},
-            },
-        )
-        await self._notify("notifications/initialized", {})
-        listed = await self._rpc("tools/list", {})
-        self.tools = listed.get("tools") or []
-
-    async def close(self) -> None:
-        await self._client.aclose()
-
-    # -- public API ---------------------------------------------------------
+                "name": t.name,
+                "description": t.description or "",
+                "inputSchema": t.inputSchema if isinstance(t.inputSchema, dict) else {"type": "object"},
+            }
+            for t in listed.tools
+        ]
+        logger.info("MCP server '%s' connected: %d tool(s)", self.cfg.name, len(self.tools))
 
     async def call(self, name: str, arguments: dict[str, Any]) -> ToolResult:
+        if self._session is None:
+            return ToolResult(ok=False, payload={"error": f"MCP {self.cfg.name} not connected"})
         try:
-            result = await self._rpc("tools/call", {"name": name, "arguments": arguments})
+            result = await self._session.call_tool(name, arguments)
         except Exception as exc:
-            return ToolResult(ok=False, payload={"error": str(exc)})
-        is_error = bool(result.get("isError"))
-        return ToolResult(ok=not is_error, payload=result)
+            logger.exception("MCP call %s.%s failed", self.cfg.name, name)
+            # ExceptionGroup/CancelledError can stringify to nothing, which left
+            # the model with an error it could not act on.
+            detail = str(exc).strip() or exc.__class__.__name__
+            return ToolResult(ok=False, payload={"error": detail})
+        is_error = getattr(result, "isError", False)
+        payload = _content_to_payload(result.content)
+        return ToolResult(ok=not is_error, payload=payload)
 
-    # -- internal RPC helpers -----------------------------------------------
+    async def close(self) -> None:
+        await self._exit_stack.aclose()
+        self._session = None
+        self.tools = []
 
-    async def _notify(self, method: str, params: dict[str, Any]) -> None:
-        self._id += 1
-        msg: dict[str, Any] = {"jsonrpc": "2.0", "method": method, "params": params}
-        try:
-            await self._raw_post(msg)
-        except Exception:
-            # Notifications best-effort — swallow errors so init does not fail.
-            pass
 
-    async def _rpc(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
-        self._id += 1
-        req_id = self._id
-        msg: dict[str, Any] = {"jsonrpc": "2.0", "id": req_id, "method": method, "params": params}
-        resp = await self._raw_post(msg)
-        return self._parse_response(resp, req_id)
-
-    async def _raw_post(self, msg: dict[str, Any]) -> httpx.Response:
-        try:
-            resp = await self._client.post(
-                "",
-                json=msg,
-                headers={"Content-Type": "application/json", "Accept": "application/json, text/event-stream"},
-            )
-        except httpx.ConnectError as exc:
-            raise RuntimeError(
-                f"Cannot connect to MCP server {self.cfg.name} at {self.cfg.http.url}: {exc}"
-            ) from exc
-        except httpx.TimeoutException as exc:
-            raise RuntimeError(f"MCP server {self.cfg.name} timed out: {exc}") from exc
-        except httpx.HTTPError as exc:
-            raise RuntimeError(f"MCP server {self.cfg.name} HTTP error: {exc}") from exc
-        if resp.status_code >= 400:
-            raise RuntimeError(
-                f"MCP server {self.cfg.name} returned HTTP {resp.status_code}: {resp.text[:200]}"
-            )
-        return resp
-
-    def _parse_response(self, resp: httpx.Response, req_id: int) -> dict[str, Any]:
-        """Decode the JSON-RPC response, handling both plain JSON and SSE."""
-        content_type = resp.headers.get("content-type", "")
-        if "text/event-stream" in content_type:
-            return self._parse_sse(resp.text, req_id)
-        payload = resp.json()
-        if "error" in payload:
-            raise RuntimeError(str(payload["error"]))
-        return payload.get("result") or {}
-
-    @staticmethod
-    def _parse_sse(text: str, req_id: int) -> dict[str, Any]:
-        """Scan an SSE stream for the JSON-RPC response with the matching id."""
-        for line in text.splitlines():
-            line = line.strip()
-            if not line or not line.startswith("data:"):
-                continue
-            data = line[len("data:") :].strip()
-            if not data:
-                continue
-            try:
-                payload = json.loads(data)
-            except json.JSONDecodeError:
-                continue
-            if payload.get("id") == req_id:
-                if "error" in payload:
-                    raise RuntimeError(str(payload["error"]))
-                return payload.get("result") or {}
-        raise RuntimeError(f"No matching JSON-RPC response (id={req_id}) in SSE stream")
+def _content_to_payload(content: Any) -> dict[str, Any]:
+    """Convert MCP SDK content blocks to a plain dict."""
+    if content is None:
+        return {"result": None}
+    if isinstance(content, dict):
+        return content
+    if isinstance(content, list):
+        texts: list[str] = []
+        for block in content:
+            if hasattr(block, "text"):
+                texts.append(block.text)
+            elif hasattr(block, "data"):
+                texts.append(str(block.data))
+            else:
+                texts.append(str(block))
+        return {"content": texts, "text": "\n".join(texts) if texts else ""}
+    return {"result": str(content)}
 
 
 # ---------------------------------------------------------------------------
 # Bridge — orchestrates one or more MCP servers
 # ---------------------------------------------------------------------------
 
-McpServer = McpServerProcess | McpServerHttp
+McpServer = _McpConnection
 
 
 class McpBridge:
+    """Manages multiple MCP server connections via the official SDK.
+
+    Exposes the same public API as the original hand-rolled bridge so callers
+    (cli.py, server.py, tui/app.py) do not need extensive changes.
+    """
+
     def __init__(self) -> None:
-        self.servers: dict[str, McpServer] = {}
+        self.servers: dict[str, _McpConnection] = {}
         self.errors: list[str] = []
-        self._loop: asyncio.AbstractEventLoop | None = None
-        self._lock = __import__("threading").Lock()
+        # The SDK binds stdio streams and session tasks to the loop that opened
+        # them, so a bridge created inside a short-lived ``asyncio.run`` becomes
+        # uncallable as soon as that loop closes — which is every CLI command and
+        # every web turn. Owning a loop keeps sessions alive for the process.
+        self._loop = asyncio.new_event_loop()
+        self._loop_thread = threading.Thread(
+            target=self._run_loop, name="mcp-loop", daemon=True
+        )
+        self._loop_thread.start()
 
-    def _ensure_loop(self) -> asyncio.AbstractEventLoop:
-        with self._lock:
-            if self._loop is None or self._loop.is_closed():
-                self._loop = asyncio.new_event_loop()
-                __import__("threading").Thread(
-                    target=self._loop.run_forever, daemon=True, name="mcp-bridge"
-                ).start()
-            return self._loop
+    def _run_loop(self) -> None:
+        asyncio.set_event_loop(self._loop)
+        self._loop.run_forever()
 
-    async def _run(self, coro):
-        try:
-            running = asyncio.get_running_loop()
-        except RuntimeError:
-            running = None
-        loop = self._ensure_loop()
-        if running is loop:
+    async def _on_owner(self, coro: Coroutine[Any, Any, Any]) -> Any:
+        """Await *coro* on the bridge's loop, no matter which loop calls us."""
+        if asyncio.get_running_loop() is self._loop:
             return await coro
-        return await asyncio.wrap_future(asyncio.run_coroutine_threadsafe(coro, loop))
+        return await asyncio.wrap_future(asyncio.run_coroutine_threadsafe(coro, self._loop))
 
     def register_into(self, registry: ToolRegistry) -> None:
+        """Register all MCP tools into the registry (read-only annotations)."""
         for name, server in self.servers.items():
             for tool in server.tools:
                 raw_name = tool.get("name") or "tool"
@@ -263,58 +188,55 @@ class McpBridge:
                     registry.readonly_mcp.add(ns)
 
     async def start(self, configs: list[McpServerConfig], registry: ToolRegistry) -> None:
-        await self._run(self._start_inner(configs, registry))
+        """Connect to all MCP servers in *configs* and register their tools."""
+        await self._on_owner(self._start_on_owner(configs, registry))
 
-    async def _start_inner(self, configs: list[McpServerConfig], registry: ToolRegistry) -> None:
+    async def _start_on_owner(
+        self, configs: list[McpServerConfig], registry: ToolRegistry
+    ) -> None:
         for cfg in configs:
-            if cfg.transport == "sse":
-                server: McpServer = McpServerHttp(cfg)
-            else:
-                server = McpServerProcess(cfg)
+            conn = _McpConnection(cfg)
             try:
-                # Use a startup guard so a hung init does not block forever.
-                await asyncio.wait_for(server.start(), timeout=15)
+                await asyncio.wait_for(conn.start(), timeout=15)
             except Exception as exc:
-                detail = str(exc)
-                if isinstance(server, McpServerProcess) and server.proc and server.proc.stderr:
-                    try:
-                        err = await asyncio.wait_for(server.proc.stderr.read(), timeout=0.5)
-                        if err:
-                            detail = f"{detail}: {err.decode('utf-8', errors='replace')[:200]}"
-                    except Exception:
-                        pass
-                self.errors.append(f"MCP {cfg.name} failed: {detail}")
-                await server.close()
+                logger.warning("MCP server '%s' failed to start: %s", cfg.name, exc)
+                self.errors.append(f"MCP {cfg.name} failed: {exc}")
+                await conn.close()
                 continue
-            self.servers[cfg.name] = server
-            for tool in server.tools:
-                raw_name = tool.get("name") or "tool"
-                ns = f"mcp__{cfg.name}__{raw_name}"
-                registry.add_mcp_schema(
-                    {
-                        "type": "function",
-                        "function": {
-                            "name": ns,
-                            "description": tool.get("description") or ns,
-                            "parameters": tool.get("inputSchema") or {"type": "object", "properties": {}},
-                        },
-                    }
-                )
-                if raw_name in cfg.readonly_tools:
-                    registry.readonly_mcp.add(ns)
+            self.servers[cfg.name] = conn
+        self.register_into(registry)
 
     async def call(self, namespaced: str, arguments: dict[str, Any]) -> ToolResult:
+        """Call a namespaced MCP tool: ``mcp__<server>__<tool>``."""
+        return await self._on_owner(self._call_on_owner(namespaced, arguments))
+
+    async def _call_on_owner(
+        self, namespaced: str, arguments: dict[str, Any]
+    ) -> ToolResult:
         parts = namespaced.split("__", 2)
         if len(parts) != 3:
             return ToolResult(ok=False, payload={"error": f"Bad MCP tool name: {namespaced}"})
-        server = self.servers.get(parts[1])
+        _, server_name, tool_name = parts
+        server = self.servers.get(server_name)
         if server is None:
-            return ToolResult(ok=False, payload={"error": f"MCP server not available: {parts[1]}"})
-        return await self._run(server.call(parts[2], arguments))
+            return ToolResult(
+                ok=False,
+                payload={"error": f"MCP server not available: {server_name}"},
+            )
+        return await server.call(tool_name, arguments)
 
     async def close(self) -> None:
-        await self._run(self._close_inner())
+        """Shut down all MCP connections and the bridge's own loop."""
+        await self._on_owner(self._close_on_owner())
+        self._loop.call_soon_threadsafe(self._loop.stop)
+        self._loop_thread.join(timeout=5)
+        if not self._loop.is_closed():
+            self._loop.close()
 
-    async def _close_inner(self) -> None:
+    async def _close_on_owner(self) -> None:
         for server in self.servers.values():
-            await server.close()
+            try:
+                await server.close()
+            except Exception as exc:
+                logger.warning("Error closing MCP server '%s': %s", server.cfg.name, exc)
+        self.servers.clear()

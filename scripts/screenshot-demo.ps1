@@ -5,7 +5,7 @@
 $ErrorActionPreference = "SilentlyContinue"
 $PROJECT_ROOT = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 $ASSETS_DIR = Join-Path $PROJECT_ROOT "assets\screenshots"
-$SHOT_DIR = "C:\Users\Administrator\.agent-browser\tmp\screenshots"
+$SHOT_DIR = Join-Path $env:TEMP "spark-screenshots"
 
 # ---- helpers ----
 function Kill-Port($port) {
@@ -51,7 +51,7 @@ if (Wait-For-Port 8000 15) { Write-Host "  backend OK on :8000" } else { Write-H
 
 # ---- start frontend ----
 Write-Host "[2/5] Starting frontend..."
-$fe = Join-Path $PROJECT_ROOT "spark\web"
+$fe = Join-Path $PROJECT_ROOT "web"
 Start-Process -FilePath npm -ArgumentList "run dev" -WorkingDirectory $fe -WindowStyle Hidden
 if (Wait-For-Port 5173 15) { Write-Host "  frontend OK on :5173" } else { Write-Host "  frontend FAILED"; exit 1 }
 

@@ -154,20 +154,32 @@ def _assert_fetchable(url: str) -> None:
         return
 
 
+_MAX_REDIRECTS = 5
+
+
 def fetch_page(url: str, max_chars: int) -> dict[str, str]:
-    _assert_fetchable(url)
+    """Fetch a page with SSRF checks applied to *every* hop.
+
+    ``follow_redirects`` stays off on purpose: httpx would chase the chain
+    before we ever see it, so the redirect target would never be validated.
+    Each hop is fetched, checked and re-validated here instead.
+    """
+    current = url
     with httpx.Client(
-        timeout=25.0, follow_redirects=True, headers={"User-Agent": USER_AGENT}
+        timeout=25.0, follow_redirects=False, headers={"User-Agent": USER_AGENT}
     ) as client:
-        current = url
-        for _ in range(5):
+        for _ in range(_MAX_REDIRECTS + 1):
+            _assert_fetchable(current)
             resp = client.get(current)
-            if resp.is_redirect:
-                current = str(resp.url)
-                _assert_fetchable(current)
-                continue
-            break
-        resp.raise_for_status()
+            if not resp.is_redirect:
+                break
+            location = resp.headers.get("location", "")
+            if not location:
+                break
+            current = str(resp.url.join(location))
+        else:
+            raise ValueError("too many redirects")
+    resp.raise_for_status()
     ctype = resp.headers.get("content-type", "")
     raw = resp.text[:MAX_FETCH_BYTES]
     if "html" in ctype or "xml" in ctype or not ctype:

@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import difflib
+from pathlib import Path
+from typing import Any
+
 from pydantic import BaseModel
 
 from spark.errors import PathEscapeError
@@ -30,14 +34,31 @@ class ApplyPatchArgs(BaseModel):
 
 
 MAX_READ_BYTES = 5 * 1024 * 1024
+MAX_READ_LINES = 2000
+
+_UTF8_BOM = "\ufeff"
 
 
-def _lines(content: str, offset: int | None, limit: int | None) -> str:
-    rows = content.splitlines()
-    start = 1 if offset is None else max(offset, 1)
-    end = len(rows) if limit is None else start - 1 + max(limit, 0)
-    sliced = rows[start - 1 : end]
-    return "\n".join(sliced)
+def _decode_file(path: Path) -> tuple[str, str, str]:
+    """Read a file as (text with ``\\n`` endings, original newline, BOM prefix).
+
+    Matching is done on normalised text while the original line endings and BOM
+    are remembered, so editing one line of a CRLF file does not rewrite every
+    other line too.
+    """
+    raw = path.read_bytes().decode("utf-8", errors="replace")
+    bom = ""
+    if raw.startswith(_UTF8_BOM):
+        bom = _UTF8_BOM
+        raw = raw[len(_UTF8_BOM) :]
+    newline = "\r\n" if "\r\n" in raw else "\n"
+    return raw.replace("\r\n", "\n"), newline, bom
+
+
+def _encode_file(text: str, newline: str, bom: str) -> str:
+    if newline == "\r\n":
+        text = text.replace("\n", "\r\n")
+    return bom + text
 
 
 def read_file(sandbox: WorkdirSandbox, args: ReadFileArgs) -> ToolResult:
@@ -64,13 +85,36 @@ def read_file(sandbox: WorkdirSandbox, args: ReadFileArgs) -> ToolResult:
             },
         )
     try:
-        with path.open("r", encoding="utf-8", errors="replace") as handle:
-            text = handle.read(MAX_READ_BYTES)
+        text, _newline, _bom = _decode_file(path)
     except OSError as exc:
         return ToolResult(ok=False, payload={"error": f"cannot read file: {exc}"})
+    rows = text.splitlines()
+    total = len(rows)
+    start = 1 if args.offset is None else max(int(args.offset), 1)
+    limit = 200 if args.limit is None else max(1, min(int(args.limit), MAX_READ_LINES))
+    if start > total:
+        return ToolResult(
+            ok=False,
+            payload={
+                "error": f"offset {start} is past the end of {args.path} ({total} lines)",
+                "path": args.path,
+                "total_lines": total,
+            },
+        )
+    window = rows[start - 1 : start - 1 + limit]
+    last = start - 1 + len(window)
     return ToolResult(
         ok=True,
-        payload={"path": args.path, "content": _lines(text, args.offset, args.limit)},
+        payload={
+            "path": args.path,
+            "content": "\n".join(window),
+            "total_lines": total,
+            "first_line": start,
+            "last_line": last,
+            # Without this flag the model cannot tell a short file from a file it
+            # was only shown part of, and will conclude code is missing.
+            "truncated": last < total,
+        },
     )
 
 
@@ -83,9 +127,9 @@ def list_dir(sandbox: WorkdirSandbox, args: ListDirArgs) -> ToolResult:
         return ToolResult(
             ok=False, payload={"error": f"Directory not found: {args.path}"}
         )
-    entries = []
+    entries: list[dict[str, Any]] = []
     for child in sorted(path.iterdir(), key=lambda p: p.name)[: args.max_entries]:
-        item = {"name": child.name, "type": "dir" if child.is_dir() else "file"}
+        item: dict[str, Any] = {"name": child.name, "type": "dir" if child.is_dir() else "file"}
         if child.is_file():
             item["size"] = child.stat().st_size
         entries.append(item)
@@ -106,7 +150,14 @@ def write_file(sandbox: WorkdirSandbox, args: WriteFileArgs) -> ToolResult:
     if reason:
         return ToolResult(ok=False, payload={"error": reason})
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(args.content, encoding="utf-8")
+    newline, bom = "\n", ""
+    if path.is_file():
+        _old, newline, bom = _decode_file(path)
+    try:
+        with path.open("w", encoding="utf-8", newline="") as handle:
+            handle.write(_encode_file(args.content, newline, bom))
+    except OSError as exc:
+        return ToolResult(ok=False, payload={"error": f"cannot write file: {exc}"})
     return ToolResult(
         ok=True, payload={"path": args.path, "bytes": len(args.content.encode("utf-8"))}
     )
@@ -127,7 +178,10 @@ def apply_patch(sandbox: WorkdirSandbox, args: ApplyPatchArgs) -> ToolResult:
         return ToolResult(ok=False, payload={"error": reason})
     if not path.exists() or not path.is_file():
         return ToolResult(ok=False, payload={"error": f"File not found: {args.path}"})
-    text = path.read_text(encoding="utf-8")
+    try:
+        text, newline, bom = _decode_file(path)
+    except OSError as exc:
+        return ToolResult(ok=False, payload={"error": f"cannot read file: {exc}"})
     count = text.count(args.old_text)
     if count != 1:
         return ToolResult(
@@ -137,7 +191,12 @@ def apply_patch(sandbox: WorkdirSandbox, args: ApplyPatchArgs) -> ToolResult:
                 "path": args.path,
             },
         )
-    path.write_text(text.replace(args.old_text, args.new_text, 1), encoding="utf-8")
+    updated = text.replace(args.old_text, args.new_text, 1)
+    try:
+        with path.open("w", encoding="utf-8", newline="") as handle:
+            handle.write(_encode_file(updated, newline, bom))
+    except OSError as exc:
+        return ToolResult(ok=False, payload={"error": f"cannot write file: {exc}"})
     return ToolResult(ok=True, payload={"path": args.path, "patched": True})
 
 
@@ -146,5 +205,45 @@ def write_summary(path: str, content: str) -> str:
     return f"write_file {path}\n{preview}"
 
 
-def patch_diff(path: str, old: str, new: str) -> str:
-    return f"--- a/{path}\n+++ b/{path}\n- {old}\n+ {new}"
+MAX_DIFF_CHARS = 6000
+
+
+def _unified(path_str: str, before: str, after: str) -> str:
+    lines = list(
+        difflib.unified_diff(
+            before.splitlines(),
+            after.splitlines(),
+            fromfile=f"a/{path_str}",
+            tofile=f"b/{path_str}",
+            lineterm="",
+            n=3,
+        )
+    )
+    if not lines:
+        return f"{path_str}: no change"
+    text = "\n".join(lines)
+    return text[:MAX_DIFF_CHARS] + "\n...diff truncated..." if len(text) > MAX_DIFF_CHARS else text
+
+
+def diff_for_write(sandbox: WorkdirSandbox, path_str: str, content: str) -> str:
+    """Real diff of ``write_file`` against what is on disk right now."""
+    try:
+        path = sandbox.resolve(path_str)
+        before = _decode_file(path)[0] if path.is_file() else ""
+    except (OSError, PathEscapeError, SandboxPolicyError) as exc:
+        return f"write_file {path_str}: cannot read current contents ({exc})"
+    return _unified(path_str, before, content)
+
+
+def patch_diff(sandbox: WorkdirSandbox, path: str, old: str, new: str) -> str:
+    """Real diff of ``apply_patch``: replace *old* once in the file, then diff."""
+    try:
+        resolved = sandbox.resolve(path)
+        if not resolved.is_file():
+            return f"apply_patch {path}: file does not exist yet"
+        text = _decode_file(resolved)[0]
+    except (OSError, PathEscapeError, SandboxPolicyError) as exc:
+        return f"apply_patch {path}: cannot read current contents ({exc})"
+    if text.count(old) != 1:
+        return f"apply_patch {path}: old_text matched {text.count(old)} times, expected 1"
+    return _unified(path, text, text.replace(old, new, 1))

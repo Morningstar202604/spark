@@ -3,7 +3,7 @@
 ## Option A — run from source (fastest)
 
 ```bash
-git clone https://github.com/x33834/spark.git
+git clone https://gitcode.com/badhope/spark.git
 cd spark
 python3 -m venv .venv
 source .venv/bin/activate        # Windows: .venv\Scripts\activate
@@ -38,12 +38,12 @@ bash scripts/build.sh            # output: dist/spark/spark
 
 - `spark` executable — CLI + Web server (frontend assets embedded)
 - Everything runs locally under `~/.spark/`
-- No runtime dependency on a browser other than opening the printed `http://127.0.0.1:PORT` (the server listens on `0.0.0.0` by default for external access; the printed URL uses 127.0.0.1)
+- No runtime dependency on a browser other than opening the printed `http://127.0.0.1:PORT` (the server listens on `127.0.0.1` only by default; pass `spark web --host 0.0.0.0` explicitly for external preview, at your own risk)
 - Optional extras (MCP / embedding / TUI) degrade gracefully when absent
 
 ## First run
 
-1. Open the printed `http://127.0.0.1:PORT` (the server listens on `0.0.0.0` by default, so external proxies / preview services can reach it directly)
+1. Open the printed `http://127.0.0.1:PORT` (loopback-only by default; external preview needs an explicit `--host 0.0.0.0`)
 2. Settings → pick a model preset (DeepSeek / Qwen / GLM / Kimi / Doubao / Unisound / Ollama / custom), paste the API key
 3. Point the working directory at your project
 4. Create a session and start — every write and command is gated by approval

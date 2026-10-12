@@ -11,32 +11,39 @@ while preserving:
 
 from __future__ import annotations
 
+import logging
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any
+from typing import Any, cast
 
 import litellm
-
 from llama_index.core.base.llms.types import (
     ChatMessage as LlamaChatMessage,
+)
+from llama_index.core.base.llms.types import (
     ChatResponse,
     CompletionResponse,
     LLMMetadata,
-    MessageRole,
+)
+from llama_index.core.base.llms.types import (
+    MessageRole as LlamaMessageRole,
 )
 from llama_index.core.llms import LLM
 from llama_index.core.memory import ChatSummaryMemoryBuffer
 
 from spark.models import ChatMessage as SparkChatMessage
+from spark.models import MessageRole
+
+logger = logging.getLogger(__name__)
 
 # Spark's "summary" role is not part of LlamaIndex's ``MessageRole`` enum,
 # so map it to ``system`` when handing history off to the buffer (the
 # summary content itself is preserved verbatim).
-_ROLE_TO_LLAMA: dict[str, MessageRole] = {
-    "system": MessageRole.SYSTEM,
-    "user": MessageRole.USER,
-    "assistant": MessageRole.ASSISTANT,
-    "tool": MessageRole.TOOL,
-    "summary": MessageRole.SYSTEM,
+_ROLE_TO_LLAMA: dict[str, LlamaMessageRole] = {
+    "system": LlamaMessageRole.SYSTEM,
+    "user": LlamaMessageRole.USER,
+    "assistant": LlamaMessageRole.ASSISTANT,
+    "tool": LlamaMessageRole.TOOL,
+    "summary": LlamaMessageRole.SYSTEM,
 }
 
 
@@ -46,7 +53,7 @@ def _spark_to_llama(msg: SparkChatMessage) -> LlamaChatMessage:
     Tool-call metadata is preserved in ``additional_kwargs`` because the
     LlamaIndex summariser reads it from there when building the prompt.
     """
-    role = _ROLE_TO_LLAMA.get(msg.role, MessageRole.USER)
+    role = _ROLE_TO_LLAMA.get(msg.role, LlamaMessageRole.USER)
     kwargs: dict[str, Any] = {}
     if msg.tool_calls:
         kwargs["tool_calls"] = [c.model_dump() for c in msg.tool_calls]
@@ -166,14 +173,14 @@ class LlmAdapter(LLM):
             role = m.role.value if hasattr(m.role, "value") else str(m.role)
             if role == "developer":
                 role = "system"
-            out.append(SparkChatMessage(role=role, content=_llama_content(m)))
+            out.append(SparkChatMessage(role=cast(MessageRole, role), content=_llama_content(m)))
         return out
 
     # ----------------------------------------------------------------- sync API
     def chat(self, messages: list[LlamaChatMessage], **kwargs: Any) -> ChatResponse:
         spark_msgs = self._to_spark_messages(messages)
         text = self._collect_text_sync(spark_msgs, [])
-        return ChatResponse(message=LlamaChatMessage(role=MessageRole.ASSISTANT, content=text))
+        return ChatResponse(message=LlamaChatMessage(role=LlamaMessageRole.ASSISTANT, content=text))
 
     def complete(self, prompt: str, formatted: bool = False, **kwargs: Any) -> CompletionResponse:
         spark_msgs = [SparkChatMessage(role="user", content=prompt)]
@@ -184,7 +191,7 @@ class LlmAdapter(LLM):
         spark_msgs = self._to_spark_messages(messages)
         text = self._collect_text_sync(spark_msgs, [])
         yield ChatResponse(
-            message=LlamaChatMessage(role=MessageRole.ASSISTANT, content=text),
+            message=LlamaChatMessage(role=LlamaMessageRole.ASSISTANT, content=text),
             delta=text,
         )
 
@@ -197,7 +204,7 @@ class LlmAdapter(LLM):
     async def achat(self, messages: list[LlamaChatMessage], **kwargs: Any) -> ChatResponse:
         spark_msgs = self._to_spark_messages(messages)
         text = await self._acollect_text(spark_msgs, [])
-        return ChatResponse(message=LlamaChatMessage(role=MessageRole.ASSISTANT, content=text))
+        return ChatResponse(message=LlamaChatMessage(role=LlamaMessageRole.ASSISTANT, content=text))
 
     async def acomplete(self, prompt: str, formatted: bool = False, **kwargs: Any) -> CompletionResponse:
         spark_msgs = [SparkChatMessage(role="user", content=prompt)]
@@ -212,7 +219,7 @@ class LlmAdapter(LLM):
                 text_parts.append(delta.text)
                 partial = "".join(text_parts)
                 yield ChatResponse(
-                    message=LlamaChatMessage(role=MessageRole.ASSISTANT, content=partial),
+                    message=LlamaChatMessage(role=LlamaMessageRole.ASSISTANT, content=partial),
                     delta=delta.text,
                 )
 
@@ -342,12 +349,14 @@ class Compactor:
                 num_retries=2,
                 drop_params=True,
             )
-            merged = response.choices[0].message.content  # type: ignore[attr-defined]
+            merged = ""
+            if response.choices:
+                merged = response.choices[0].message.content or ""
             if merged:
                 return merged.strip()
         except Exception:
-            # On any failure, fall back to concatenating
-            pass
+            # API 调用失败时回退到字符串拼接
+            logger.warning("compact API 调用失败，回退到拼接模式", exc_info=True)
 
         # Fallback: return prior + new concatenated in a structured wrapper
         return (
@@ -381,12 +390,16 @@ class Compactor:
                 num_retries=2,
                 drop_params=True,
             )
-            content = response.choices[0].message.content  # type: ignore[attr-defined]
+            content = ""
+            if response.choices:
+                choice = response.choices[0]
+                msg = getattr(choice, "message", None)
+                content = getattr(msg, "content", "") or ""
             if content:
                 return content.strip()
-        except Exception:
+        except Exception as exc:
             # litellm path failed — fall back to original buffer-based summarisation
-            pass
+            logger.debug("structured summary via litellm failed: %s", exc)
 
         # ── Fallback: original ChatSummaryMemoryBuffer approach ───────────
         llama_messages = [_spark_to_llama(m) for m in [SparkChatMessage(role="user", content=transcript_text)]]
@@ -399,7 +412,11 @@ class Compactor:
 
         result = buffer.get()
 
-        if result and result[0].role in (MessageRole.SYSTEM, MessageRole.DEVELOPER, MessageRole.USER):
+        if result and result[0].role in (
+            LlamaMessageRole.SYSTEM,
+            LlamaMessageRole.DEVELOPER,
+            LlamaMessageRole.USER,
+        ):
             content = _llama_content(result[0])
             return content.strip() or transcript_text[:500]
 
