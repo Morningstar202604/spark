@@ -1,11 +1,17 @@
 """LLM-backed fact extraction and conflict resolution for memory."""
 from __future__ import annotations
 
+import logging
 import re
 from dataclasses import dataclass
 
+from pydantic import BaseModel, Field
+
 from spark.memory.llm import chat_complete, parse_json_object
 from spark.memory.store import MemoryRow
+from spark.structured import StructuredOutputError, complete as structured_complete
+
+logger = logging.getLogger(__name__)
 
 _SECRET_RES = [
     re.compile(r"sk-[A-Za-z0-9_\-]{8,}"),
@@ -55,6 +61,13 @@ RESOLVE_SYSTEM = """你是记忆库管理员。将每条新记忆与现有相似
 
 CONSOLIDATE_SYSTEM = """把多条相关的记忆合并成一条精炼记忆：保留全部关键信息，消除重复，不超过 150 字。
 只输出 JSON：{"content":"...","importance":1-10}"""
+
+
+class _ConsolidateResult(BaseModel):
+    """P1-1: schema for :func:`consolidate_group` (instructor-validated)."""
+
+    content: str = Field(description="合并后的精炼记忆文本，150 字以内")
+    importance: float = Field(description="重要性，1-10")
 
 
 @dataclass
@@ -209,12 +222,34 @@ async def consolidate_group(
     model: str,
 ) -> tuple[str, float] | None:
     lines = [f"{i + 1}. {c}" for i, c in enumerate(contents)]
+    user = "\n".join(lines)
+    # P1-1: 优先走 instructor 结构化通道（schema 强校验 + 自动 repair），
+    # 失败再回退到老的 chat_complete + parse_json_object 兜底，保证旧路径可用。
+    try:
+        result = await structured_complete(
+            _ConsolidateResult,
+            system=CONSOLIDATE_SYSTEM,
+            user=user,
+            model=model,
+            base_url=base_url,
+            api_key=api_key,
+            max_retries=2,
+        )
+        content = (result.content or "").strip()
+        if not content:
+            return None
+        importance = max(1.0, min(10.0, float(result.importance)))
+        return content, importance
+    except StructuredOutputError as exc:
+        logger.info(
+            "consolidate_structured_falling_back err=%s", str(exc)[:160]
+        )
     raw = await chat_complete(
         base_url=base_url,
         api_key=api_key,
         model=model,
         system=CONSOLIDATE_SYSTEM,
-        user="\n".join(lines),
+        user=user,
     )
     data = parse_json_object(raw)
     if not data:
