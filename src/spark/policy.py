@@ -191,6 +191,7 @@ def decide(
     allow_always: set[str],
     readonly_mcp: set[str],
     rules: list[PermissionRule] | None = None,
+    plan_approved: bool = False,
 ) -> DecisionKind:
     # Approvals are bound to the exact (tool, arguments) pair, so approving one
     # command can never silently authorize a different one later.
@@ -212,11 +213,17 @@ def decide(
     if tool.name in readonly_mcp:
         return "allow"
     if tool.name in WRITE_TOOLS:
-        if mode == "suggest":
+        # 写工具：suggest/manual/plan-only 提示；approve-plan 需计划已批准；
+        # auto-edit/full-auto 自动。
+        if mode in ("suggest", "manual", "plan-only"):
             return "prompt"
+        if mode == "approve-plan":
+            return "allow" if plan_approved else "prompt"
         return "allow"
     if tool.name in EXECUTE_TOOLS or tool.name in SHELL_TOOLS or is_mcp_tool(tool.name):
         if mode == "full-auto":
+            return "allow"
+        if mode == "approve-plan" and plan_approved:
             return "allow"
         return "prompt"
     return "prompt"

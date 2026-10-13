@@ -28,7 +28,12 @@ from spark.models import (
     ToolResult,
     TurnEvent,
 )
-from spark.policy import NEVER_PERSIST_ALLOW, call_signature, decide
+from spark.policy import (
+    NEVER_PERSIST_ALLOW,
+    READONLY_TOOLS,
+    call_signature,
+    decide,
+)
 from spark.providers.base import Provider
 from spark.store import SessionStore
 from spark.tools.registry import ToolContext, ToolRegistry
@@ -61,6 +66,8 @@ class AgentLoop:
         self.memory = memory
         self.allow_always: set[str] = set()
         self.cancelled = False
+        # approve-plan 模式：计划已产出并经用户批准后才自动执行写/执行工具
+        self._plan_approved: bool | None = False
         self.registry.ctx.task_runner = self.spawn_subtask
         self.registry.ctx.task_runner_parallel = self.spawn_subtasks_parallel
         self.history: list[ChatMessage] = store.load_messages(session_id)
@@ -550,6 +557,9 @@ class AgentLoop:
                             return
                     if call.name == "update_plan" and self.registry.plan:
                         yield TurnEvent(type="plan", data={"steps": self.registry.plan})
+                        # approve-plan：计划一经产出即进入计划审批门
+                        async for event in self._maybe_approve_plan(call):
+                            yield event
                 rounds += 1
                 continue
 
@@ -635,6 +645,34 @@ class AgentLoop:
             "removed_messages": removed,
         }
 
+    async def _maybe_approve_plan(self, call: ToolCall):
+        """approve-plan 模式的计划审批门：计划产出后等待用户批准一次。
+
+        批准（allow/allow_always）后 ``_plan_approved=True``，后续写/执行
+        工具按 auto-edit 语义自动执行；拒绝或无人审批则停留在 prompt 档。
+        """
+        if self.cfg.agent.approval != "approve-plan" or self._plan_approved is True:
+            return
+        request = ApprovalRequest(
+            tool_call=call,
+            summary="plan",
+            diff=None,
+        )
+        self._notify_safe(
+            "approval_needed",
+            {
+                "tool_call": "plan",
+                "arguments": {"steps": self.registry.plan or []},
+                "summary": "plan",
+            },
+        )
+        yield TurnEvent(type="approval_needed", approval=request, tool_call=call)
+        if self.approver is None:
+            self._plan_approved = False
+            return
+        verdict = await self.approver(request)
+        self._plan_approved = verdict.action in ("allow", "allow_always")
+
     async def _run_tool(self, call: ToolCall, message_id: int):
         yield TurnEvent(type="tool_start", tool_call=call)
         _tool_call_start = time.monotonic()
@@ -650,12 +688,26 @@ class AgentLoop:
                 yield TurnEvent(type="tool_end", tool_call=call, result=result)
                 return
         rules = self.cfg.permission_rules or None
+        if self.cfg.agent.approval == "plan-only":
+            readonly = READONLY_TOOLS | self.registry.readonly_mcp
+            if call.name not in readonly:
+                result = ToolResult(
+                    ok=False,
+                    payload={
+                        "error": "plan-only: write/execute tools are disabled; output the plan and ask the user to switch to auto modes",
+                        "tool": call.name,
+                    },
+                )
+                await self._persist_tool(call, message_id, result, "plan_only")
+                yield TurnEvent(type="tool_end", tool_call=call, result=result)
+                return
         decision = decide(
             self.cfg.agent.approval,
             call,
             allow_always=self.allow_always,
             readonly_mcp=self.registry.readonly_mcp,
             rules=rules,
+            plan_approved=self._plan_approved is True,
         )
         approval_label = "allow"
         if decision == "deny":

@@ -389,10 +389,17 @@ export default function SettingsDrawer({ onClose, onSaved }: Props) {
             <div className="flex flex-col gap-4">
               <section className="flex flex-col gap-3 rounded-xl border border-line bg-panel p-4">
                 <h3 className="text-sm font-semibold text-ink">审批模式</h3>
-                {(["suggest", "auto-edit", "full-auto"] as const).map((m) => (
+                {(["full-auto", "approve-plan", "auto-edit", "suggest", "plan-only", "manual"] as const).map((m) => (
                   <label key={m} className="flex cursor-pointer items-center gap-2.5">
                     <input type="radio" name="approval" className="accent-accent" checked={cfg.agent.approval === m} onChange={() => patchAgent({ approval: m })} />
-                    <span className="text-[13px] text-ink2">{m === "suggest" ? "suggest（每步确认）" : m === "auto-edit" ? "auto-edit（自动改文件）" : "full-auto（全自动）"}</span>
+                    <span className="text-[13px] text-ink2">
+                      {m === "full-auto" ? "full-auto（全自动）" :
+                       m === "approve-plan" ? "approve-plan（先批准计划再自动执行）" :
+                       m === "auto-edit" ? "auto-edit（自动改文件）" :
+                       m === "suggest" ? "suggest（每步确认）" :
+                       m === "plan-only" ? "plan-only（只出计划不执行）" :
+                       "manual（逐条人工确认）"}
+                    </span>
                   </label>
                 ))}
                 <label className="flex items-center justify-between gap-2 rounded-lg bg-panel2 px-3 py-2.5">

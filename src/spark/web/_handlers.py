@@ -599,7 +599,7 @@ def _handle_settings(handler: HandlerBase, body: dict) -> None:
     approval = str(
         agent_in.get("approval") or state.cfg.agent.approval
     ).strip()
-    if approval not in {"suggest", "auto-edit", "full-auto"}:
+    if approval not in {"suggest", "auto-edit", "full-auto", "plan-only", "approve-plan", "manual"}:
         handler._json(
             400,
             {"error": "approval must be suggest, auto-edit or full-auto"},

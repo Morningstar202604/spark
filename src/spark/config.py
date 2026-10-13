@@ -30,7 +30,23 @@ from spark.errors import ConfigError
 
 logger = logging.getLogger(__name__)
 
-ApprovalMode = Literal["suggest", "auto-edit", "full-auto"]
+ApprovalMode = Literal[
+    "suggest",
+    "auto-edit",
+    "full-auto",
+    "plan-only",
+    "approve-plan",
+    "manual",
+]
+"""五档审批模式（业界范式对齐）：
+
+* ``full-auto``   — 全部自动执行（写/执行均 allow），仅 deny 规则可拦截
+* ``auto-edit``   — 写工具自动、执行工具逐条确认（历史三档，保留兼容）
+* ``suggest``     — 写/执行均提示确认（历史三档）
+* ``plan-only``   — 只读允许、写/执行一律不执行（plan mode，仅输出计划）
+* ``approve-plan``— 先出计划并等待批准，批准后按 auto-edit 语义自动执行
+* ``manual``      — 写/执行逐条人工确认
+"""
 ProviderName = Literal["openai_compat", "ollama", "mock"]
 SandboxMode = Literal["sandbox-only", "workspace", "full-access", "unrestricted"]
 # Single source of truth for CLI/config validation — derived from the Literals so
