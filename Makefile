@@ -4,7 +4,7 @@
 PY := .venv/bin/python
 PIP := .venv/bin/pip
 
-.PHONY: install dev test lint build run doctor clean
+.PHONY: install dev test lint build run doctor clean audit
 
 ## 安装
 install:            ## 安装到 .venv（可编辑 + dev 依赖）
@@ -17,6 +17,13 @@ dev:                ## 启动 Web 界面（工作目录 = 当前目录，本机�
 
 test:               ## 全量测试
 	$(PY) -m pytest -q
+
+## P1-9: 依赖漏洞扫描（uv audit 读 uv.lock；pip-audit 扫已装环境）
+audit:              ## 依赖漏洞扫描 — uv audit + pip-audit（检出漏洞即非零退出）
+	@echo "== uv audit =="
+	uv audit
+	@echo "== pip-audit =="
+	python3 -m pip_audit --progress-spinner off
 
 lint:               ## ruff 静态检查（未安装时自动安装）
 	$(PIP) install -q ruff && .venv/bin/ruff check src/spark tests

@@ -23,3 +23,18 @@ repos:
       - id: check-yaml
       - id: check-added-large-files
         args: [--maxkb=2000]
+
+# P1-9: secret 扫描 — 硬编码密钥/令牌提交前拦截
+# gitleaks：gitleaks protect --staged，只扫本次暂存变更（官方 golang hook，自动拉取二进制）
+# trufflehog：trufflehog git file://. --since-commit HEAD，验证式扫描近期提交
+# exclude 保护 tests/fixtures 中故意放置的假 secret 样例（若有），防止误报拦截测试夹具
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.9.0
+    hooks:
+      - id: gitleaks
+        exclude: ^tests/fixtures/
+  - repo: https://github.com/trufflesecurity/trufflehog
+    rev: v3.99.2
+    hooks:
+      - id: trufflehog
+        exclude: ^tests/fixtures/

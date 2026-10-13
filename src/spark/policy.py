@@ -1,4 +1,5 @@
 """Tool-call approval policy and wildcard permission rules."""
+
 from __future__ import annotations
 
 import hashlib
@@ -154,6 +155,20 @@ def mcp_parts(name: str) -> tuple[str, str] | None:
     if len(parts) != 3:
         return None
     return parts[1], parts[2]
+
+
+def mcp_tool_allowed(allowed_tools: list[str], tool_name: str) -> bool:
+    """P1-9: 第三方 MCP server 最小权限白名单判定。
+
+    ``allowed_tools`` 来自该 server 的配置（glob 列表）：
+
+    * 空列表 = 未声明白名单 → 向后兼容，全部放行（历史行为）。
+    * 非空 = 最小权限模式：``tool_name`` 命中任意一个 glob 才放行；
+      未声明的工具一律拒绝（默认拒绝未声明项）。``"*"`` 显式放行全部。
+    """
+    if not allowed_tools:
+        return True
+    return any(_wildcard_match(pattern, tool_name) for pattern in allowed_tools)
 
 
 # ---------------------------------------------------------------------------

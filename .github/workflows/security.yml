@@ -1,0 +1,46 @@
+# P1-9: 安全闭环 — secret 扫描 + 依赖漏洞扫描
+# 独立 workflow，不改动现有 ci.yml / release.yml。
+# * secret-scan：gitleaks + trufflehog，命中真实密钥即失败（阻断合并）。
+# * dependency-audit：uv audit + pip-audit。当前依赖存在已知漏洞（多数无修复
+#   版本，如 chromadb 代码注入类），作为治理看板持续暴露，不阻断合并
+#   （continue-on-error）；可修复的漏洞在依赖升级版本中收敛。
+name: Security
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  secret-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # trufflehog git 扫描需要完整历史
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install pre-commit
+        run: pip install pre-commit
+      - name: Secret scan (gitleaks + trufflehog)
+        run: pre-commit run gitleaks trufflehog --all-files
+
+  dependency-audit:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v5
+      - name: Install project
+        run: pip install -e ".[dev]"
+      - name: uv audit
+        run: uv audit
+      - name: pip-audit
+        run: |
+          pip install pip-audit
+          python3 -m pip_audit --progress-spinner off
