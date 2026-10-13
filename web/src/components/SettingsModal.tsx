@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from "react"
 import type { FullConfig, HookEntry, McpServer, ModelProfile, ProbeResult, SettingsPayload, Status } from "../types"
 import { fetchConfig, fetchAgentsMd, saveAgentsMd, saveSettings, testConnection, listModelProfiles, saveModelProfile, deleteModelProfile, activateModelProfile } from "../api"
 import MemorySection from "./MemorySection"
+import { McpRegistryModal } from "./McpRegistryModal"
+import type { McpRegistryItem } from "../api"
 import { applyTheme, getStoredTheme, type Theme } from "../theme"
 import { Badge, Button, Field, IconButton, Select, Spinner, TextArea, TextInput, Toggle, cls } from "./ui"
 import { IconBrain, IconCheck, IconGlobe, IconKey, IconLayers, IconMoon, IconPlus, IconSettings, IconSun, IconTerminal, IconTrash, IconX } from "./icons"
@@ -40,7 +42,24 @@ export default function SettingsDrawer({ onClose, onSaved }: Props) {
   const [protectedText, setProtectedText] = useState("")
   const [hookRows, setHookRows] = useState<HookEntry[]>([])
   const [theme, setTheme] = useState<Theme>(() => getStoredTheme())
+  const [showRegistry, setShowRegistry] = useState(false)
   const dirtyRef = useRef({ cfg: false, mcp: false, md: false })
+
+  function handleRegistryPick(item: McpRegistryItem) {
+    if (!item.suggested_command) return
+    dirtyRef.current.mcp = true
+    const derived = (item.name || item.title || "mcp").split("/").pop() || "mcp"
+    setMcpRows((rows) => [
+      ...rows,
+      {
+        name: derived.replace(/[^a-zA-Z0-9_-]/g, "-"),
+        command: item.suggested_command!,
+        args: [...item.suggested_args],
+        readonly_tools: [],
+      },
+    ])
+    setShowRegistry(false)
+  }
 
   function patchAgent(patch: Partial<FullConfig["agent"]>) {
     dirtyRef.current.cfg = true
@@ -557,9 +576,14 @@ export default function SettingsDrawer({ onClose, onSaved }: Props) {
                       </Field>
                     </div>
                   ))}
-                  <Button size="sm" variant="soft" onClick={() => setMcpRows((rows) => [...rows, { name: `mcp-${rows.length + 1}`, command: "", args: [], readonly_tools: [] }])}>
-                    <IconPlus size={12} /> 添加服务器
-                  </Button>
+                  <div className="flex items-center gap-2">
+                    <Button size="sm" variant="soft" onClick={() => setMcpRows((rows) => [...rows, { name: `mcp-${rows.length + 1}`, command: "", args: [], readonly_tools: [] }])}>
+                      <IconPlus size={12} /> 添加服务器
+                    </Button>
+                    <Button size="sm" variant="soft" onClick={() => setShowRegistry(true)}>
+                      <IconGlobe size={12} /> 从 Registry 浏览
+                    </Button>
+                  </div>
                 </div>
               </section>
             </div>
@@ -633,6 +657,7 @@ export default function SettingsDrawer({ onClose, onSaved }: Props) {
           </div>
         </div>
       </aside>
+      {showRegistry && <McpRegistryModal onClose={() => setShowRegistry(false)} onPick={handleRegistryPick} />}
     </div>
   )
 }
