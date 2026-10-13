@@ -6,6 +6,12 @@ outer orchestrator — it owns history, session store, memory, cancellation, etc
 The graph only formalises the call-model → execute-tools → repeat cycle using
 LangGraph's interrupt mechanism for human approval.
 
+> **现状（如实标注）**：生产路径（CLI / TUI / Web 的 ``AgentLoop``）当前使用
+> 手写 while 循环而非本模块；本文件是 LangGraph 参考实现与接入的备选，
+> 供 P0-6（plan/verify 节点）决策时直接采用。接入生产时使用
+> :func:`build_react_graph_with_sqlite_saver` 将 graph 状态落盘到 SQLite
+> （跨进程中断可恢复），或由 ``AgentLoop`` 显式传入 checkpointer。
+
 Key integrations
 ----------------
 
@@ -18,9 +24,9 @@ Key integrations
   called from graph node functions — the graph is just the control-flow
   skeleton.
 
-Usage (from ``AgentLoop.iter_turn``)::
+Usage (when wiring the graph into production)::
 
-    graph = build_react_graph(self)
+    graph = build_react_graph_with_sqlite_saver(state_db_path)(...)
     async for event in turn_events_from_graph(graph, user_text, images):
         yield event
 """
@@ -29,6 +35,7 @@ from __future__ import annotations
 
 import json
 import logging
+from pathlib import Path
 from typing import Annotated, Any, Optional
 
 from langgraph.checkpoint.base import BaseCheckpointSaver
@@ -322,3 +329,32 @@ def build_react_graph_with_memory(checkpointer: Optional[BaseCheckpointSaver] = 
     from langgraph.checkpoint.memory import MemorySaver
     cp = checkpointer or MemorySaver()
     return lambda **kw: build_react_graph(**kw, checkpointer=cp)
+
+
+def build_react_graph_with_sqlite_saver(
+    db_path: Any,
+    *,
+    thread_id: str = "spark",
+) -> Any:
+    """Convenience: build the graph with a persisted SQLite checkpointer.
+
+    ``db_path`` 可以是 ``Path``/``str``（文件库）或 ``":memory:"``。graph
+    的每个 checkpoint（含中断审批点）落盘，进程重启后可从中断点恢复——
+    与 ``AgentLoop`` 的会话级检查点互补（前者恢复执行状态，后者恢复工作区
+    快照 + 消息索引）。
+    """
+    from langgraph.checkpoint.sqlite import SqliteSaver
+    import sqlite3
+
+    if str(db_path) == ":memory:":
+        conn = sqlite3.connect(":memory:", check_same_thread=False)
+    else:
+        Path(db_path).parent.mkdir(parents=True, exist_ok=True)
+        conn = sqlite3.connect(str(db_path), check_same_thread=False)
+    cp = SqliteSaver(conn)
+
+    def _build(**kw: Any) -> Any:
+        return build_react_graph(**kw, checkpointer=cp)
+
+    _build.thread_id = thread_id  # type: ignore[attr-defined]
+    return _build

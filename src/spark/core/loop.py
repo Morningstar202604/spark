@@ -157,6 +157,32 @@ class AgentLoop:
         self._turn_tokens += added
         return added
 
+    def _persist_usage(
+        self,
+        message_id: int | None,
+        messages: list[ChatMessage],
+        text_parts: list[str],
+        reasoning_parts: list[str],
+    ) -> None:
+        """Write per-turn token spend into the SQLite audit table (estimated).
+
+        ``source="estimated"`` — spark 不依赖 provider 的 usage 字段，统一按
+        tokenizer 估算；后续接入 provider 真实 usage 时改传 ``source="reported"``。
+        """
+        try:
+            input_est = sum(estimate_message_tokens(m) for m in messages)
+            output_est = estimate_message_tokens(
+                ChatMessage(role="assistant", content="".join(text_parts) or None)
+            )
+            reasoning_est = estimate_message_tokens(
+                ChatMessage(role="assistant", content="".join(reasoning_parts) or None)
+            )
+            self.store.append_token_usage(
+                self.session_id, message_id, input_est, output_est, reasoning_est
+            )
+        except Exception:
+            logger.debug("persist token usage failed", exc_info=True)
+
     def _budget_exceeded(self) -> bool:
         limit = getattr(self.cfg.agent, "max_turn_tokens", 0) or 0
         return limit > 0 and self._turn_tokens >= limit
@@ -477,6 +503,7 @@ class AgentLoop:
                 return
 
             self._charge_tokens(text_parts, reasoning_parts)
+            self._persist_usage(None, messages, text_parts, reasoning_parts)
 
             if tool_calls:
                 tripped = None

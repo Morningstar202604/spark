@@ -78,8 +78,40 @@ class SessionStore:
                     exit_code INTEGER,
                     output TEXT NOT NULL DEFAULT ''
                 );
+                CREATE TABLE IF NOT EXISTS token_usage (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    session_id TEXT NOT NULL,
+                    message_id INTEGER,
+                    input_tokens INTEGER NOT NULL DEFAULT 0,
+                    output_tokens INTEGER NOT NULL DEFAULT 0,
+                    reasoning_tokens INTEGER NOT NULL DEFAULT 0,
+                    total_tokens INTEGER NOT NULL DEFAULT 0,
+                    source TEXT NOT NULL DEFAULT 'estimated',
+                    created_at INTEGER NOT NULL
+                );
                 """
             )
+            # FTS5 trigram 全文索引（中文子串检索；短查询回退 LIKE）
+            # 注意：FTS5 rowid 必须是整数，sessions.id 为 TEXT，故用 UNINDEXED 列承载。
+            try:
+                self._conn.executescript(
+                    """
+                    CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts
+                        USING fts5(content, tokenize='trigram');
+                    CREATE VIRTUAL TABLE IF NOT EXISTS sessions_fts
+                        USING fts5(session_id UNINDEXED, title, tokenize='trigram');
+                    """
+                )
+            except sqlite3.OperationalError:
+                # SQLite < 3.34 无 trigram：降级，search() 自动回退 LIKE
+                self._conn.executescript(
+                    """
+                    CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts
+                        USING fts5(content);
+                    CREATE VIRTUAL TABLE IF NOT EXISTS sessions_fts
+                        USING fts5(session_id UNINDEXED, title);
+                    """
+                )
             # WAL + composite indexes: long sessions otherwise degrade to full
             # table scans on every load and pay two fsyncs per appended message.
             # 修复：用 str() 统一比较，防止 Path(":memory:") != ":memory:" 误判
@@ -110,10 +142,50 @@ class SessionStore:
             except sqlite3.OperationalError:
                 pass
             try:
-                self._conn.execute("ALTER TABLE sessions ADD COLUMN forked_from TEXT")
+                self._conn.execute(
+                    "ALTER TABLE sessions ADD COLUMN forked_from TEXT"
+                )
             except sqlite3.OperationalError:
                 pass
+            # 存量数据一次性回填 FTS 索引（幂等）
+            self._conn.executescript(
+                """
+                INSERT INTO messages_fts (rowid, content)
+                SELECT id, content FROM messages m
+                WHERE content IS NOT NULL AND content != ''
+                  AND NOT EXISTS (SELECT 1 FROM messages_fts f WHERE f.rowid = m.id);
+                INSERT INTO sessions_fts (session_id, title)
+                SELECT id, title FROM sessions s
+                WHERE NOT EXISTS (SELECT 1 FROM sessions_fts f WHERE f.session_id = s.id);
+                """
+            )
             self._conn.commit()
+
+    def _fts_sync_message(self, message_id: int, content: str | None) -> None:
+        """Keep messages_fts aligned with the messages table (best-effort)."""
+        try:
+            self._conn.execute("DELETE FROM messages_fts WHERE rowid = ?", (message_id,))
+            if content:
+                self._conn.execute(
+                    "INSERT INTO messages_fts (rowid, content) VALUES (?, ?)",
+                    (message_id, content),
+                )
+        except sqlite3.OperationalError:
+            pass
+
+    def _fts_sync_title(self, session_id: str, title: str | None) -> None:
+        """Keep sessions_fts aligned with the sessions table (best-effort)."""
+        try:
+            self._conn.execute(
+                "DELETE FROM sessions_fts WHERE session_id = ?", (session_id,)
+            )
+            if title:
+                self._conn.execute(
+                    "INSERT INTO sessions_fts (session_id, title) VALUES (?, ?)",
+                    (session_id, title),
+                )
+        except sqlite3.OperationalError:
+            pass
 
     def close(self) -> None:
         with self._lock:
@@ -156,6 +228,19 @@ class SessionStore:
             self._conn.execute(
                 "DELETE FROM messages WHERE session_id = ?", (session_id,)
             )
+            try:
+                self._conn.execute(
+                    "DELETE FROM messages_fts WHERE rowid IN (SELECT id FROM messages WHERE session_id = ?)",
+                    (session_id,),
+                )
+                self._conn.execute(
+                    "DELETE FROM sessions_fts WHERE session_id = ?", (session_id,)
+                )
+                self._conn.execute(
+                    "DELETE FROM token_usage WHERE session_id = ?", (session_id,)
+                )
+            except sqlite3.OperationalError:
+                pass
             self._conn.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
             self._conn.commit()
 
@@ -163,15 +248,11 @@ class SessionStore:
         """Update the session timestamp (and optionally its title)."""
         now = int(time.time())
         with self._lock:
-            if title:
-                self._conn.execute(
-                    "UPDATE sessions SET updated_at = ?, title = ? WHERE id = ?",
-                    (now, title, session_id),
-                )
-            else:
-                self._conn.execute(
-                    "UPDATE sessions SET updated_at = ? WHERE id = ?", (now, session_id)
-                )
+            self._conn.execute(
+                "UPDATE sessions SET updated_at = ?, title = ? WHERE id = ?",
+                (now, title, session_id),
+            )
+            self._fts_sync_title(session_id, title)
             self._conn.commit()
 
     def set_title(self, session_id: str, title: str) -> None:
@@ -179,6 +260,7 @@ class SessionStore:
             self._conn.execute(
                 "UPDATE sessions SET title = ? WHERE id = ?", (title, session_id)
             )
+            self._fts_sync_title(session_id, title)
             self._conn.commit()
 
     def set_keywords(self, session_id: str, keywords: str) -> None:
@@ -213,6 +295,8 @@ class SessionStore:
                     "UPDATE sessions SET title = ? WHERE id = ? AND title = 'untitled'",
                     (message.content.strip()[:24], session_id),
                 )
+            self._fts_sync_message(last_id, message.content)
+            self._fts_sync_title(session_id, message.content.strip()[:24] if (message.role == "user" and message.content) else None)
             # The message and its session timestamp must land together, otherwise a
             # crash between the two commits leaves a message with stale ordering.
             self._conn.execute(
@@ -360,6 +444,12 @@ class SessionStore:
                 "DELETE FROM tool_events WHERE session_id = ? AND message_id > ?",
                 (session_id, message_id),
             )
+            try:
+                self._conn.execute(
+                    "DELETE FROM messages_fts WHERE rowid > ?", (message_id,)
+                )
+            except sqlite3.OperationalError:
+                pass
             self._conn.commit()
         return removed
 
@@ -408,6 +498,43 @@ class SessionStore:
             ).fetchone()
             return dict(row) if row else None
 
+    # ---- token usage audit ----
+
+    def append_token_usage(
+        self,
+        session_id: str,
+        message_id: int | None,
+        input_tokens: int,
+        output_tokens: int,
+        reasoning_tokens: int = 0,
+        source: str = "estimated",
+    ) -> None:
+        """Record one LLM call's token spend (estimated unless provider reports)."""
+        now = int(time.time())
+        total = int(input_tokens) + int(output_tokens) + int(reasoning_tokens)
+        with self._lock:
+            self._conn.execute(
+                """INSERT INTO token_usage
+                   (session_id, message_id, input_tokens, output_tokens, reasoning_tokens, total_tokens, source, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (session_id, message_id, input_tokens, output_tokens, reasoning_tokens, total, source, now),
+            )
+            self._conn.commit()
+
+    def session_token_usage(self, session_id: str) -> dict:
+        """Aggregated token spend for a session (all turns)."""
+        with self._lock:
+            row = self._conn.execute(
+                """SELECT COALESCE(SUM(input_tokens), 0) AS input_tokens,
+                          COALESCE(SUM(output_tokens), 0) AS output_tokens,
+                          COALESCE(SUM(reasoning_tokens), 0) AS reasoning_tokens,
+                          COALESCE(SUM(total_tokens), 0) AS total_tokens,
+                          COUNT(*) AS calls
+                   FROM token_usage WHERE session_id = ?""",
+                (session_id,),
+            ).fetchone()
+            return dict(row) if row else {"input_tokens": 0, "output_tokens": 0, "reasoning_tokens": 0, "total_tokens": 0, "calls": 0}
+
     # ---- fork / message ops / search ----
 
     def fork(self, session_id: str) -> dict | None:
@@ -440,6 +567,18 @@ class SessionStore:
                 " SELECT ?, role, content, created_at, payload_json FROM messages WHERE session_id = ?",
                 (new_sid, session_id),
             )
+            try:
+                self._conn.execute(
+                    "INSERT INTO messages_fts (rowid, content)"
+                    " SELECT id, content FROM messages WHERE session_id = ? AND content != ''",
+                    (new_sid,),
+                )
+                self._conn.execute(
+                    "INSERT INTO sessions_fts (session_id, title) VALUES (?, ?)",
+                    (new_sid, f"{src['title']}（分叉）"),
+                )
+            except sqlite3.OperationalError:
+                pass
             self._conn.commit()
             return self.get_session(new_sid)
 
@@ -460,6 +599,12 @@ class SessionStore:
                 "DELETE FROM tool_events WHERE session_id = ? AND message_id >= ?",
                 (session_id, message_id),
             )
+            try:
+                self._conn.execute(
+                    "DELETE FROM messages_fts WHERE rowid >= ?", (message_id,)
+                )
+            except sqlite3.OperationalError:
+                pass
             self._conn.commit()
         return self.load_messages(session_id)
 
@@ -480,21 +625,89 @@ class SessionStore:
                 "DELETE FROM tool_events WHERE session_id = ? AND message_id = ?",
                 (session_id, message_id),
             )
+            try:
+                self._conn.execute("DELETE FROM messages_fts WHERE rowid = ?", (message_id,))
+            except sqlite3.OperationalError:
+                pass
             self._conn.commit()
         return self.load_messages(session_id)
 
     def search(self, q: str, limit: int = 20) -> list[dict]:
-        """会话搜索：标题命中 kind=title，消息正文命中 kind=content（含 snippet 片段）。
+        """会话搜索：FTS5（trigram，中文子串友好）优先，短查询回退 LIKE。
 
-        本地单用户库规模下用 LIKE 子串匹配（对中文友好且零分词配置）；
-        数据量上来后可升级 SQLite FTS5 trigram。
+        FTS5 对 3+ 字符查询可命中任意子串并按 bm25 排序；trigram 查询
+        长度小于 3 时无匹配，自动回退原 LIKE 实现。
         """
         needle = q.strip()
         if not needle:
             return []
         like = f"%{needle}%"
         rows: list[dict] = []
+        fts_ok = len(needle) >= 3
         with self._lock:
+            if fts_ok:
+                try:
+                    fts_rows = self._conn.execute(
+                        """SELECT s.id, s.workdir, s.title, s.updated_at, m.content
+                           FROM messages_fts mfts
+                           JOIN messages m ON m.id = mfts.rowid
+                           JOIN sessions s ON s.id = m.session_id
+                           WHERE messages_fts MATCH ?
+                           ORDER BY bm25(messages_fts) LIMIT ?""",
+                        (self._fts_query(needle), limit),
+                    ).fetchall()
+                    title_rows = self._conn.execute(
+                        """SELECT s.id, s.workdir, s.title, s.updated_at
+                           FROM sessions_fts f JOIN sessions s ON s.id = f.session_id
+                           WHERE sessions_fts MATCH ?
+                           ORDER BY bm25(sessions_fts) LIMIT ?""",
+                        (self._fts_query(needle), limit),
+                    ).fetchall()
+                except sqlite3.OperationalError:
+                    fts_rows = []
+                    title_rows = []
+                    fts_ok = False
+            else:
+                fts_rows = []
+                title_rows = []
+            seen: set[str] = set()
+            if fts_ok:
+                for r in title_rows:
+                    if r["id"] in seen:
+                        continue
+                    seen.add(r["id"])
+                    rows.append(
+                        {
+                            "id": r["id"],
+                            "workdir": r["workdir"],
+                            "title": r["title"],
+                            "updated_at": r["updated_at"],
+                            "match": {"kind": "title", "snippet": r["title"]},
+                        }
+                    )
+                for r in fts_rows:
+                    if r["id"] in seen or len(rows) >= limit:
+                        continue
+                    seen.add(r["id"])
+                    content = r["content"] or ""
+                    pos = content.find(needle)
+                    start = max(0, pos - 20)
+                    snippet = (
+                        ("…" if start > 0 else "")
+                        + content[start : pos + len(needle) + 20]
+                        + ("…" if start + len(needle) + 20 < len(content) else "")
+                    )
+                    rows.append(
+                        {
+                            "id": r["id"],
+                            "workdir": r["workdir"],
+                            "title": r["title"],
+                            "updated_at": r["updated_at"],
+                            "match": {"kind": "content", "snippet": snippet},
+                        }
+                    )
+                return rows[:limit]
+            # --- LIKE fallback（短查询 / FTS 不可用）---
             sessions = self._conn.execute(
                 "SELECT id, workdir, title, updated_at FROM sessions"
                 " WHERE title LIKE ? ORDER BY updated_at DESC LIMIT ?",
@@ -518,7 +731,6 @@ class SessionStore:
                     " ORDER BY s.updated_at DESC LIMIT ?",
                     (like, like, limit - len(rows)),
                 ).fetchall()
-                seen: set[str] = set()
                 for r in msg_rows:
                     if r["session_id"] in seen:
                         continue
@@ -541,3 +753,10 @@ class SessionStore:
                         }
                     )
         return rows[:limit]
+
+    @staticmethod
+    def _fts_query(q: str) -> str:
+        """把用户输入转成安全的 FTS5 查询：整个短语作为一个词条匹配，
+        转义 FTS 特殊字符（trigram 下空格分词，短语即子串命中）。"""
+        escaped = q.replace('"', '""')
+        return f'"{escaped}"'

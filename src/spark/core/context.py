@@ -14,6 +14,116 @@ def load_system_prompt() -> str:
     return files("spark.prompts").joinpath("system.md").read_text(encoding="utf-8")
 
 
+# 项目指令文件生态（2024→2026 事实标准）：
+# * 根层：AGENTS.md（agents.md / agentsstandard.com 规范）与 CLAUDE.md（Anthropic）并列加载
+# * 全局层：~/.agents/{AGENTS.md,CLAUDE.md} —— 用户级跨项目约定
+# * 子目录层：workdir 内嵌套目录的 AGENTS.md/CLAUDE.md（Claude Code memory hierarchy 语义）
+_GLOBAL_AGENTS_DIR = Path.home() / ".agents"
+_INSTRUCTION_NAMES = ("AGENTS.md", "CLAUDE.md")
+_MAX_INSTRUCTION_DEPTH = 3
+_MAX_INSTRUCTION_FILES = 20
+_MAX_INSTRUCTION_TOTAL_CHARS = 16000
+
+
+def _read_instruction(path: Path, *, inside_workdir: Path | None) -> str | None:
+    """安全读取单个指令文件：UTF-8、symlink 解析后必须仍在 workdir 内
+    （全局层跳过该校验）、超长截断。返回文本或 None。"""
+    if inside_workdir is not None:
+        try:
+            resolved = path.resolve()
+        except OSError:
+            return None
+        if not resolved.is_relative_to(inside_workdir) or not resolved.is_file():
+            return None
+    elif not path.is_file():
+        return None
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+    if not text.strip():
+        return None
+    return text[: _MAX_INSTRUCTION_TOTAL_CHARS // 2]
+
+
+def _walk_dirs(top: Path, max_depth: int):
+    """深度受限目录遍历，产出 (dir_path, depth)。不跟随 symlink。"""
+    stack = [(top, 0)]
+    while stack:
+        current, depth = stack.pop()
+        yield current, depth
+        if depth >= max_depth:
+            continue
+        try:
+            entries = sorted(current.iterdir(), key=lambda p: p.name)
+        except OSError:
+            continue
+        for e in entries:
+            if e.is_dir() and not e.is_symlink():
+                stack.append((e, depth + 1))
+
+
+def load_agents_md(workdir: Path, cfg: SparkConfig) -> str | None:
+    """加载项目指令（AGENTS.md/CLAUDE.md 生态）。
+
+    三级叠加：~/.agents/ 全局 → workdir 根（配置指定名 + CLAUDE.md）→
+    workdir 内嵌套目录（深度 ≤3、最多 20 个文件）。全部内容以
+    ``## <路径>`` 标注来源后拼接，总量上限 16k 字符。任一阶段为空则跳过；
+    完全无文件时返回 None（上游保持既有 <project_instructions> 包裹行为）。
+    路径逃逸防护保留：配置名含 ``../`` 或分隔符时该名称被跳过（测试语义不变）。
+    """
+    chunks: list[str] = []
+    base = workdir.resolve()
+    seen: set[str] = set()
+
+    def add(path: Path, inside: bool) -> None:
+        nonlocal chunks
+        key = str(path.resolve()) if inside else str(path)
+        if key in seen:
+            return
+        seen.add(key)
+        text = _read_instruction(path, inside_workdir=base if inside else None)
+        if text:
+            chunks.append(f"## {path}\n{text}")
+
+    # 1) 全局层
+    for name in _INSTRUCTION_NAMES:
+        add(_GLOBAL_AGENTS_DIR / name, inside=False)
+
+    # 2) 根层
+    root_names = set(_INSTRUCTION_NAMES)
+    cfg_name = (cfg.context.agents_md or "").strip()
+    if cfg_name and not any(sep in cfg_name for sep in ("/", "\\", ":")) and ".." not in cfg_name:
+        root_names.add(cfg_name)
+    for name in root_names:
+        add(base / name, inside=True)
+
+    # 3) 子目录层
+    counted = 0
+    for root, depth in _walk_dirs(base, _MAX_INSTRUCTION_DEPTH):
+        if depth == 0:
+            continue
+        rel = root.relative_to(base)
+        if rel.parts and rel.parts[0] in {
+            ".git", "node_modules", "vendor", "dist", "build", "__pycache__", ".venv", ".tox", ".spark",
+        }:
+            continue
+        for name in _INSTRUCTION_NAMES:
+            if counted >= _MAX_INSTRUCTION_FILES:
+                break
+            p = Path(root) / name
+            if p.is_file():
+                add(p, inside=True)
+                counted += 1
+
+    if not chunks:
+        return None
+    text = "\n\n".join(chunks)
+    if len(text) > _MAX_INSTRUCTION_TOTAL_CHARS:
+        text = text[: _MAX_INSTRUCTION_TOTAL_CHARS]
+    return text
+
+
 _ENV_BLOCK_CACHE: list[str] = []
 
 
@@ -41,27 +151,6 @@ def environment_block(workdir: Path) -> str:
     )
     _ENV_BLOCK_CACHE.append(block)
     return block
-
-
-def load_agents_md(workdir: Path, cfg: SparkConfig) -> str | None:
-    name = cfg.context.agents_md
-    # Only a bare filename may be read, and the result must still land inside the
-    # workdir after symlink resolution.
-    if not name or any(sep in name for sep in ("/", "\\", ":")) or ".." in name:
-        return None
-    base = workdir.resolve()
-    path = base / name
-    try:
-        resolved = path.resolve()
-    except OSError:
-        return None
-    if not resolved.is_relative_to(base) or not resolved.is_file():
-        return None
-    text = resolved.read_text(encoding="utf-8", errors="replace")
-    limit = cfg.context.max_fragment_chars
-    if len(text) > limit:
-        return text[:limit]
-    return text
 
 
 MODE_HINTS = {
