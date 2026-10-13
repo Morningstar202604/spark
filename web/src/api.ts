@@ -358,6 +358,43 @@ export async function streamPty(
   }
 }
 
+/* ------------------------------------------------------------------ */
+/* MCP registry 聚合搜索（P1-7）                                        */
+/* ------------------------------------------------------------------ */
+
+export interface McpRegistryItem {
+  name: string
+  title: string
+  description: string
+  version: string
+  repository_url: string
+  transport: "stdio" | "remote" | "unknown"
+  remote_url: string | null
+  suggested_command: string | null
+  suggested_args: string[]
+  required_env: { name: string; required: boolean; secret: boolean }[]
+  glama: { score: number; count: number; source: string } | null
+  china: { verdict: "available" | "risk" | "unreachable"; reasons: string[] }
+}
+
+export interface McpRegistryResult {
+  items: McpRegistryItem[]
+  source: "live" | "offline"
+  error: string | null
+  filtered_out: number
+}
+
+export async function searchMcpRegistry(
+  query: string,
+  includeUnavailable = false,
+): Promise<McpRegistryResult> {
+  const q = encodeURIComponent(query)
+  const inc = includeUnavailable ? "1" : "0"
+  return readJson<McpRegistryResult>(
+    await fetchWithTimeout(`/api/mcp/registry/search?q=${q}&include_unavailable=${inc}`, undefined, 45000),
+  )
+}
+
 export interface CheckpointRow {
   id: number
   label: string

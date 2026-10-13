@@ -285,9 +285,7 @@ def build_handler_class(html: str):
                         return
                     if target.is_file():
                         data = target.read_bytes()
-                        ctype = _CTYPES.get(
-                            target.suffix.lower(), "application/octet-stream"
-                        )
+                        ctype = _CTYPES.get(target.suffix.lower(), "application/octet-stream")
                         self.send_response(200)
                         self.send_header("Content-Type", ctype)
                         self.send_header("Content-Length", str(len(data)))
@@ -327,9 +325,7 @@ def build_handler_class(html: str):
                 return
             if path == "/api/agents_md":
                 path_md = state.workdir / state.cfg.context.agents_md
-                content = (
-                    path_md.read_text(encoding="utf-8") if path_md.exists() else ""
-                )
+                content = path_md.read_text(encoding="utf-8") if path_md.exists() else ""
                 self._json(
                     200,
                     {
@@ -402,15 +398,13 @@ def build_handler_class(html: str):
                         elif msg.role == "summary":
                             msg_entry = {
                                 "role": "assistant",
-                                "content": "[conversation summary]\n"
-                                + (msg.content or ""),
+                                "content": "[conversation summary]\n" + (msg.content or ""),
                             }
                         elif msg.role == "user":
                             msg_entry = {"role": "user", "content": msg.content or ""}
                             if msg.images:
                                 msg_entry["images"] = [
-                                    f"data:{i.media_type};base64,{i.data}"
-                                    for i in msg.images
+                                    f"data:{i.media_type};base64,{i.data}" for i in msg.images
                                 ]
                             if not msg.content:
                                 continue
@@ -451,6 +445,30 @@ def build_handler_class(html: str):
                 from spark.web.pty_api import handle_pty_stream
 
                 handle_pty_stream(self)
+                return
+            # P1-7：MCP registry 聚合代理——搜索 + 国内可用性过滤
+            if path == "/api/mcp/registry/search":
+                query = parse_qs(urlparse(self.path).query)
+                q = (query.get("q", [""])[0] or "").strip()
+                limit_s = (query.get("limit", ["20"])[0] or "20").strip()
+                include_unavailable = (
+                    query.get("include_unavailable", ["0"])[0] or "0"
+                ).strip() == "1"
+                from spark.mcp_registry import search_servers
+
+                try:
+                    limit = int(limit_s)
+                except ValueError:
+                    limit = 20
+                try:
+                    result = search_servers(q, limit=limit, include_unavailable=include_unavailable)
+                except Exception as exc:  # noqa: BLE001 — 代理层兜底，UI 给错误态
+                    self._json(
+                        200,
+                        {"items": [], "source": "offline", "error": str(exc), "filtered_out": 0},
+                    )
+                    return
+                self._json(200, result)
                 return
             self._json(404, {"error": "not found"})
 
