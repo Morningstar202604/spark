@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from spark.config import SparkConfig
+from spark.edit.tool import ApplyEditArgs, apply_edit, apply_edit_diff
 from spark.models import ToolCall, ToolResult
 from spark.sandbox import WorkdirSandbox
 from spark.tools import bg, fs, gitops, notebook, search, shell, web
@@ -112,6 +113,18 @@ class ToolRegistry:
             _schema("apply_patch", "Replace exactly one occurrence of old_text in a file.",
                 {"path": {"type": "string"}, "old_text": {"type": "string"}, "new_text": {"type": "string"}},
                 ["path", "old_text", "new_text"]),
+            _schema("apply_edit",
+                "Rewrite a file using aider-style SEARCH/REPLACE blocks, OR whole-file content. "
+                "For targeted edits send one or more blocks like:\n"
+                "<<<<<<< SEARCH\n<exact current text, must be UNIQUE in the file>\n=======\n<new text>\n>>>>>>> REPLACE\n"
+                "Each SEARCH must match exactly once (fuzzy whitespace-tolerant matching is tried); "
+                "ambiguous/missing matches are refused without touching the file. "
+                "If content has no SEARCH block markers it is treated as a whole-file rewrite. "
+                "Edits to .py/.ts/.tsx/.js are gated by tree-sitter: a syntax error is refused.",
+                {"path": {"type": "string"},
+                 "content": {"type": "string",
+                             "description": "either SEARCH/REPLACE block(s) or the complete new file content"}},
+                ["path", "content"]),
             _schema("run_shell", "Run a shell command inside workdir.",
                 {"command": {"type": "string"}, "cwd": {"type": "string"}},
                 ["command"]),
@@ -263,6 +276,13 @@ class ToolRegistry:
                 str(call.arguments.get("new_text", "")),
             )
             return diff, diff
+        if call.name == "apply_edit":
+            diff = apply_edit_diff(
+                self.ctx.sandbox,
+                str(call.arguments.get("path", "")),
+                str(call.arguments.get("content", "")),
+            )
+            return diff, diff
         if call.name == "run_shell":
             cmd = str(call.arguments.get("command", ""))[:200]
             cwd = str(call.arguments.get("cwd") or ".")
@@ -289,6 +309,7 @@ class ToolRegistry:
             "list_dir": lambda a: fs.list_dir(ctx.sandbox, fs.ListDirArgs.model_validate(a)),
             "write_file": lambda a: fs.write_file(ctx.sandbox, fs.WriteFileArgs.model_validate(a)),
             "apply_patch": lambda a: fs.apply_patch(ctx.sandbox, fs.ApplyPatchArgs.model_validate(a)),
+            "apply_edit": lambda a: apply_edit(ctx.sandbox, ApplyEditArgs.model_validate(a)),
             # --- shell ---
             "run_shell": lambda a: shell.run_shell(
                 ctx.sandbox, shell.RunShellArgs.model_validate(a),
