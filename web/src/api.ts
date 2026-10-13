@@ -255,6 +255,109 @@ export async function testConnection(payload: {
   return data as ProbeResult
 }
 
+/* ------------------------------------------------------------------ */
+/* 内置终端（PTY）                                                     */
+/* 架构说明：后端服务器基于标准库 http.server，不支持 WebSocket 升级，  */
+/* 实时通道采用 SSE（GET 长连接逐帧推送），与 /api/chat/stream 同构。   */
+/* ------------------------------------------------------------------ */
+
+export interface PtyOpenInfo {
+  tab_id: string
+  cwd: string
+  alive: boolean
+  rows: number
+  cols: number
+}
+
+export async function ptyOpen(tabId = "main", cwd?: string): Promise<PtyOpenInfo> {
+  return readJson<PtyOpenInfo>(
+    await fetchWithTimeout("/api/pty/open", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tab_id: tabId, cwd }),
+    }),
+  )
+}
+
+export async function ptyWrite(tabId: string, data: string): Promise<boolean> {
+  const r = await readJson<{ ok: boolean }>(
+    await fetchWithTimeout("/api/pty/write", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tab_id: tabId, data }),
+    }),
+  )
+  return r.ok
+}
+
+export async function ptyResize(tabId: string, rows: number, cols: number): Promise<void> {
+  await readJson(
+    await fetchWithTimeout("/api/pty/resize", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tab_id: tabId, rows, cols }),
+    }),
+  )
+}
+
+export async function ptyClose(tabId: string): Promise<void> {
+  await readJson(
+    await fetchWithTimeout("/api/pty/close", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tab_id: tabId }),
+    }),
+  )
+}
+
+export type PtyEvent =
+  | { type: "pty_open"; tab_id: string; cwd: string }
+  | { type: "pty_data"; data: string }
+  | { type: "pty_exit"; tab_id: string }
+
+/** 订阅 PTY 输出 SSE 流（GET 长连接）。返回的 Promise 仅在流结束时 resolve。 */
+export async function streamPty(
+  tabId: string,
+  onEvent: (ev: PtyEvent) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  const res = await fetchWithTimeout(
+    `/api/pty/stream?tab_id=${encodeURIComponent(tabId)}`,
+    { method: "GET", signal },
+    120000,
+  )
+  if (!res.ok || !res.body) {
+    throw new Error(`pty stream HTTP ${res.status}`)
+  }
+  const reader = res.body.getReader()
+  try {
+    const decoder = new TextDecoder()
+    let buffer = ""
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done) return
+      buffer += decoder.decode(value, { stream: true })
+      let idx: number
+      while ((idx = buffer.indexOf("\n\n")) >= 0) {
+        const frame = buffer.slice(0, idx)
+        buffer = buffer.slice(idx + 2)
+        for (const line of frame.split("\n")) {
+          if (!line.startsWith("data: ")) continue
+          const payload = line.slice(6)
+          if (!payload) continue
+          try {
+            onEvent(JSON.parse(payload) as PtyEvent)
+          } catch {
+            /* skip malformed frame */
+          }
+        }
+      }
+    }
+  } finally {
+    try { reader.cancel() } catch { /* ignore */ }
+  }
+}
+
 export interface CheckpointRow {
   id: number
   label: string

@@ -441,6 +441,17 @@ def build_handler_class(html: str):
                     return
                 self._json(200, _browse(url))
                 return
+            # P1-5：内置终端（PTY）——tabs 列表 + SSE 读流（写/开/关走 POST）
+            if path == "/api/pty/tabs":
+                from spark.web.pty_api import handle_pty_tabs
+
+                handle_pty_tabs(self)
+                return
+            if path == "/api/pty/stream":
+                from spark.web.pty_api import handle_pty_stream
+
+                handle_pty_stream(self)
+                return
             self._json(404, {"error": "not found"})
 
         # ------------------------------------------------------------------
@@ -488,3 +499,20 @@ _POST_HANDLERS: dict[str, Any] = {
     "/api/settings": _handle_settings,
     "/api/test": _handle_test,
 }
+
+# P1-5：内置终端（PTY）写路径（读流是 GET /api/pty/stream，见 _handle_get）
+from spark.web.pty_api import (  # noqa: E402
+    handle_pty_close as _pty_close,
+    handle_pty_open as _pty_open,
+    handle_pty_resize as _pty_resize,
+    handle_pty_write as _pty_write,
+)
+
+_POST_HANDLERS.update(
+    {
+        "/api/pty/open": _pty_open,
+        "/api/pty/write": _pty_write,
+        "/api/pty/resize": _pty_resize,
+        "/api/pty/close": _pty_close,
+    }
+)
