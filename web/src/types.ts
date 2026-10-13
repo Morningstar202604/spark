@@ -64,6 +64,7 @@ export interface FullConfig {
     show_context: boolean
     show_keywords: boolean
     show_notices: boolean
+    system_prompt: string
   }
   context: {
     agents_md: string
@@ -109,6 +110,7 @@ export interface SettingsPayload {
     show_context?: boolean
     show_keywords?: boolean
     show_notices?: boolean
+    system_prompt?: string
   }
   mcp_servers: McpServer[]
   hooks?: HookEntry[]

@@ -122,6 +122,8 @@ class AgentConfig(BaseModel):
     show_context: bool = True
     show_keywords: bool = True
     show_notices: bool = True
+    # 自定义系统提示词：留空 = 使用内置 prompts/system.md；填写后覆盖默认
+    system_prompt: str = ""
 
 
 class ContextConfig(BaseModel):

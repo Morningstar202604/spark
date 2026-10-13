@@ -34,12 +34,39 @@ capacity = 500
 embedding_model = "text-embedding-3-small"
 auto_extract = true
 
-# ---- MCP 服务器 ----
+# ---- MCP 服务器（取消注释即启用，需本地已装对应命令）----
+# 常用 MCP server 预设（国内可用优先）：
+#
 # [[mcp_servers]]
 # name = "filesystem"
 # command = "npx"
 # args = ["-y", "@modelcontextprotocol/server-filesystem", "."]
 # readonly_tools = []                  # 声明为只读的工具名（免审批）
+#
+# [[mcp_servers]]
+# name = "fetch"                       # 网页抓取（读 URL 内容）
+# command = "npx"
+# args = ["-y", "@modelcontextprotocol/server-fetch"]
+#
+# [[mcp_servers]]
+# name = "git"                         # Git 操作
+# command = "npx"
+# args = ["-y", "@modelcontextprotocol/server-git", "."]
+#
+# [[mcp_servers]]
+# name = "time"                        # 时间/时区工具
+# command = "npx"
+# args = ["-y", "@modelcontextprotocol/server-time"]
+#
+# [[mcp_servers]]
+# name = "memory"                      # 持久化记忆
+# command = "npx"
+# args = ["-y", "@modelcontextprotocol/server-memory"]
+#
+# [[mcp_servers]]
+# name = "playwright"                  # 浏览器自动化（需本地有 Chromium）
+# command = "npx"
+# args = ["-y", "@playwright/mcp@latest"]
 #
 # 远程传输：
 # [[mcp_servers]]

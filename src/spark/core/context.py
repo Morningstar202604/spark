@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import sys
 from importlib.resources import files
 from pathlib import Path
@@ -8,6 +9,8 @@ from spark.config import SparkConfig
 from spark.core.tokens import estimate_message_tokens
 from spark.models import ChatMessage
 from spark.skills import discover_skills, inject_skills
+
+logger = logging.getLogger(__name__)
 
 
 def load_system_prompt() -> str:
@@ -105,7 +108,16 @@ def load_agents_md(workdir: Path, cfg: SparkConfig) -> str | None:
             continue
         rel = root.relative_to(base)
         if rel.parts and rel.parts[0] in {
-            ".git", "node_modules", "vendor", "dist", "build", "__pycache__", ".venv", ".tox", ".spark", ".agents",
+            ".git",
+            "node_modules",
+            "vendor",
+            "dist",
+            "build",
+            "__pycache__",
+            ".venv",
+            ".tox",
+            ".spark",
+            ".agents",
         }:
             continue
         for name in _INSTRUCTION_NAMES:
@@ -120,7 +132,7 @@ def load_agents_md(workdir: Path, cfg: SparkConfig) -> str | None:
         return None
     text = "\n\n".join(chunks)
     if len(text) > _MAX_INSTRUCTION_TOTAL_CHARS:
-        text = text[: _MAX_INSTRUCTION_TOTAL_CHARS]
+        text = text[:_MAX_INSTRUCTION_TOTAL_CHARS]
     return text
 
 
@@ -167,7 +179,10 @@ def system_prompt(workdir: Path, cfg: SparkConfig) -> str:
     Shared by :func:`build_messages` and :func:`history_token_usage` so the token
     estimate can never be computed against a different prompt than the one sent.
     """
-    text = load_system_prompt() + f"\n\nWorkdir: {workdir.resolve()}"
+    # 用户自定义系统提示词：cfg.agent.system_prompt 非空时覆盖默认 prompts/system.md
+    custom_prompt = getattr(cfg.agent, "system_prompt", "") or ""
+    base = custom_prompt.strip() if custom_prompt.strip() else load_system_prompt()
+    text = base + f"\n\nWorkdir: {workdir.resolve()}"
     text += f"\n\n{environment_block(workdir)}"
     mode_hint = MODE_HINTS.get(getattr(cfg.agent, "sandbox_mode", "workspace"))
     if mode_hint:
@@ -208,9 +223,7 @@ def build_messages(
     Compactor's token-aware implementation; otherwise the original
     char-based budget logic is used (preserved for backward compatibility).
     """
-    messages: list[ChatMessage] = [
-        ChatMessage(role="system", content=system_prompt(workdir, cfg))
-    ]
+    messages: list[ChatMessage] = [ChatMessage(role="system", content=system_prompt(workdir, cfg))]
     agents = load_agents_md(workdir, cfg)
     if agents:
         messages.append(
@@ -245,9 +258,7 @@ def _trim_recent_chars(
     kept: list[ChatMessage] = []
     used = 0
     for msg in reversed(recent):
-        size = len(msg.content or "") + sum(
-            len(str(c.arguments)) for c in (msg.tool_calls or [])
-        )
+        size = len(msg.content or "") + sum(len(str(c.arguments)) for c in (msg.tool_calls or []))
         if used + size > budget and kept:
             break
         kept.append(msg)

@@ -12,6 +12,18 @@ import { useUiStore } from "../store/uiStore"
 
 type Tab = "model" | "agent" | "security" | "display" | "memory" | "mcp" | "project"
 
+// 预装模型预设：国内可用优先，用户选一个自动填 provider/base_url/model，只需填 API Key
+const MODEL_PRESETS: { label: string; provider: string; base_url: string; model: string }[] = [
+  { label: "DeepSeek（深度求索）", provider: "openai_compat", base_url: "https://api.deepseek.com/v1", model: "deepseek-chat" },
+  { label: "通义千问 Qwen（阿里）", provider: "openai_compat", base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1", model: "qwen-plus" },
+  { label: "Kimi（月之暗面）", provider: "openai_compat", base_url: "https://api.moonshot.cn/v1", model: "moonshot-v1-8k" },
+  { label: "智谱 GLM（清华）", provider: "openai_compat", base_url: "https://open.bigmodel.cn/api/paas/v4", model: "glm-4-flash" },
+  { label: "豆包（字节跳动）", provider: "openai_compat", base_url: "https://ark.cn-beijing.volces.com/api/v3", model: "doubao-pro-32k" },
+  { label: "Agnes AI（Sapiens）", provider: "openai_compat", base_url: "https://apihub.agnes-ai.com/v1", model: "agnes-2.5-flash" },
+  { label: "Ollama（本地）", provider: "ollama", base_url: "http://localhost:11434/v1", model: "qwen2.5-coder" },
+  { label: "Mock（离线演示）", provider: "mock", base_url: "http://localhost", model: "mock-model" },
+]
+
 const TABS: { key: Tab; label: string; icon: React.ReactNode }[] = [
   { key: "model", label: "模型", icon: <IconLayers size={14} /> },
   { key: "agent", label: "Agent", icon: <IconTerminal size={14} /> },
@@ -321,6 +333,23 @@ export default function SettingsDrawer({ onClose, onSaved }: Props) {
                     <option value="ollama">ollama</option>
                   </Select>
                 </Field>
+                <Field label="常用模型预设（一键填充，再填 API Key 即可）">
+                  <Select
+                    value=""
+                    onChange={(e) => {
+                      const p = MODEL_PRESETS.find((x) => x.label === e.target.value)
+                      if (!p) return
+                      dirtyRef.current.cfg = true
+                      setCfg((c) => (c ? { ...c, provider: { ...c.provider, name: p.provider, base_url: p.base_url, model: p.model } } : c))
+                      setNotice(`已填充 ${p.label}，请填写 API Key 后测试连接。`)
+                    }}
+                  >
+                    <option value="">— 选择预设 —</option>
+                    {MODEL_PRESETS.map((p) => (
+                      <option key={p.label} value={p.label}>{p.label}</option>
+                    ))}
+                  </Select>
+                </Field>
                 <Field label="Base URL">
                   <TextInput value={cfg.provider.base_url} onChange={(e) => { dirtyRef.current.cfg = true; setCfg((c) => (c ? { ...c, provider: { ...c.provider, base_url: e.target.value } } : c)) }} placeholder="https://api.example.com/v1" />
                 </Field>
@@ -539,6 +568,30 @@ export default function SettingsDrawer({ onClose, onSaved }: Props) {
                     <Toggle checked={Boolean(cfg.agent[key])} onChange={(v) => patchAgent({ [key]: v })} />
                   </label>
                 ))}
+              </section>
+
+              <section className="flex flex-col gap-2 rounded-xl border border-line bg-panel p-4">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-sm font-semibold text-ink">系统提示词</h3>
+                  <Button
+                    size="sm"
+                    variant="soft"
+                    onClick={() => {
+                      patchAgent({ system_prompt: "" })
+                      setNotice("已恢复默认系统提示词（内置 prompts/system.md）。")
+                    }}
+                  >
+                    恢复默认
+                  </Button>
+                </div>
+                <p className="text-xs leading-relaxed text-ink3">留空使用内置默认提示词；填写后完全覆盖默认。支持 Markdown，保存后下次对话生效。</p>
+                <TextArea
+                  value={cfg.agent.system_prompt ?? ""}
+                  onChange={(e) => patchAgent({ system_prompt: e.target.value })}
+                  placeholder={"You are Spark, a capable local coding agent...\n\n（留空 = 使用默认）"}
+                  rows={8}
+                  className="font-mono text-xs"
+                />
               </section>
             </div>
           )}

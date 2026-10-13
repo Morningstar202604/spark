@@ -16,7 +16,8 @@ Desktop.ini
 *.code-workspace
 
 # Local state of AI coding tools (not part of the product)
-.claude/
+.claude/*
+!.claude/agents/
 .gemini/
 .opencode/
 .monkeycode/
