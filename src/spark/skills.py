@@ -11,6 +11,7 @@ class SkillInfo:
     description: str
     content: str
     path: Path
+    when_to_use: str = ""
 
 
 _FM_RE = re.compile(r"^---\s*\n(.*?)\n---\s*\n?(.*)$", re.DOTALL)
@@ -64,6 +65,7 @@ def discover_skills(workdir: Path) -> list[SkillInfo]:
                 description=meta.get("description", ""),
                 content=body.strip(),
                 path=md,
+                when_to_use=meta.get("when_to_use", ""),
             )
         )
     return skills
@@ -84,8 +86,9 @@ def inject_skills(system_prompt: str, skills: list[SkillInfo]) -> str:
         "  To use a skill, call the `load_skill` tool with the skill name.",
     ]
     for s in skills:
+        attr = f" when_to_use=\"{s.when_to_use}\"" if s.when_to_use else ""
         block.append(
-            f"  <skill name=\"{s.name}\" description=\"{s.description}\"/>"
+            f"  <skill name=\"{s.name}\" description=\"{s.description}\"{attr}/>"
         )
     block.append("</available_skills>\n")
     return system_prompt + "\n".join(block)

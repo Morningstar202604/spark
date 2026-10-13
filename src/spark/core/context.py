@@ -105,7 +105,7 @@ def load_agents_md(workdir: Path, cfg: SparkConfig) -> str | None:
             continue
         rel = root.relative_to(base)
         if rel.parts and rel.parts[0] in {
-            ".git", "node_modules", "vendor", "dist", "build", "__pycache__", ".venv", ".tox", ".spark",
+            ".git", "node_modules", "vendor", "dist", "build", "__pycache__", ".venv", ".tox", ".spark", ".agents",
         }:
             continue
         for name in _INSTRUCTION_NAMES:
