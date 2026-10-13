@@ -173,6 +173,10 @@ def system_prompt(workdir: Path, cfg: SparkConfig) -> str:
     if mode_hint:
         text += f"\n{mode_hint}"
     text = inject_skills(text, discover_skills(workdir))
+    # P1-4: 声明式子代理（.claude/agents/*.md，文件即 subagent）
+    from spark.agents import discover_declared_agents, inject_subagents
+
+    text = inject_subagents(text, discover_declared_agents(workdir))
     # P0-10: repo-map 代码索引（aider 范式）——树里符号定位，减少全仓读取
     if getattr(cfg.context, "repo_map_enabled", True):
         try:
