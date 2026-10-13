@@ -32,6 +32,7 @@ from spark.errors import ConfigError, SparkError
 from spark.models import ApprovalAction, ImageRef
 from spark.providers.probe import probe_provider
 from spark.sandbox import WorkdirSandbox
+from spark.slash import handle_test, parse_slash
 from spark.web._httpbase import HandlerBase
 from spark.web._routing import _route_state
 from spark.web.sse import SSE_DISCONNECT_ERRORS, _SSESession
@@ -481,6 +482,25 @@ def _handle_chat_stream(handler: HandlerBase, body: dict) -> None:
                 f"{event.tool_call.name}: {_json.dumps(event.result.payload if event.result else {}, ensure_ascii=False)[:200]}"
             )
 
+    # P1-3：后端识别原始 "/test ..." 文本（前端最小实现=直接发送原始 slash），
+    # 跑仓库测试；失败时把含 traceback 的输出回灌进同一 agent loop 修正。
+    slash = parse_slash(prompt)
+    slash_result = None
+    if slash is not None and slash.name == "test":
+        if not stream.submit_payload(
+            {"type": "text_delta", "text": "⏳ 正在运行测试…\n"}
+        ):
+            return
+        try:
+            slash_result = handle_test(state.sandbox, slash.args)
+        except Exception as exc:  # noqa: BLE001 — slash 失败不拖垮整条 SSE
+            logger.warning("/test 执行失败: %s", exc, exc_info=True)
+            stream.submit_payload(
+                {"type": "turn_error", "text": f"/test 执行失败: {exc}"}
+            )
+            stream.finish()
+            return
+
     try:
         if stream.disconnected:
             return
@@ -489,12 +509,32 @@ def _handle_chat_stream(handler: HandlerBase, body: dict) -> None:
                 return
             state.busy = True
             try:
-                for event in turn_loop.iter_turn_sync(
-                    prompt, images=image_refs
-                ):
-                    collect_event(event)
-                    if not stream.submit(event):
-                        break
+                if slash_result is not None:
+                    stream.submit_payload(
+                        {"type": "text_delta", "text": slash_result.summary + "\n"}
+                    )
+                    if slash_result.ok or not slash_result.feedback:
+                        stream.submit_payload(
+                            {"type": "turn_end", "text": slash_result.summary}
+                        )
+                    else:
+                        # 回灌失败输出给 agent loop，让其读 traceback 自行修正
+                        for event in turn_loop.iter_turn_sync(
+                            slash_result.feedback, images=None
+                        ):
+                            collect_event(event)
+                            if not stream.submit(event):
+                                break
+                        stream.submit_payload(
+                            {"type": "turn_end", "text": slash_result.summary}
+                        )
+                else:
+                    for event in turn_loop.iter_turn_sync(
+                        prompt, images=image_refs
+                    ):
+                        collect_event(event)
+                        if not stream.submit(event):
+                            break
             finally:
                 state.busy = False
         if stream.disconnected:

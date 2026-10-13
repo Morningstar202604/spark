@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from pathlib import Path
 
@@ -355,6 +356,12 @@ class SparkApp(App):
         event.input.value = ""
         if not text or self._running:
             return
+        from spark.slash import parse_slash
+
+        slash = parse_slash(text)
+        if slash is not None and slash.name == "test":
+            self.run_worker(self._run_test_slash(slash.args), exclusive=True)
+            return
         self.run_worker(self._run_prompt(text), exclusive=True)
 
     def action_cancel_turn(self) -> None:
@@ -423,6 +430,39 @@ class SparkApp(App):
             self._flush_text(chat)
             self._running = False
             self._update_status()
+
+    async def _run_test_slash(self, raw_args: str) -> None:
+        """/test：跑仓库测试，渲染摘要；失败时把 traceback 回灌给 agent 修正。"""
+        self._running = True
+        self._current_text = ""
+        self._update_status()
+        chat = self.query_one("#chat", RichLog)
+        shown = (f"/test {raw_args}").strip()
+        chat.write(f"[bold cyan]你[/bold cyan] {rich_escape(shown)}")
+        chat.write("[dim]⏳ 正在运行测试…[/dim]")
+        from spark.slash import handle_test
+
+        sandbox = self.registry.ctx.sandbox
+        try:
+            result = await asyncio.to_thread(handle_test, sandbox, raw_args)
+        except Exception as exc:  # noqa: BLE001 — TUI 不应因 slash 崩溃
+            chat.write(f"[red]✗ /test 执行异常：{rich_escape(str(exc))}[/red]")
+            self._running = False
+            self._update_status()
+            return
+        color = "green" if result.ok else "red"
+        chat.write(f"[{color}]{rich_escape(result.summary)}[/{color}]")
+        if result.output:
+            chat.write(f"[dim]{rich_escape(result.output)}[/dim]")
+        if not result.ok and result.feedback:
+            chat.write("[yellow]→ 回灌失败输出，交由 agent 修正…[/yellow]")
+            try:
+                async for event in self.loop_engine.iter_turn(result.feedback):
+                    self._render(event, chat)
+            finally:
+                self._flush_text(chat)
+        self._running = False
+        self._update_status()
 
     def _flush_text(self, chat: RichLog) -> None:
         if self._current_text:
