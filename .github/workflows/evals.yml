@@ -1,0 +1,35 @@
+name: Evals
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+# P1-6 agent evals 基线：fixture 驱动的 mock 模式回归（不联网、不跑真实 LLM）。
+# eval 失败即红，给后续每一项能力改造提供迭代依据。
+# 真实数据集求解（clone 仓库跑 FAIL_TO_PASS）与 LLM-judge 路径见 docs/evals.md，
+# 属手动目标，不进此 workflow。
+
+jobs:
+  evals:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: |
+          pip install -e ".[dev]"
+      - name: Lint (ruff, evals module)
+        run: ruff check src/spark/evals tests/test_p1_06_evals.py
+      - name: Agent evals (mock fixtures)
+        run: python -m spark.evals --json evals-report.json
+      - name: Upload eval report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: evals-report
+          path: evals-report.json
+          retention-days: 14
