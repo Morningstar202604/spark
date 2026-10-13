@@ -140,6 +140,7 @@ class MemoryConfig(BaseModel):
     capacity: int = Field(default=500, ge=1, le=100_000)
     embedding_model: str = "text-embedding-3-small"
     auto_extract: bool = True
+    rerank_model: str = ""  # 留空 = 不启用重排；填 BAAI/bge-reranker-v2-m3 等本地模型
 
 
 class ModelProfile(BaseModel):

@@ -272,6 +272,49 @@ def web_cmd(
         raise typer.Exit(exc.exit_code) from exc
 
 
+@app.command("mcp-serve")
+def mcp_serve_cmd(
+    workdir: Path = typer.Option(Path("."), "--workdir"),
+    approval: str | None = typer.Option(
+        None,
+        "--approval",
+        help="suggest | auto-edit | full-auto（默认逐项询问，确认后再执行）",
+    ),
+    model: str | None = typer.Option(None, "--model"),
+    provider: str | None = typer.Option(None, "--provider"),
+    config: Path | None = typer.Option(None, "--config"),
+    sandbox_mode: str | None = typer.Option(
+        None,
+        "--sandbox-mode",
+        help="sandbox-only | workspace | full-access | unrestricted",
+    ),
+    port: int | None = typer.Option(
+        None,
+        "--port",
+        help="提供时以 streamable HTTP 模式在 127.0.0.1:<port> 运行；否则 stdio",
+    ),
+) -> None:
+    """把 spark 内建工具反向暴露为 MCP server（stdio / streamable HTTP）。"""
+    try:
+        workdir = workdir.resolve()
+        cfg = _common_cfg(
+            workdir, config, approval, model, provider, sandbox_mode=sandbox_mode
+        )
+        from spark.mcp_expose import build_mcp_server
+
+        server = build_mcp_server(str(workdir), cfg)
+        if port:
+            import uvicorn
+
+            app = server.streamable_http_app()
+            uvicorn.run(app, host="127.0.0.1", port=port, log_level="warning")
+        else:
+            server.run(transport="stdio")
+    except SparkError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(exc.exit_code) from exc
+
+
 @app.command("desktop")
 def desktop_cmd(
     workdir: Path = typer.Option(Path("."), "--workdir"),

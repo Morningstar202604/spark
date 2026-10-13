@@ -768,6 +768,45 @@ class MemoryStore:
         )
         return round(score, 4)
 
+    def _bm25(self, row: MemoryRow, q_tokens: list[str], idf: dict[str, float]) -> float:
+        """BM25-style lexical score over the row's keyword index.
+
+        Uses the same tokenizer as :func:`tokenize` (中文 bigram），词频 + IDF
+        + 文档长度归一。与向量排序独立，供 RRF 融合。
+        """
+        row_tokens = (row.keywords or "").split()
+        if not row_tokens:
+            return 0.0
+        doc_len = len(row_tokens)
+        avg_len = max(1.0, self._avg_kw_len)
+        k1, b = 1.2, 0.75
+        score = 0.0
+        counts: dict[str, int] = {}
+        for t in row_tokens:
+            counts[t] = counts.get(t, 0) + 1
+        for t in q_tokens:
+            tf = counts.get(t, 0)
+            if tf == 0:
+                continue
+            idf_t = idf.get(t, 1.0)
+            denom = tf + k1 * (1 - b + b * doc_len / avg_len)
+            score += idf_t * (tf * (k1 + 1)) / denom
+        return round(score, 4)
+
+    def _rrf_merge(
+        self,
+        vec_rank: list[MemoryRow],
+        kw_rank: list[MemoryRow],
+        k: int = 60,
+    ) -> dict[int, float]:
+        """Reciprocal Rank Fusion：两个独立排序按 1/(k+rank) 融合。"""
+        scores: dict[int, float] = {}
+        for rank, row in enumerate(vec_rank):
+            scores[row.id] = scores.get(row.id, 0.0) + 1.0 / (k + rank + 1)
+        for rank, row in enumerate(kw_rank):
+            scores[row.id] = scores.get(row.id, 0.0) + 1.0 / (k + rank + 1)
+        return scores
+
     def search(
         self,
         query: str,
@@ -777,8 +816,15 @@ class MemoryStore:
         min_score: float = 0.0,
         source_session: str | None = None,
         exclude_session: str | None = None,
+        hybrid: bool = True,
     ) -> list[tuple[MemoryRow, float]]:
-        """Hybrid keyword + vector search over active memories; returns top_k (row, score) pairs."""
+        """Hybrid keyword + vector search over active memories.
+
+        ``hybrid=True``（默认）时采用 **RRF 融合**：向量余弦排序与 BM25
+        词法排序各自独立，再按 reciprocal rank 融合——对中文同义/近义表达
+        与精确术语命中都不漏检。``hybrid=False`` 保持旧的线性加权打分
+        （兼容既有调用与测试）。
+        """
         top_k = top_k or self.cfg.top_k
         q_tokens: list[str] = []
         seen: set[str] = set()
@@ -786,7 +832,7 @@ class MemoryStore:
             if t not in seen:
                 seen.add(t)
                 q_tokens.append(t)
-        results: list[tuple[MemoryRow, float]] = []
+        rows: list[MemoryRow] = []
         for row in self.all_active():
             if source_session is not None and row.source_session not in (
                 None,
@@ -795,6 +841,49 @@ class MemoryStore:
                 continue
             if exclude_session is not None and row.source_session == exclude_session:
                 continue
+            rows.append(row)
+        if not rows:
+            return []
+
+        # 词法 IDF（基于当前集合）
+        if q_tokens:
+            doc_freq: dict[str, int] = {}
+            for row in rows:
+                rk = set((row.keywords or "").split())
+                for t in q_tokens:
+                    if t in rk:
+                        doc_freq[t] = doc_freq.get(t, 0) + 1
+            n_docs = len(rows)
+            idf = {
+                t: math.log(1.0 + (n_docs - df + 0.5) / (df + 0.5))
+                for t, df in doc_freq.items()
+            }
+        else:
+            idf = {}
+        self._avg_kw_len = sum(len((r.keywords or "").split()) for r in rows) / max(1, len(rows))
+
+        if hybrid and query_embedding is not None:
+            # RRF：双路独立排序
+            vec_rank = sorted(
+                rows,
+                key=lambda r: cosine(r.embedding or [0.0] * len(query_embedding), query_embedding)
+                if r.embedding and len(r.embedding) == len(query_embedding)
+                else 0.0,
+                reverse=True,
+            )
+            kw_rank = sorted(
+                rows,
+                key=lambda r: self._bm25(r, q_tokens, idf),
+                reverse=True,
+            )
+            merged = self._rrf_merge(vec_rank, kw_rank)
+            results = sorted(rows, key=lambda r: merged.get(r.id, 0.0), reverse=True)
+            results = [r for r in results if merged.get(r.id, 0.0) > 0.0]
+            return [(r, merged[r.id]) for r in results[:top_k]]
+
+        # 旧线性加权路径（hybrid=False / 无向量）
+        results: list[tuple[MemoryRow, float]] = []
+        for row in rows:
             s = self.score(row, q_tokens, query_embedding)
             if s > min_score:
                 results.append((row, s))

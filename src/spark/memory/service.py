@@ -127,7 +127,57 @@ class MemoryService:
     ) -> list[tuple[MemoryRow, float]]:
         vecs = self._embed([query])
         q_emb = vecs[0] if vecs else None
-        return self.store.search(query, top_k=top_k, query_embedding=q_emb)
+        hits = self.store.search(query, top_k=top_k, query_embedding=q_emb)
+        return self._maybe_rerank(query, hits, top_k)
+
+    def _maybe_rerank(
+        self,
+        query: str,
+        hits: list[tuple[MemoryRow, float]],
+        top_k: int | None,
+    ) -> list[tuple[MemoryRow, float]]:
+        """可选重排：FlagEmbedding（bge-reranker-v2-m3）若已安装则对候选重排。
+
+        未安装 / 加载失败时静默保持原序（RRF 已保证基础质量），不引入硬依赖。
+        """
+        if not hits or top_k == 0:
+            return hits
+        try:
+            from FlagEmbedding import FlagReranker  # type: ignore[import-not-found]
+
+            reranker = self._get_reranker(FlagReranker)
+            if reranker is None:
+                return hits
+            top = min(len(hits), (top_k or self.cfg.top_k) * 2)
+            pairs = [[query, row.content] for row, _ in hits[:top]]
+            scores = reranker.compute_score(pairs, normalize=True)
+            if not isinstance(scores, (list, tuple)):
+                scores = [scores]
+            ranked = sorted(
+                zip(hits[:top], scores), key=lambda x: x[1], reverse=True
+            )
+            return [(row, float(s)) for (row, _), s in ranked][: (top_k or self.cfg.top_k)]
+        except ImportError:
+            return hits
+        except Exception:
+            logger.debug("reranker 重排失败，保持原序", exc_info=True)
+            return hits
+
+    _reranker_cache: tuple = (None, None)
+
+    def _get_reranker(self, cls) -> object | None:
+        """缓存已加载的 reranker（模型一次性加载，进程内复用）。"""
+        cached = self._reranker_cache[0]
+        if cached is not None:
+            return cached
+        model_name = self.cfg.memory.rerank_model or "BAAI/bge-reranker-v2-m3"
+        try:
+            model = cls(model_name, device="cpu")
+            self._reranker_cache = (model, model_name)
+            return model
+        except Exception:
+            logger.warning("加载 reranker %s 失败，跳过重排", model_name)
+            return None
 
     def retrieve_context(self, query: str, top_k: int | None = None) -> str | None:
         if not self.cfg.memory.enabled:
