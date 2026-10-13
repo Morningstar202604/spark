@@ -10,6 +10,7 @@ import httpx
 from pydantic import BaseModel
 
 from spark.models import ToolResult
+from spark.tools.untrusted import wrap
 
 USER_AGENT = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
 
@@ -211,7 +212,13 @@ def web_search_tool(args: WebSearchArgs) -> ToolResult:
             },
         )
     return ToolResult(
-        ok=True, payload={"query": query, "results": results, "count": len(results)}
+        ok=True,
+        payload={
+            "query": query,
+            # 搜索结果来自外部：整体不可信，防止注入指令
+            "results": wrap(json.dumps(results, ensure_ascii=False)),
+            "count": len(results),
+        },
     )
 
 
@@ -227,7 +234,8 @@ def web_fetch_tool(args: WebFetchArgs) -> ToolResult:
     payload: dict = {
         "url": page["url"],
         "title": page["title"],
-        "content": content,
+        # 网页正文来自外部：整体不可信，防止 prompt injection
+        "content": wrap(content),
         "chars": len(content),
     }
     if truncated:

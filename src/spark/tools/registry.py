@@ -342,7 +342,13 @@ class ToolRegistry:
                 return await self._handle_task(call)
 
             if name.startswith("mcp__") and self.ctx.mcp_call is not None:
-                return await self.ctx.mcp_call(name, call.arguments)
+                result = await self.ctx.mcp_call(name, call.arguments)
+                # 第三方 MCP 输出不可信：包裹 untrusted 围栏（防注入）
+                if result.ok and result.payload is not None:
+                    from spark.tools.untrusted import payload_text, wrap
+
+                    result.payload = {"content": wrap(payload_text(result.payload))}
+                return result
 
             # Built-in tools dispatched via table
             table = self._build_dispatch_table()

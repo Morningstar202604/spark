@@ -18,6 +18,56 @@ from spark.sandbox import SandboxPolicyError, WorkdirSandbox
 MAX_SHELL_OUTPUT_BYTES = 4 * 1024 * 1024
 _READ_CHUNK_BYTES = 8192
 
+# ---------------------------------------------------------------------------
+# OS 级沙箱（bubblewrap 探测 + 降级）
+# Claude Code sandboxing 范式：workspace 模式下命令跑在命名空间隔离内——
+# 系统路径只读、仅 workdir 可写。bwrap 未安装时静默降级到策略检查
+# （check_shell 仍是第一道防线，bwrap 是第二道纵深）。
+# ---------------------------------------------------------------------------
+_BWRAP_CACHE: dict[str, str | None] = {"path": None, "probed": False}
+
+
+def _bwrap_path() -> str | None:
+    if _BWRAP_CACHE["probed"]:
+        return _BWRAP_CACHE["path"]
+    path = shutil.which("bwrap")
+    _BWRAP_CACHE["path"] = path
+    _BWRAP_CACHE["probed"] = True
+    return path
+
+
+def bwrap_command(cwd: str, command: str, workdir: str, home: str | None = None) -> list[str] | None:
+    """构造 bubblewrap 命名空间隔离命令；环境不支持时返回 None（调用方降级）。
+
+    仅保护文件系统视图：系统路径只读、workdir 与 HOME 读写、/tmp 读写、
+    proc/dev 挂载。不隔离网络（agent 可能需要 shell 内网络命令）。
+    """
+    if os.name == "nt" or not _bwrap_path():
+        return None
+    home_dir = home or os.path.expanduser("~")
+    bindings = [
+        "--ro-bind", "/usr", "/usr",
+        "--ro-bind", "/bin", "/bin",
+        "--ro-bind", "/lib", "/lib",
+        "--ro-bind", "/lib64", "/lib64",
+        "--ro-bind", "/etc", "/etc",
+        "--proc", "/proc",
+        "--dev", "/dev",
+        "--bind", workdir, workdir,
+    ]
+    if home_dir and os.path.isdir(home_dir):
+        bindings += ["--bind", home_dir, home_dir]
+    if os.path.isdir("/tmp"):
+        bindings += ["--bind", "/tmp", "/tmp"]
+    return [
+        _bwrap_path(),  # type: ignore[list-item]
+        "--unshare-all",
+        "--die-with-parent",
+        *bindings,
+        "--chdir", cwd,
+        "/bin/sh", "-c", command,
+    ]
+
 
 class RunShellArgs(BaseModel):
     command: str
@@ -53,7 +103,25 @@ def run_shell(
         process_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
     else:
         process_kwargs["start_new_session"] = True
-    process = subprocess.Popen(args.command, **process_kwargs)
+
+    # OS 级沙箱：workspace 模式且 bwrap 可用时走命名空间隔离；
+    # 不可用/更高权限档位时维持原路径（check_shell 仍在前面把关）。
+    if (
+        os.name != "nt"
+        and not sandbox.full_access
+        and not sandbox.unrestricted
+        and sandbox.sandbox_mode == "workspace"
+    ):
+        isolated = bwrap_command(str(cwd), args.command, str(sandbox.root))
+        if isolated is not None:
+            process_kwargs["shell"] = False
+            command_to_run: list[str] = isolated
+        else:
+            command_to_run = args.command  # type: ignore[assignment]
+    else:
+        command_to_run = args.command  # type: ignore[assignment]
+
+    process = subprocess.Popen(command_to_run, **process_kwargs)  # type: ignore[arg-type]
     stdout_result: list[tuple[bytes, bool]] = []
     stderr_result: list[tuple[bytes, bool]] = []
 
