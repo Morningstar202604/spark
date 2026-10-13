@@ -281,6 +281,33 @@ export async function rollbackCheckpoint(checkpointId: number): Promise<{
   )
 }
 
+/* ------------------------------------------------------------------ */
+/* 只读工具：文件查看 / 网页阅读（与 agent 工具共用同一套安全边界）      */
+/* ------------------------------------------------------------------ */
+
+export interface FsEntry {
+  name: string
+  type: "dir" | "file"
+  size?: number
+  mtime?: number
+}
+
+export async function fetchFsTree(path: string): Promise<{ path?: string; entries?: FsEntry[]; error?: string }> {
+  return readJson(await fetchWithTimeout(`/api/fs/tree?path=${encodeURIComponent(path)}`))
+}
+
+export async function fetchFsRead(
+  path: string,
+): Promise<{ name?: string; path?: string; content?: string; size?: number; truncated?: boolean; binary?: boolean; error?: string }> {
+  return readJson(await fetchWithTimeout(`/api/fs/read?path=${encodeURIComponent(path)}`))
+}
+
+export async function browseUrl(
+  url: string,
+): Promise<{ title?: string; url?: string; content?: string; error?: string }> {
+  return readJson(await fetchWithTimeout(`/api/browse?url=${encodeURIComponent(url)}`))
+}
+
 export async function streamChat(
   prompt: string,
   onEvent: (ev: ChatEvent) => void,

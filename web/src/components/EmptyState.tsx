@@ -1,4 +1,5 @@
 import { memo } from "react"
+import { BrandMark } from "./BrandMark"
 import { IconSpark } from "./icons"
 
 const suggestions = [
@@ -11,8 +12,8 @@ export const EmptyState = memo(function EmptyState({ onPick }: { onPick: (prompt
   return (
     <div className="flex h-full items-center justify-center">
       <div className="anim-fade-up mx-auto max-w-xl px-6 py-10 text-center">
-        <div className="mx-auto mb-5 flex h-14 w-14 items-center justify-center rounded-2xl bg-accent-soft">
-          <IconSpark size={28} />
+        <div className="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-[20px]">
+          <BrandMark size={64} />
         </div>
         <h1 className="text-2xl font-bold tracking-tight text-ink">Spark</h1>
         <p className="mt-2 text-sm leading-relaxed text-ink2">本地自托管的 AI 编程智能体，代码与密钥都在你手里</p>

@@ -1,7 +1,8 @@
 import { memo, useMemo, useState } from "react"
 import type { SessionRow } from "../types"
-import { IconHistory, IconMonitor, IconMoon, IconPlus, IconSearch, IconSettings, IconSpark, IconSun, IconTrash, IconX } from "./icons"
+import { IconHistory, IconMonitor, IconMoon, IconPlus, IconSearch, IconSettings, IconSun, IconTrash, IconX } from "./icons"
 import { cls, IconButton } from "./ui"
+import { BrandMark } from "./BrandMark"
 import { useUiStore } from "../store/uiStore"
 import { useSessionStore } from "../store/sessionStore"
 
@@ -82,9 +83,7 @@ export const Sidebar = memo(function Sidebar() {
       >
         {/* 头部 */}
         <div className="flex items-center gap-2 px-3 pt-3 pb-2">
-          <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-accent-soft">
-            <IconSpark size={17} />
-          </div>
+          <BrandMark size={28} />
           <span className="text-[15px] font-bold tracking-tight text-ink">Spark</span>
           <div className="ml-auto flex items-center gap-0.5">
             <IconButton title="收起侧边栏" onClick={() => setSidebarOpen(false)} className="lg:hidden">

@@ -3,7 +3,7 @@ import { useSessionStore } from "../store/sessionStore"
 import { useUiStore } from "../store/uiStore"
 import { ContextMeter } from "./ContextMeter"
 import { IconButton } from "./ui"
-import { IconCommand, IconMenu } from "./icons"
+import { IconCommand, IconFolder, IconGlobe, IconMenu } from "./icons"
 
 export const Header = memo(function Header() {
   const status = useSessionStore((s) => s.status)
@@ -11,6 +11,8 @@ export const Header = memo(function Header() {
   const streaming = useChatStoreStreaming()
   const toggleSidebar = useUiStore((s) => s.toggleSidebar)
   const setPaletteOpen = useUiStore((s) => s.setPaletteOpen)
+  const openFiles = useUiStore((s) => s.openFiles)
+  const openBrowser = useUiStore((s) => s.openBrowser)
 
   const title = (status && status.session_id && sessionTitle()) || "新对话"
 
@@ -35,6 +37,12 @@ export const Header = memo(function Header() {
       )}
 
       <ContextMeter />
+      <IconButton title="文件查看器" onClick={openFiles}>
+        <IconFolder size={16} />
+      </IconButton>
+      <IconButton title="网页阅读" onClick={openBrowser}>
+        <IconGlobe size={16} />
+      </IconButton>
       <IconButton title="命令面板 (Ctrl+K)" onClick={() => setPaletteOpen(true)}>
         <IconCommand size={16} />
       </IconButton>

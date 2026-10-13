@@ -16,6 +16,8 @@ interface UiState {
   sidebarOpen: boolean
   paletteOpen: boolean
   checkpointsOpen: boolean
+  filesOpen: boolean
+  browserOpen: boolean
   checkpoints: CheckpointRow[]
   cpsBusy: boolean
   toasts: ToastItem[]
@@ -29,6 +31,10 @@ interface UiState {
   setPaletteOpen: (open: boolean) => void
   openCheckpoints: () => void
   closeCheckpoints: () => void
+  openFiles: () => void
+  closeFiles: () => void
+  openBrowser: () => void
+  closeBrowser: () => void
   setCheckpoints: (rows: CheckpointRow[]) => void
   setCpsBusy: (busy: boolean) => void
   pushToast: (key: TranslationKey, kind?: ToastItem["kind"]) => void
@@ -44,6 +50,8 @@ export const useUiStore = create<UiState>((set) => ({
   sidebarOpen: window.innerWidth >= 1024,
   paletteOpen: false,
   checkpointsOpen: false,
+  filesOpen: false,
+  browserOpen: false,
   checkpoints: [],
   cpsBusy: false,
   toasts: [],
@@ -67,8 +75,12 @@ export const useUiStore = create<UiState>((set) => ({
   setSidebarOpen: (open) => set({ sidebarOpen: open }),
   setPaletteOpen: (open) => set({ paletteOpen: open }),
 
-  openCheckpoints: () => set({ checkpointsOpen: true, settingsOpen: false }),
+  openCheckpoints: () => set({ checkpointsOpen: true, settingsOpen: false, filesOpen: false, browserOpen: false }),
   closeCheckpoints: () => set({ checkpointsOpen: false }),
+  openFiles: () => set({ filesOpen: true, settingsOpen: false, checkpointsOpen: false, browserOpen: false }),
+  closeFiles: () => set({ filesOpen: false }),
+  openBrowser: () => set({ browserOpen: true, settingsOpen: false, checkpointsOpen: false, filesOpen: false }),
+  closeBrowser: () => set({ browserOpen: false }),
   setCheckpoints: (rows) => set({ checkpoints: rows }),
   setCpsBusy: (busy) => set({ cpsBusy: busy }),
 

@@ -6,6 +6,8 @@ import { Composer } from "./components/Composer"
 import { ApprovalModal } from "./components/ApprovalModal"
 import { CommandPalette } from "./components/CommandPalette"
 import { CheckpointModal } from "./components/CheckpointModal"
+import { FileViewer } from "./components/FileViewer"
+import { BrowserModal } from "./components/BrowserModal"
 import Toast from "./components/Toast"
 import { fetchStatus } from "./api"
 import type { Status } from "./types"
@@ -67,6 +69,8 @@ export default function App() {
       <ApprovalModal />
       <CommandPalette />
       <CheckpointModal />
+      <FileViewer />
+      <BrowserModal />
       {settingsOpen && (
         <Suspense fallback={null}>
           <SettingsModal onClose={closeSettings} onSaved={handleSaved} />

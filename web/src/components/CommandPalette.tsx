@@ -5,6 +5,8 @@ import { cls, Kbd } from "./ui"
 import {
   IconCheck,
   IconCommand,
+  IconFile,
+  IconGlobe,
   IconHistory,
   IconLayers,
   IconMonitor,
@@ -33,6 +35,8 @@ export const CommandPalette = memo(function CommandPalette() {
   const setTheme = useUiStore((s) => s.setTheme)
   const openSettings = useUiStore((s) => s.openSettings)
   const openCheckpoints = useUiStore((s) => s.openCheckpoints)
+  const openFiles = useUiStore((s) => s.openFiles)
+  const openBrowser = useUiStore((s) => s.openBrowser)
   const handleNewSession = useSessionStore((s) => s.handleNewSession)
   const sessions = useSessionStore((s) => s.sessions)
   const handleSwitch = useSessionStore((s) => s.handleSwitch)
@@ -101,6 +105,28 @@ export const CommandPalette = memo(function CommandPalette() {
         },
       },
       {
+        id: "files",
+        group: "通用",
+        title: "文件查看器",
+        hint: "",
+        icon: <IconFile size={15} />,
+        run: () => {
+          openFiles()
+          setOpen(false)
+        },
+      },
+      {
+        id: "browser",
+        group: "通用",
+        title: "网页阅读",
+        hint: "",
+        icon: <IconGlobe size={15} />,
+        run: () => {
+          openBrowser()
+          setOpen(false)
+        },
+      },
+      {
         id: "theme",
         group: "通用",
         title: `主题：切换为${nextTheme === "light" ? "亮色" : nextTheme === "dark" ? "暗色" : "跟随系统"}`,
@@ -129,7 +155,7 @@ export const CommandPalette = memo(function CommandPalette() {
       },
     }))
     return [...base, ...sessionCmds]
-  }, [theme, lang, sessions, status, handleNewSession, handleSwitch, setOpen, openSettings, openCheckpoints, setTheme, setLang])
+  }, [theme, lang, sessions, status, handleNewSession, handleSwitch, setOpen, openSettings, openCheckpoints, openFiles, openBrowser, setTheme, setLang])
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()

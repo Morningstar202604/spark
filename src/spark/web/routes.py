@@ -15,8 +15,9 @@ from __future__ import annotations
 
 import json as _json
 import logging
+from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 from spark.web._handlers import (  # noqa: F401  (re-export for backward-compat)
     _handle_agents_md,
@@ -39,6 +40,93 @@ from spark.web._httpbase import HandlerBase
 from spark.web._routing import _route_state  # noqa: E402
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# 只读工具 API（文件查看 / 网页阅读）
+# - 文件接口被严格限制在 state.workdir 之内（resolve + 前缀校验）
+# - browse 复用 agent 的 web_fetch 通道（含 SSRF 防护），不做客户端渲染
+# ---------------------------------------------------------------------------
+
+_SKIP_DIRS = {".git", "__pycache__", "node_modules", ".venv", ".next", ".spark"}
+
+
+def _resolve_in_workdir(workdir: str, rel: str) -> Path | None:
+    """Resolve *rel* (relative or absolute) inside *workdir*; None when escaping."""
+    try:
+        base = Path(workdir).resolve()
+        target = (base / rel).resolve() if rel else base
+        target.relative_to(base)
+        return target
+    except (ValueError, OSError):
+        return None
+
+
+def _fs_tree(workdir: str, rel: str) -> dict[str, Any]:
+    base = _resolve_in_workdir(workdir, rel)
+    if base is None:
+        return {"error": "path outside workdir"}
+    if not base.exists():
+        return {"error": "not found"}
+    if not base.is_dir():
+        return {"error": "not a directory"}
+    entries: list[dict[str, Any]] = []
+    try:
+        children = sorted(base.iterdir(), key=lambda p: (not p.is_dir(), p.name.lower()))
+    except OSError:
+        return {"error": "unreadable directory"}
+    for p in children:
+        if p.name in _SKIP_DIRS or p.name.startswith("."):
+            continue
+        if p.is_dir():
+            entries.append({"name": p.name, "type": "dir"})
+        else:
+            try:
+                size = p.stat().st_size
+                mtime = int(p.stat().st_mtime)
+            except OSError:
+                size, mtime = 0, 0
+            entries.append({"name": p.name, "type": "file", "size": size, "mtime": mtime})
+        if len(entries) >= 500:
+            break
+    return {"path": str(base), "entries": entries}
+
+
+_MAX_READ_CHARS = 100_000
+
+
+def _fs_read(workdir: str, rel: str) -> dict[str, Any]:
+    target = _resolve_in_workdir(workdir, rel)
+    if target is None:
+        return {"error": "path outside workdir"}
+    if not target.exists() or not target.is_file():
+        return {"error": "not found"}
+    try:
+        raw = target.read_bytes()
+    except OSError:
+        return {"error": "unreadable file"}
+    if b"\x00" in raw[:8192]:
+        return {"name": target.name, "binary": True, "size": len(raw)}
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        return {"name": target.name, "binary": True, "size": len(raw)}
+    truncated = len(text) > _MAX_READ_CHARS
+    return {
+        "name": target.name,
+        "path": str(target),
+        "content": text[:_MAX_READ_CHARS],
+        "size": len(raw),
+        "truncated": truncated,
+    }
+
+
+def _browse(url: str) -> dict[str, Any]:
+    from spark.tools.web import fetch_page
+
+    try:
+        return fetch_page(url, max_chars=12000)
+    except Exception as exc:  # noqa: BLE001  (surface a friendly message)
+        return {"url": url, "error": str(exc)}
 
 
 def build_handler_class(html: str):
@@ -334,6 +422,24 @@ def build_handler_class(html: str):
                             continue
                         messages.append(msg_entry)
                 self._json(200, {"session_id": state.session_id, "messages": messages})
+                return
+            if path == "/api/fs/tree":
+                query = parse_qs(urlparse(self.path).query)
+                rel = (query.get("path", [""])[0] or "").strip()
+                self._json(200, _fs_tree(str(state.workdir), rel))
+                return
+            if path == "/api/fs/read":
+                query = parse_qs(urlparse(self.path).query)
+                rel = (query.get("path", [""])[0] or "").strip()
+                self._json(200, _fs_read(str(state.workdir), rel))
+                return
+            if path == "/api/browse":
+                query = parse_qs(urlparse(self.path).query)
+                url = (query.get("url", [""])[0] or "").strip()
+                if not url:
+                    self._json(400, {"error": "url required"})
+                    return
+                self._json(200, _browse(url))
                 return
             self._json(404, {"error": "not found"})
 
