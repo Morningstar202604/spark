@@ -44,6 +44,13 @@ dev = [
     "ruff>=0.7",
     "mypy>=1.11",
     "bandit>=1.7",
+    "pre-commit>=3.6",
+]
+# P0-9: 观测（Langfuse 自托管 = OTLP 端点，spark 直接接入 OTLP 即可）
+telemetry = [
+    "opentelemetry-api>=1.28",
+    "opentelemetry-sdk>=1.28",
+    "opentelemetry-exporter-otlp-proto-grpc>=1.28",
 ]
 desktop = [
     "pywebview>=5.0",

@@ -193,6 +193,47 @@ class OpenAICompatProvider:
         with a budget scaled to the effort tier (cache-friendly: the fixed
         system + tools stay a stable prefix, effort only varies the tail).
         """
+        # P0-9: OTel span 包裹整个流式调用（含重试），观测模型/effort/时长/结果
+        span = None
+        try:
+            from spark.otel import get_tracer
+
+            span = get_tracer().start_span(
+                "llm.stream",
+                attributes={
+                    "llm.model": self.model,
+                    "gen_ai.request.model": self.model,
+                    "gen_ai.usage.input_tokens": 0,
+                    "spark.effort": effort or "",
+                },
+            )
+        except Exception:  # pragma: no cover - 观测不可用时不影响主流程
+            span = None
+
+        try:
+            async for delta in self._stream_impl(messages, tools, effort):
+                yield delta
+            if span is not None:
+                from opentelemetry.trace import Status, StatusCode
+
+                span.set_status(Status(StatusCode.OK))
+        except Exception as exc:
+            if span is not None:
+                from opentelemetry.trace import Status, StatusCode
+
+                span.record_exception(exc)
+                span.set_status(Status(StatusCode.ERROR))
+            raise
+        finally:
+            if span is not None:
+                span.end()
+
+    async def _stream_impl(
+        self,
+        messages: list[ChatMessage],
+        tools: list[dict],
+        effort: str | None = None,
+    ) -> AsyncIterator[ChatDelta]:
         last_exc: Exception | None = None
         for attempt in range(self.max_retries + 1):
             try:
