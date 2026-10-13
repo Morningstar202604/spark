@@ -1,37 +1,30 @@
-import { useState } from "react"
-import { t } from "../i18n"
-import { useUiStore } from "../store/uiStore"
+import { memo, useState } from "react"
+import { Spinner, cls } from "./ui"
+import { IconChevronRight } from "./icons"
 
-interface Props {
-  text: string
-  active: boolean
-}
-
-export default function ThinkingBlock({ text, active }: Props) {
-  const lang = useUiStore((s) => s.lang)
+/** 思维链折叠块（reasoning） */
+export const ThinkingBlock = memo(function ThinkingBlock({ text, streaming }: { text: string; streaming?: boolean }) {
   const [open, setOpen] = useState(false)
-
-  if (!text) return null
   return (
-    <div className="w-full max-w-4xl overflow-hidden rounded-xl border border-spark-user/35 bg-spark-user/8 text-xs">
+    <div className="my-1 overflow-hidden rounded-lg border border-line bg-panel">
       <button
         type="button"
-        onClick={() => setOpen(!open)}
-        className="flex w-full items-center gap-2 px-3 py-2 text-left text-spark-user"
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center gap-2 px-3 py-1.5 text-left transition-colors hover:bg-hover"
+        aria-expanded={open}
       >
-        <span className={`text-[10px] transition-transform ${open ? "rotate-90" : ""}`}>▶</span>
-        {active ? (
-          <span className="animate-pulse font-bold">{t("common.thinking", lang)}</span>
-        ) : (
-          <span className="font-bold">{t("common.thinkingProcess", lang)}</span>
-        )}
-        <span className="ml-auto text-[10px] text-spark-muted">{t("common.charCount", lang, { n: text.length })}</span>
+        <span className={cls("shrink-0 text-ink3 transition-transform", open && "rotate-90")}>
+          <IconChevronRight size={12} />
+        </span>
+        {streaming ? <Spinner size={11} className="text-accent" /> : <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-warn" />}
+        <span className="text-xs font-medium text-ink2">思考过程</span>
+        <span className="ml-auto text-[10px] text-ink3">{streaming ? "思考中…" : `${text.length} 字`}</span>
       </button>
       {open && (
-        <div className="max-h-56 overflow-auto border-t border-spark-user/25 px-3 py-2 whitespace-pre-wrap break-words text-spark-text/75">
-          {text}
+        <div className="anim-fade border-t border-line px-3 py-2">
+          <p className="text-[12.5px] leading-relaxed whitespace-pre-wrap text-ink2">{text}</p>
         </div>
       )}
     </div>
   )
-}
+})

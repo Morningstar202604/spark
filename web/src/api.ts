@@ -354,10 +354,10 @@ export async function streamChat(
       }
       attempt++
       if (attempt > MAX_RETRIES) {
-        useUiStore.getState().pushToast("连接已断开", "error")
+        useUiStore.getState().pushToast("toast.sendFailed", "error")
         throw e
       }
-      useUiStore.getState().pushToast("正在重连…", "info")
+      useUiStore.getState().pushToast("toast.reconnecting", "info")
       const delay = Math.min(BASE_DELAY * Math.pow(2, attempt - 1), 32000)
       await new Promise((r) => setTimeout(r, delay))
       if (signal?.aborted) {

@@ -6,30 +6,30 @@ import { initTheme } from "./theme"
 
 initTheme()
 
-class RootErrorBoundary extends React.Component<
-  { children: React.ReactNode },
-  { error: Error | null }
-> {
-  state: { error: Error | null } = { error: null };
-  static getDerivedStateFromError(error: Error) { return { error }; }
+class RootErrorBoundary extends React.Component<{ children: React.ReactNode }, { error: Error | null }> {
+  state: { error: Error | null } = { error: null }
+  static getDerivedStateFromError(error: Error) {
+    return { error }
+  }
   render() {
     if (this.state.error) {
       return (
-        <div className="flex h-screen items-center justify-center bg-spark-bg p-6 text-fg">
+        <div className="flex h-full items-center justify-center bg-canvas p-6 text-ink">
           <div className="text-center space-y-3">
             <div className="text-3xl">⚠️</div>
-            <p className="text-sm text-fg-muted">Something went wrong</p>
+            <p className="text-sm text-ink2">Something went wrong</p>
+            <p className="max-w-sm text-xs text-ink3">{String(this.state.error)}</p>
             <button
-              className="rounded bg-accent px-4 py-1.5 text-sm text-on-accent"
+              className="rounded-lg bg-accent px-4 py-1.5 text-sm font-medium text-on-accent"
               onClick={() => window.location.reload()}
             >
               刷新重试
             </button>
           </div>
         </div>
-      );
+      )
     }
-    return this.props.children;
+    return this.props.children
   }
 }
 

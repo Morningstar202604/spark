@@ -1,129 +1,95 @@
-import { memo, useEffect, useState } from "react"
+import { memo, useCallback, useState } from "react"
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
-import "highlight.js/styles/github.css"
-import hljs from "highlight.js/lib/core"
-import type { LanguageFn } from "highlight.js"
-import bash from "highlight.js/lib/languages/bash"
-import python from "highlight.js/lib/languages/python"
-import typescript from "highlight.js/lib/languages/typescript"
-import javascript from "highlight.js/lib/languages/javascript"
-import json from "highlight.js/lib/languages/json"
+import hljs from "highlight.js/lib/common"
+import { IconCheck, IconCopy } from "./icons"
+import { useUiStore } from "../store/uiStore"
+import { resolveTheme } from "../theme"
+import { cls } from "./ui"
 
-hljs.registerLanguage("bash", bash)
-hljs.registerLanguage("shell", bash)
-hljs.registerLanguage("python", python)
-hljs.registerLanguage("py", python)
-hljs.registerLanguage("typescript", typescript)
-hljs.registerLanguage("ts", typescript)
-hljs.registerLanguage("tsx", typescript)
-hljs.registerLanguage("javascript", javascript)
-hljs.registerLanguage("js", javascript)
-hljs.registerLanguage("json", json)
-
-const deferredLanguageLoads = new Map<string, Promise<LanguageFn>>()
-
-function loadDeferredLanguage(language: string): Promise<LanguageFn> {
-  const canonical = language === "toml" ? "ini" : language
-  const existing = deferredLanguageLoads.get(canonical)
-  if (existing) return existing
-
-  const promise = (canonical === "ini" ? import("highlight.js/lib/languages/ini") : import("highlight.js/lib/languages/sql"))
-    .then(({ default: languageFn }) => {
-      hljs.registerLanguage(canonical, languageFn)
-      if (canonical === "ini") hljs.registerLanguage("toml", languageFn)
-      return languageFn
-    })
-    .catch((error: unknown) => {
-      deferredLanguageLoads.delete(canonical)
-      throw error
-    })
-  deferredLanguageLoads.set(canonical, promise)
-  return promise
-}
+// 语言缺失时由 CodeBlock 内的 highlightAuto 兜底，无需手动注册
 
 function CodeBlock({ code, lang }: { code: string; lang: string }) {
+  const [copied, setCopied] = useState(false)
   const language = lang.toLowerCase()
-  const deferred = language === "toml" || language === "ini" || language === "sql"
-  const [ready, setReady] = useState(!deferred || Boolean(hljs.getLanguage(language)))
-
-  useEffect(() => {
-    if (!deferred || hljs.getLanguage(language)) {
-      setReady(true)
-      return
-    }
-    let active = true
-    setReady(false)
-    loadDeferredLanguage(language)
-      .then(() => {
-        if (active) setReady(true)
-      })
-      .catch(() => {
-        if (active) setReady(false)
-      })
-    return () => {
-      active = false
-    }
-  }, [deferred, language])
-
   let highlighted = ""
   let ok = false
-  if (ready && hljs.getLanguage(language)) {
-    try {
+  try {
+    if (language && hljs.getLanguage(language)) {
       highlighted = hljs.highlight(code, { language }).value
       ok = true
-    } catch {
-      ok = false
+    } else {
+      highlighted = hljs.highlightAuto(code).value
+      ok = true
     }
+  } catch {
+    ok = false
   }
+
+  const copy = useCallback(() => {
+    navigator.clipboard?.writeText(code).catch(() => {})
+    setCopied(true)
+    window.setTimeout(() => setCopied(false), 1400)
+  }, [code])
+
   return (
-    <div className="my-2 overflow-hidden rounded-lg border border-spark-line">
-      <div className="flex items-center justify-between bg-spark-side px-3 py-1 text-[10px] tracking-wider text-spark-muted uppercase">
-        <span>{lang || "text"}</span>
+    <div className="codeblock anim-fade">
+      <div className="codeblock-header">
+        <span className="flex items-center gap-2">
+          <span className="font-semibold text-ink2">{lang || "text"}</span>
+          {ok && <span className="text-[10px] text-ink3">{code.split("\n").length} 行</span>}
+        </span>
         <button
           type="button"
-          onClick={() => navigator.clipboard?.writeText(code)}
-          className="rounded px-1.5 py-0.5 hover:bg-spark-line"
+          onClick={copy}
+          className="flex items-center gap-1 rounded-md px-1.5 py-0.5 text-ink3 transition-colors hover:bg-hover hover:text-ink"
         >
-          复制
+          {copied ? <IconCheck size={12} className="text-ok" /> : <IconCopy size={12} />}
+          <span>{copied ? "已复制" : "复制"}</span>
         </button>
       </div>
-      <pre className="overflow-auto p-3 text-xs leading-relaxed">
-        {ok ? (
-          <code className="hljs" dangerouslySetInnerHTML={{ __html: highlighted }} />
-        ) : (
-          <code>{code}</code>
-        )}
+      <pre tabIndex={0} aria-label="代码块，可滚动">
+        {ok ? <code className={cls("hljs")} dangerouslySetInnerHTML={{ __html: highlighted }} /> : <code>{code}</code>}
       </pre>
     </div>
   )
 }
 
 function DiffBlock({ code }: { code: string }) {
+  const theme = useUiStore((s) => s.theme)
+  const dark = resolveTheme(theme) === "dark"
   const lines = code.split("\n")
   return (
-    <pre className="my-2 overflow-auto rounded-lg border border-spark-line bg-spark-code p-3 font-mono text-xs leading-relaxed">
-      {lines.map((line, i) => {
-        const cls = line.startsWith("+")
-          ? "text-spark-ok bg-spark-ok/12"
-          : line.startsWith("-")
-            ? "text-spark-err bg-spark-err/12"
-            : line.startsWith("@@")
-              ? "text-spark-user"
-              : "text-spark-muted"
-        return (
-          <div key={i} className={`px-1 ${cls}`}>
-            {line || " "}
-          </div>
-        )
-      })}
+    <pre className="codeblock max-h-[520px] overflow-auto p-0" tabIndex={0} aria-label="代码差异，可滚动">
+      <div className="codeblock-header">
+        <span className="font-semibold text-ink2">diff</span>
+        <span className="text-[10px] text-ink3">+{lines.filter((l) => l.startsWith("+") && !l.startsWith("+++")).length} / -{lines.filter((l) => l.startsWith("-") && !l.startsWith("---")).length}</span>
+      </div>
+      <div className="p-0">
+        {lines.map((line, i) => {
+          const add = line.startsWith("+") && !line.startsWith("+++")
+          const del = line.startsWith("-") && !line.startsWith("---")
+          const hunk = line.startsWith("@@")
+          const clsLine = add ? cls("add", dark && "dark") : del ? cls("del", dark && "dark") : hunk ? "hunk" : "ctx"
+          return (
+            <div key={i} className={cls("diff-line", clsLine)}>
+              {line || " "}
+            </div>
+          )
+        })}
+      </div>
     </pre>
   )
 }
 
+function looksLikeDiff(text: string): boolean {
+  const lines = text.split("\n")
+  return lines.some((l) => l.startsWith("@@")) && (lines.some((l) => l.startsWith("+")) || lines.some((l) => l.startsWith("-")))
+}
+
 const Markdown = memo(function Markdown({ text }: { text: string }) {
   return (
-    <div className="md-body text-sm leading-relaxed">
+    <div className="md-body">
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         components={{
@@ -133,13 +99,13 @@ const Markdown = memo(function Markdown({ text }: { text: string }) {
             const isBlock = raw.includes("\n") || match
             if (!isBlock) {
               return (
-                <code className="rounded bg-spark-code px-1.5 py-0.5 font-mono text-[0.85em] text-spark-accent" {...props}>
+                <code className="inline-code" {...props}>
                   {raw}
                 </code>
               )
             }
             const content = raw.replace(/\n$/, "")
-            if (!match && (content.includes("diff") || /^(?:[+-]{1}[^+-]|[+-]\s)/m.test(content)) && content.split("\n").some((l) => l.startsWith("+") || l.startsWith("-"))) {
+            if (!match && looksLikeDiff(content)) {
               return <DiffBlock code={content} />
             }
             return <CodeBlock code={content} lang={match?.[1] || ""} />
@@ -149,23 +115,23 @@ const Markdown = memo(function Markdown({ text }: { text: string }) {
           },
           a({ href, children }) {
             return (
-              <a href={href} target="_blank" rel="noreferrer" className="text-spark-accent underline">
+              <a href={href} target="_blank" rel="noreferrer" className="hover:underline">
                 {children}
               </a>
             )
           },
           table({ children }) {
             return (
-              <div className="my-2 overflow-auto rounded-lg border border-spark-line">
-                <table className="w-full text-xs">{children}</table>
+              <div className="my-2 overflow-auto rounded-lg border border-line">
+                <table className="w-full text-sm">{children}</table>
               </div>
             )
           },
           th({ children }) {
-            return <th className="border-b border-spark-line bg-spark-side px-3 py-1.5 text-left font-bold">{children}</th>
+            return <th className="border-b border-line bg-panel2 px-3 py-2 text-left font-semibold text-ink2">{children}</th>
           },
           td({ children }) {
-            return <td className="border-b border-spark-line/50 px-3 py-1.5">{children}</td>
+            return <td className="border-b border-line/60 px-3 py-2 text-ink2">{children}</td>
           },
         }}
       >

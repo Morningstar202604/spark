@@ -238,6 +238,11 @@ const dict = {
     "toast.approvalFailed": "审批响应失败，请重试",
     "toast.historyLoadFailed": "历史消息加载失败",
     "toast.sendFailed": "发送失败：后端连接中断或模型不可用",
+    "toast.backendError": "无法连接后端服务，请确认 spark web 正在运行",
+    "toast.checkpointsLoadFailed": "检查点加载失败",
+    "toast.rollbackDone": "已回滚到检查点，工作区与对话已还原",
+    "toast.rollbackFailed": "回滚失败，请重试",
+    "toast.reconnecting": "正在重连…",
   },
 
   en: {
@@ -477,6 +482,11 @@ const dict = {
     "toast.approvalFailed": "Approval response failed, please retry",
     "toast.historyLoadFailed": "Failed to load history messages",
     "toast.sendFailed": "Send failed: backend disconnected or model unavailable",
+    "toast.backendError": "Backend unreachable. Make sure spark web is running",
+    "toast.checkpointsLoadFailed": "Failed to load checkpoints",
+    "toast.rollbackDone": "Rolled back to checkpoint. Workspace and chat restored",
+    "toast.rollbackFailed": "Rollback failed, please retry",
+    "toast.reconnecting": "Reconnecting…",
   },
 } as const
 

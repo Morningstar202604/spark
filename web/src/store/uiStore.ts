@@ -1,59 +1,86 @@
 import { create } from "zustand"
-import { getDefaultLang, setDefaultLang, type Lang } from "../i18n"
-import type { ToastItem } from "../components/Toast"
+import { getDefaultLang, setDefaultLang, type Lang, type TranslationKey } from "../i18n"
+import type { Theme } from "../theme"
+import { applyTheme, getStoredTheme, initTheme } from "../theme"
 import type { CheckpointRow } from "../api"
 
+export interface ToastItem {
+  id: number
+  key: TranslationKey
+  kind: "error" | "success" | "info"
+}
+
 interface UiState {
+  theme: Theme
   settingsOpen: boolean
   sidebarOpen: boolean
-  cpsOpen: boolean
+  paletteOpen: boolean
+  checkpointsOpen: boolean
   checkpoints: CheckpointRow[]
   cpsBusy: boolean
   toasts: ToastItem[]
+  lang: Lang
+  setTheme: (t: Theme) => void
+  cycleTheme: () => void
   openSettings: () => void
   closeSettings: () => void
   toggleSidebar: () => void
   setSidebarOpen: (open: boolean) => void
+  setPaletteOpen: (open: boolean) => void
   openCheckpoints: () => void
   closeCheckpoints: () => void
   setCheckpoints: (rows: CheckpointRow[]) => void
   setCpsBusy: (busy: boolean) => void
-  pushToast: (text: string, kind?: ToastItem["kind"]) => void
-  lang: Lang
-  setLang: (lang: Lang) => void
+  pushToast: (key: TranslationKey, kind?: ToastItem["kind"]) => void
   dismissToast: (id: number) => void
+  setLang: (lang: Lang) => void
 }
 
 let toastCounter = 0
 
 export const useUiStore = create<UiState>((set) => ({
+  theme: initTheme(),
   settingsOpen: false,
-  sidebarOpen: window.innerWidth >= 768,
-  cpsOpen: false,
+  sidebarOpen: window.innerWidth >= 1024,
+  paletteOpen: false,
+  checkpointsOpen: false,
   checkpoints: [],
   cpsBusy: false,
   toasts: [],
+  lang: getDefaultLang(),
+
+  setTheme: (t) => {
+    applyTheme(t)
+    set({ theme: t })
+  },
+  cycleTheme: () => {
+    const order: Theme[] = ["light", "dark", "system"]
+    const cur = getStoredTheme()
+    const next = order[(order.indexOf(cur) + 1) % order.length]
+    applyTheme(next)
+    set({ theme: next })
+  },
 
   openSettings: () => set({ settingsOpen: true }),
   closeSettings: () => set({ settingsOpen: false }),
   toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen })),
   setSidebarOpen: (open) => set({ sidebarOpen: open }),
+  setPaletteOpen: (open) => set({ paletteOpen: open }),
 
-  openCheckpoints: () => set({ cpsOpen: true, cpsBusy: true }),
-  closeCheckpoints: () => set({ cpsOpen: false }),
+  openCheckpoints: () => set({ checkpointsOpen: true, cpsBusy: true }),
+  closeCheckpoints: () => set({ checkpointsOpen: false }),
   setCheckpoints: (rows) => set({ checkpoints: rows }),
   setCpsBusy: (busy) => set({ cpsBusy: busy }),
 
-  lang: getDefaultLang(),
+  pushToast: (key, kind = "error") => {
+    toastCounter += 1
+    const id = toastCounter
+    set((s) => ({ toasts: [...s.toasts.slice(-3), { id, key, kind }] }))
+  },
+  dismissToast: (id) => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })),
+
   setLang: (lang) => {
     setDefaultLang(lang)
     set({ lang })
   },
-
-  pushToast: (text, kind = "error") => {
-    toastCounter += 1
-    const id = toastCounter
-    set((s) => ({ toasts: [...s.toasts.slice(-2), { id, text, kind }] }))
-  },
-  dismissToast: (id) => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })),
 }))

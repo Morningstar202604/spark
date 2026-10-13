@@ -1,40 +1,31 @@
 import { create } from "zustand"
-import type { ApprovalInfo, PlanStep, SessionRow, Status, HistoryMessage } from "../types"
-import {
-  listSessions,
-  newSession,
-  switchSession,
-  deleteSession,
-  cancelTurn,
-  respondApproval,
-} from "../api"
+import type { ApprovalInfo, PlanStep, SessionRow, Status, ToolCall } from "../types"
+import { listSessions, newSession, switchSession, deleteSession, cancelTurn, respondApproval } from "../api"
+import { useChatStore, historyToItems, type ChatMsg } from "./chatStore"
 import { useUiStore } from "./uiStore"
-import { useChatStore } from "./chatStore"
-import { t } from "../i18n"
+
+export interface ApprovalState {
+  info: ApprovalInfo
+  tool: ToolCall
+}
 
 interface SessionState {
   status: Status | null
   sessions: SessionRow[]
-  approval: ApprovalInfo | null
+  approval: ApprovalState | null
   approvalBusy: boolean
   plan: PlanStep[]
   setStatus: (s: Status | null) => void
-  setApproval: (a: ApprovalInfo | null) => void
+  patchStatus: (patch: Partial<Status>) => void
+  setApproval: (a: ApprovalState | null) => void
   setPlan: (p: PlanStep[]) => void
+  syncPlanFromItems: (items: ChatMsg[]) => void
   refreshSessions: () => Promise<void>
   handleNewSession: () => Promise<void>
   handleSwitch: (id: string) => Promise<void>
   handleDelete: (id: string) => Promise<void>
   handleCancel: () => Promise<void>
   handleApproval: (decision: "allow" | "allow_always" | "deny") => Promise<void>
-}
-
-function historyToItems(messages: HistoryMessage[]) {
-  return messages.map((m) =>
-    m.role === "tool"
-      ? { kind: "tool" as const, role: "assistant" as const, text: "", call: { id: "", name: m.name || "tool", arguments: {} }, result: m.content, ok: true }
-      : { kind: "message" as const, role: m.role, text: m.content, images: m.images },
-  )
 }
 
 export const useSessionStore = create<SessionState>((set, get) => {
@@ -47,30 +38,43 @@ export const useSessionStore = create<SessionState>((set, get) => {
     plan: [],
 
     setStatus: (s) => set({ status: s }),
+    patchStatus: (patch) => set((s) => ({ status: s.status ? { ...s.status, ...patch } : s.status })),
     setApproval: (a) => set({ approval: a }),
     setPlan: (p) => set({ plan: p }),
+
+    syncPlanFromItems: (items) => {
+      for (let i = items.length - 1; i >= 0; i -= 1) {
+        for (let j = items[i].segments.length - 1; j >= 0; j -= 1) {
+          const seg = items[i].segments[j]
+          if (seg.kind === "plan" && seg.steps.length) {
+            set({ plan: seg.steps })
+            return
+          }
+        }
+      }
+    },
 
     refreshSessions: async () => {
       try {
         const data = await listSessions()
         set({ sessions: data.sessions })
       } catch (e) {
-        useUiStore.getState().pushToast(t("toast.sessionLoadFailed", useUiStore.getState().lang, { msg: e instanceof Error ? e.message : String(e) }))
+        useUiStore.getState().pushToast("toast.sessionLoadFailed", "error")
+        void e
       }
     },
 
     handleNewSession: async () => {
       try {
         const st = await newSession()
-        set({ status: st, plan: [] })
+        set({ status: st, plan: st.plan || [] })
         const chat = useChatStore.getState()
         chat.setItems([])
-        chat.setThinking(null)
         await get().refreshSessions()
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e)
         useChatStore.getState().addErrorItem(msg)
-        useUiStore.getState().pushToast(t("toast.newSessionFailed", useUiStore.getState().lang))
+        useUiStore.getState().pushToast("toast.newSessionFailed", "error")
       }
     },
 
@@ -83,12 +87,11 @@ export const useSessionStore = create<SessionState>((set, get) => {
         const items = historyToItems(data.messages)
         const chat = useChatStore.getState()
         chat.setItems(items)
-        chat.setThinking(null)
         await get().refreshSessions()
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e)
         useChatStore.getState().addErrorItem(msg)
-        useUiStore.getState().pushToast(t("toast.switchSessionFailed", useUiStore.getState().lang))
+        useUiStore.getState().pushToast("toast.switchSessionFailed", "error")
       }
     },
 
@@ -101,14 +104,13 @@ export const useSessionStore = create<SessionState>((set, get) => {
         if (id === currentStatus.session_id) {
           const chat = useChatStore.getState()
           chat.setItems([])
-          chat.setThinking(null)
           set({ plan: data.status?.plan || [] })
         }
         await get().refreshSessions()
       } catch (e) {
-        const msg = t("toast.deleteFailed", useUiStore.getState().lang, { msg: e instanceof Error ? e.message : String(e) })
-        useChatStore.getState().addErrorItem(msg)
-        useUiStore.getState().pushToast(t("toast.deleteSessionFailed", useUiStore.getState().lang))
+        const msg = e instanceof Error ? e.message : String(e)
+        void msg
+        useUiStore.getState().pushToast("toast.deleteSessionFailed", "error")
       }
     },
 
@@ -116,7 +118,7 @@ export const useSessionStore = create<SessionState>((set, get) => {
       try {
         await cancelTurn()
       } catch {
-        useUiStore.getState().pushToast(t("toast.cancelFailed", useUiStore.getState().lang))
+        useUiStore.getState().pushToast("toast.cancelFailed", "error")
       }
     },
 
@@ -128,7 +130,7 @@ export const useSessionStore = create<SessionState>((set, get) => {
         await respondApproval(decision)
         set({ approval: null })
       } catch {
-        useUiStore.getState().pushToast(t("toast.approvalFailed", useUiStore.getState().lang))
+        useUiStore.getState().pushToast("toast.approvalFailed", "error")
       } finally {
         approvalBusyRef = false
         set({ approvalBusy: false })

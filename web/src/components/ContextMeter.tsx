@@ -1,57 +1,47 @@
-import { useEffect, useRef, useState } from "react"
-import type { ContextUsage } from "../types"
-import { t } from "../i18n"
-import { useUiStore } from "../store/uiStore"
+import { memo } from "react"
+import { cls } from "./ui"
+import { useSessionStore } from "../store/sessionStore"
 
-function fmt(n: number): string {
-  if (n >= 1024) return `${(n / 1024).toFixed(1)}k`
-  return String(n)
-}
+/** 上下文用量环（顶部） */
+export const ContextMeter = memo(function ContextMeter() {
+  const context = useSessionStore((s) => s.status?.context)
+  const show = useSessionStore((s) => s.status?.display?.show_context ?? true)
+  if (!show || !context) return null
 
-/** Ease the displayed percentage toward the real one so the meter glides
- *  instead of jumping when a turn suddenly fills the context window. */
-function useAnimatedPercent(target: number): number {
-  const [display, setDisplay] = useState(target)
-  const rafRef = useRef<number | null>(null)
-  useEffect(() => {
-    if (Math.abs(target - display) < 0.5) {
-      setDisplay(target)
-      return
-    }
-    const step = () => {
-      setDisplay((prev) => {
-        const next = prev + (target - prev) * 0.18
-        return Math.abs(target - next) < 0.5 ? target : next
-      })
-      rafRef.current = requestAnimationFrame(step)
-    }
-    rafRef.current = requestAnimationFrame(step)
-    return () => {
-      if (rafRef.current !== null) cancelAnimationFrame(rafRef.current)
-    }
-  }, [target])
-  return display
-}
+  const { used, limit, percent } = context
+  const pct = Math.min(100, Math.max(0, Math.round(percent ?? (limit ? (used / limit) * 100 : 0))))
+  const danger = pct >= 85
+  const warn = pct >= 60 && pct < 85
 
-export default function ContextMeter({ usage }: { usage: ContextUsage | null | undefined }) {
-  const lang = useUiStore((s) => s.lang)
-  if (!usage || !usage.limit) return null
-  const percent = Math.min(100, usage.percent || 0)
-  const shown = useAnimatedPercent(percent)
-  const color =
-    percent >= 85 ? "bg-red-500" : percent >= 65 ? "bg-amber-400" : "bg-spark-accent"
+  const R = 8.5
+  const C = 2 * Math.PI * R
+
   return (
-    <div className="flex items-center gap-1.5" title={t("context.title", lang, { used: fmt(usage.used), limit: fmt(usage.limit), threshold: 85 })}>
-      <div className="hidden h-1.5 w-16 overflow-hidden rounded-full bg-spark-line sm:block sm:w-24">
-        <div
-          className={`h-full rounded-full transition-colors duration-500 ${color}`}
-          style={{ width: `${Math.max(2, shown)}%` }}
-        />
-      </div>
-      <span className={`text-[10px] tabular-nums sm:hidden ${percent >= 85 ? "text-spark-err" : "text-spark-muted"}`}>{percent.toFixed(0)}%</span>
-      <span className={`hidden text-[10px] tabular-nums sm:inline ${percent >= 85 ? "text-spark-err" : "text-spark-muted"}`}>
-        {t("context.used", lang, { percent: percent.toFixed(0) })}
+    <button
+      type="button"
+      title={`上下文 ${Math.round(used / 1000)}k / ${Math.round(limit / 1000)}k tokens（${pct}%），超过阈值自动压缩`}
+      className="group flex items-center gap-1.5 rounded-full px-1.5 py-1 transition-colors hover:bg-hover"
+    >
+      <span className="relative flex h-5.5 w-5.5 items-center justify-center">
+        <svg width="22" height="22" viewBox="0 0 24 24" className="-rotate-90">
+          <circle cx="12" cy="12" r={R} fill="none" stroke="var(--line2)" strokeWidth="2.5" />
+          <circle
+            cx="12"
+            cy="12"
+            r={R}
+            fill="none"
+            stroke={danger ? "var(--err)" : warn ? "var(--warn)" : "var(--accent)"}
+            strokeWidth="2.5"
+            strokeLinecap="round"
+            strokeDasharray={C}
+            strokeDashoffset={C * (1 - pct / 100)}
+            className="transition-[stroke-dashoffset] duration-500"
+          />
+        </svg>
       </span>
-    </div>
+      <span className={cls("font-mono text-[11px] tabular-nums", danger ? "text-err" : warn ? "text-warn" : "text-ink2")}>
+        {pct}%
+      </span>
+    </button>
   )
-}
+})

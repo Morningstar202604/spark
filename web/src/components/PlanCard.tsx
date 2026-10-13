@@ -1,56 +1,65 @@
-import { useState } from "react"
+import { memo, useState } from "react"
+import type { ReactNode } from "react"
 import type { PlanStep } from "../types"
+import { cls } from "./ui"
+import { IconCheck, IconChevronDown } from "./icons"
 
-const ICONS: Record<PlanStep["status"], string> = {
-  completed: "✓",
-  in_progress: "◐",
-  pending: "○",
+const statusMeta: Record<PlanStep["status"], { label: string; icon: ReactNode; cls: string }> = {
+  pending: { label: "待办", icon: <span className="h-3 w-3 rounded-full border-2 border-ink3" />, cls: "text-ink3" },
+  in_progress: { label: "进行中", icon: <span className="spin h-3 w-3 rounded-full border-2 border-accent border-t-transparent" />, cls: "text-accent" },
+  completed: { label: "已完成", icon: <IconCheck size={13} className="text-ok" />, cls: "text-ok" },
 }
 
-const COLORS: Record<PlanStep["status"], string> = {
-  completed: "text-spark-ok",
-  in_progress: "text-spark-accent",
-  pending: "text-spark-muted",
-}
-
-export default function PlanCard({ steps }: { steps: PlanStep[] }) {
-  const [collapsed, setCollapsed] = useState(false)
+/** 计划卡片：垂直步骤列表 + 进度条 */
+export const PlanCard = memo(function PlanCard({ steps }: { steps: PlanStep[] }) {
+  const [open, setOpen] = useState(true)
   if (!steps.length) return null
   const done = steps.filter((s) => s.status === "completed").length
+  const pct = Math.round((done / steps.length) * 100)
+
   return (
-    <div className="rounded-xl border border-spark-line bg-spark-panel px-3 py-2 text-xs">
+    <div className="my-2 overflow-hidden rounded-xl border border-line bg-panel">
       <button
         type="button"
-        onClick={() => setCollapsed((v) => !v)}
-        className="flex w-full items-center gap-2 text-left"
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center gap-2.5 px-3.5 py-2.5 text-left transition-colors hover:bg-hover"
+        aria-expanded={open}
       >
-        <span className="font-bold tracking-wider text-spark-accent uppercase">Plan</span>
-        <span className="rounded bg-spark-line px-1.5 py-0.5 text-[10px] tabular-nums text-spark-muted">
-          {done}/{steps.length}
+        <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-accent-soft text-accent">
+          <IconChevronDown size={13} className={cls("transition-transform", !open && "-rotate-90")} />
         </span>
-        {/* progress bar mirrors the done/total count */}
-        <span className="hidden h-1 flex-1 overflow-hidden rounded-full bg-spark-line sm:block">
-          <span
-            className="block h-full rounded-full bg-spark-accent transition-all duration-500 ease-out"
-            style={{ width: `${(done / steps.length) * 100}%` }}
-          />
+        <span className="text-sm font-semibold text-ink">任务计划</span>
+        <span className="text-[11px] text-ink3">
+          {done}/{steps.length} 完成
         </span>
-        <span className="ml-auto text-[10px] text-spark-muted sm:ml-2">{collapsed ? "展开" : "收起"}</span>
+        <span className="ml-auto flex w-28 items-center gap-2">
+          <span className="h-1.5 flex-1 overflow-hidden rounded-full bg-hover">
+            <span className="block h-full rounded-full bg-accent transition-all duration-500" style={{ width: `${pct}%` }} />
+          </span>
+          <span className="w-9 text-right font-mono text-[11px] text-ink3">{pct}%</span>
+        </span>
       </button>
-      {!collapsed && (
-        <ul className="mt-1.5 flex flex-col gap-1">
-          {steps.map((s, i) => (
-            <li key={i} className="animate-plan-item flex items-start gap-2" style={{ animationDelay: `${Math.min(i * 40, 240)}ms` }}>
-              <span className={`shrink-0 ${COLORS[s.status]} ${s.status === "in_progress" ? "animate-spin-slow" : ""}`}>
-                {ICONS[s.status]}
-              </span>
-              <span className={s.status === "completed" ? "text-spark-muted line-through" : "text-spark-text"}>
-                {s.title}
-              </span>
-            </li>
-          ))}
-        </ul>
+      {open && (
+        <ol className="anim-fade border-t border-line px-3.5 py-2">
+          {steps.map((s, i) => {
+            const m = statusMeta[s.status]
+            return (
+              <li key={i} className="flex items-start gap-2.5 py-1.5">
+                <span className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center">{m.icon}</span>
+                <span
+                  className={cls(
+                    "min-w-0 flex-1 text-[13px] leading-snug",
+                    s.status === "completed" ? "text-ink3 line-through decoration-ink3/50" : s.status === "in_progress" ? "text-ink" : "text-ink2",
+                  )}
+                >
+                  {s.title}
+                </span>
+                <span className={cls("shrink-0 text-[10px]", m.cls)}>{m.label}</span>
+              </li>
+            )
+          })}
+        </ol>
       )}
     </div>
   )
-}
+})

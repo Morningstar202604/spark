@@ -3,25 +3,27 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <meta name="theme-color" content="#fbf8f4" />
-    <meta name="description" content="Spark · Ember — 本地自托管的 AI 编程智能体，代码在你手，密钥在你手。" />
+    <meta name="theme-color" content="#fafafa" />
+    <meta name="description" content="Spark — 本地自托管的 AI 编程智能体：代码在你手，密钥在你手。" />
     <script>
+      // 防 FOUC：首帧即应用正确主题（支持 light / dark / system 三态）
       try {
-        var t = localStorage.getItem("spark-theme");
-        document.documentElement.setAttribute("data-theme", t === "dark" ? "dark" : "light");
+        var t = localStorage.getItem("spark-theme") || "system";
+        var dark = t === "dark" || (t === "system" && window.matchMedia("(prefers-color-scheme: dark)").matches);
+        document.documentElement.setAttribute("data-theme", dark ? "dark" : "light");
       } catch (e) {
         document.documentElement.setAttribute("data-theme", "light");
       }
     </script>
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <title>Spark · Ember</title>
-    <script type="module" crossorigin src="/assets/index-DNsqfV_i.js"></script>
+    <title>Spark · AI 编程智能体</title>
+    <script type="module" crossorigin src="/assets/index-B_OxRyj0.js"></script>
     <link rel="modulepreload" crossorigin href="/assets/react-MjClCPN0.js">
-    <link rel="modulepreload" crossorigin href="/assets/highlight-4kQGT6_r.js">
+    <link rel="modulepreload" crossorigin href="/assets/highlight-qLGoMsY8.js">
     <link rel="modulepreload" crossorigin href="/assets/markdown-XdiI-Hkc.js">
-    <link rel="stylesheet" crossorigin href="/assets/index-DqocAHwT.css">
+    <link rel="stylesheet" crossorigin href="/assets/index-D1z9OBP9.css">
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root"></div>
   </body>
 </html>

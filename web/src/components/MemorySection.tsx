@@ -1,58 +1,54 @@
 import { useCallback, useEffect, useState } from "react"
 import { fetchMemories, memoryAdd, memoryDelete, memoryOptimize, type MemoryItem, type MemoryStats } from "../api"
-import { t } from "../i18n"
-import { useUiStore } from "../store/uiStore"
+import { Badge, Button, Field, Select, TextInput, cls } from "./ui"
+import { IconSearch, IconTrash } from "./icons"
 
-const typeBadge: Record<string, string> = {
-  preference: "bg-spark-user/15 text-spark-user",
-  project: "bg-spark-ok/15 text-spark-ok",
-  lesson: "bg-spark-tool/15 text-spark-tool",
-  general: "bg-spark-line text-spark-muted",
+const typeTone: Record<string, "accent" | "ok" | "warn" | "neutral"> = {
+  preference: "accent",
+  project: "ok",
+  lesson: "warn",
+  general: "neutral",
 }
 
 function fmtTime(ts: number): string {
-  return new Date(ts * 1000).toLocaleString("zh-CN", {
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  })
+  return new Date(ts * 1000).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })
 }
 
 function ItemRow({ item, onDelete }: { item: MemoryItem; onDelete: (id: number) => void }) {
-  const lang = useUiStore((s) => s.lang)
+  const score = typeof item.score === "number" ? item.score.toFixed(3) : null
   return (
-    <div className="flex items-start gap-2 rounded-lg border border-spark-line bg-spark-bg px-3 py-2">
-      <span className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-bold ${typeBadge[item.type] || typeBadge.general}`}>
-        {item.type}
+    <div className="flex items-start gap-2.5 rounded-lg border border-line bg-panel2 px-3 py-2.5">
+      <span className="mt-0.5 shrink-0">
+        <Badge tone={typeTone[item.type] ?? "neutral"}>{item.type}</Badge>
       </span>
       <div className="min-w-0 flex-1">
-        <p className="text-xs break-words text-spark-text">{item.content}</p>
-        <p className="mt-0.5 text-[10px] text-spark-muted">
-          {t("memory.importance", lang, { score: item.importance })} · {t("memory.hits", lang, { count: item.access_count })} · {fmtTime(item.updated_at)}
-          {item.status === "archived" && ` · ${t("memory.archivedFlag", lang)}`}
+        <p className="text-[12.5px] break-words leading-relaxed text-ink">{item.content}</p>
+        <p className="mt-1 text-[10.5px] text-ink3">
+          重要度 {item.importance} · 命中 {item.access_count} 次 · {fmtTime(item.updated_at)}
+          {score !== null && <span className="text-accent"> · score {score}</span>}
+          {item.status === "archived" && <span className="text-ink3"> · 已归档</span>}
         </p>
       </div>
       <button
         type="button"
         onClick={() => onDelete(item.id)}
-        className="shrink-0 rounded px-2 py-1 text-[10px] font-bold text-spark-err hover:bg-spark-err/12"
+        title="删除"
+        className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-ink3 transition-colors hover:bg-err/10 hover:text-err"
       >
-        {t("memory.delete", lang)}
+        <IconTrash size={12} />
       </button>
     </div>
   )
 }
 
 export default function MemorySection() {
-  const lang = useUiStore((s) => s.lang)
   const [stats, setStats] = useState<MemoryStats | null>(null)
   const [items, setItems] = useState<MemoryItem[]>([])
   const [query, setQuery] = useState("")
   const [hits, setHits] = useState<MemoryItem[] | null>(null)
   const [newContent, setNewContent] = useState("")
   const [newType, setNewType] = useState("preference")
-  const [report, setReport] = useState<string>("")
+  const [report, setReport] = useState("")
   const [busy, setBusy] = useState(false)
 
   const refresh = useCallback(async (q: string) => {
@@ -62,7 +58,7 @@ export default function MemorySection() {
       setItems(data.items)
       setHits(q ? data.search : null)
     } catch (e) {
-      setReport(t("memory.loadFailed", lang, { msg: e instanceof Error ? e.message : String(e) }))
+      setReport(`记忆加载失败：${e instanceof Error ? e.message : String(e)}`)
     }
   }, [])
 
@@ -75,7 +71,7 @@ export default function MemorySection() {
     try {
       await refresh(query.trim())
     } catch (e) {
-      setReport(t("memory.searchFailed", lang, { msg: e instanceof Error ? e.message : String(e) }))
+      setReport(`检索失败：${e instanceof Error ? e.message : String(e)}`)
     } finally {
       setBusy(false)
     }
@@ -89,7 +85,7 @@ export default function MemorySection() {
       setNewContent("")
       await refresh(query.trim())
     } catch (e) {
-      setReport(t("memory.addFailed", lang, { msg: e instanceof Error ? e.message : String(e) }))
+      setReport(`添加失败：${e instanceof Error ? e.message : String(e)}`)
     } finally {
       setBusy(false)
     }
@@ -101,7 +97,7 @@ export default function MemorySection() {
       await memoryDelete(id)
       await refresh(query.trim())
     } catch (e) {
-      setReport(t("memory.deleteFailed", lang, { msg: e instanceof Error ? e.message : String(e) }))
+      setReport(`删除失败：${e instanceof Error ? e.message : String(e)}`)
     } finally {
       setBusy(false)
     }
@@ -109,46 +105,49 @@ export default function MemorySection() {
 
   async function handleOptimize() {
     setBusy(true)
-    setReport(t("common.optimizing", lang))
+    setReport("优化中：相似合并 + 容量淘汰…")
     try {
       const { report: r } = await memoryOptimize()
-      const parts = [t("memory.optimizeMerge", lang, { n: r.consolidated_groups }), t("memory.optimizeArchive", lang, { n: r.archived })]
-      if (r.errors?.length) parts.push(t("memory.optimizeError", lang, { n: r.errors.length }))
-      setReport(t("memory.optimizeDone", lang, { text: parts.join(", ") }))
+      const parts = [`合并簇 ${r.consolidated_groups} 组`, `归档 ${r.archived} 条`]
+      if (r.errors?.length) parts.push(`错误 ${r.errors.length}`)
+      setReport(`完成：${parts.join(", ")}`)
       await refresh("")
     } catch (e) {
-      setReport(t("memory.optimizeFailed", lang, { msg: e instanceof Error ? e.message : String(e) }))
+      setReport(`优化失败：${e instanceof Error ? e.message : String(e)}`)
     } finally {
       setBusy(false)
     }
   }
 
   return (
-    <div className="rounded-xl border border-spark-line p-4 flex flex-col gap-3">
-      <div className="text-xs font-bold tracking-widest text-spark-accent uppercase">{t("memory.longTerm", lang)}</div>
-      <p className="text-xs text-spark-muted">
-        {t("memory.description", lang)}
-      </p>
-      {stats && (
-        <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-spark-muted">
-          <span>{t("memory.active", lang)} <b className="text-spark-text">{stats.active}</b></span>
-          <span>{t("memory.archived", lang)} <b className="text-spark-text">{stats.archived}</b></span>
-          {Object.entries(stats.by_type).map(([t, n]) => (
-            <span key={t}>
-              {t} <b className="text-spark-text">{n}</b>
+    <div className="flex flex-col gap-3">
+      <div className="flex items-center justify-between">
+        <div className="text-sm font-semibold text-ink">长期记忆</div>
+        {stats && (
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-ink3">
+            <span>活跃 <b className="text-ink">{stats.active}</b></span>
+            <span>归档 <b className="text-ink">{stats.archived}</b></span>
+            {Object.entries(stats.by_type).map(([t, n]) => (
+              <span key={t}>
+                {t} <b className="text-ink">{n}</b>
+              </span>
+            ))}
+            <span>
+              向量检索{" "}
+              <b className={stats.embedding_available ? "text-ok" : stats.embedding_available === false ? "text-warn" : "text-ink3"}>
+                {stats.embedding_available ? "可用" : stats.embedding_available === false ? "降级为关键词" : "未探测"}
+              </b>
             </span>
-          ))}
-          <span>
-            {t("memory.vectorSearch", lang)}{" "}
-            <b className={stats.embedding_available ? "text-spark-ok" : "text-spark-tool"}>
-              {stats.embedding_available ? t("memory.available", lang) : stats.embedding_available === false ? t("memory.degraded", lang) : t("memory.undetected", lang)}
-            </b>
-          </span>
-        </div>
-      )}
+          </div>
+        )}
+      </div>
 
-      <div className="grid grid-cols-[1fr_auto] gap-2">
-        <input
+      <p className="text-xs leading-relaxed text-ink3">
+        模型自动从对话中抽取事实，检索后注入每轮上下文。支持去重合并、相似巩固、容量淘汰与访问强化。
+      </p>
+
+      <div className="flex gap-2">
+        <TextInput
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={(e) => {
@@ -157,79 +156,64 @@ export default function MemorySection() {
               void handleSearch()
             }
           }}
-          placeholder={t("memory.searchTest", lang)}
-          className="rounded-lg border border-spark-line bg-spark-bg px-3 py-2 text-sm text-spark-text outline-none focus:border-spark-accent"
+          placeholder="检索测试：输入问题看会命中哪些记忆"
         />
-        <button
-          type="button"
-          onClick={handleSearch}
-          disabled={busy}
-          className="rounded-lg bg-spark-line px-3 py-2 text-xs font-bold text-spark-text hover:opacity-80 disabled:opacity-50"
-        >
-          {t("common.search", lang)}
-        </button>
+        <Button variant="soft" onClick={handleSearch} disabled={busy} className="shrink-0">
+          <IconSearch size={13} /> 检索
+        </Button>
       </div>
 
       {hits !== null && (
         <div className="flex flex-col gap-2">
-          <div className="text-[11px] text-spark-muted">{t("memory.searchResults", lang)}</div>
-          {hits.length === 0 && <p className="text-xs text-spark-muted">{t("memory.noHits", lang)}</p>}
+          <div className="text-[11px] font-medium text-ink2">命中结果（含打分）：</div>
+          {hits.length === 0 && <p className="text-xs text-ink3">无命中。</p>}
           {hits.map((h) => (
             <ItemRow key={`h-${h.id}`} item={h} onDelete={handleDelete} />
           ))}
         </div>
       )}
 
-      <div className="max-h-64 overflow-auto flex flex-col gap-2 border-t border-spark-line pt-3">
-        {items.length === 0 && <p className="text-xs text-spark-muted">{t("memory.noItems", lang)}</p>}
+      <div className={cls("flex max-h-64 flex-col gap-2 overflow-y-auto border-t border-line pt-3")}>
+        {items.length === 0 && <p className="py-2 text-xs text-ink3">还没有记忆。对话后自动积累，或在下方手动添加。</p>}
         {items.map((item) => (
           <ItemRow key={item.id} item={item} onDelete={handleDelete} />
         ))}
       </div>
 
-      <div className="flex flex-col gap-2 border-t border-spark-line pt-3 sm:grid sm:grid-cols-[1fr_auto_auto] sm:items-center">
-        <input
-          value={newContent}
-          onChange={(e) => setNewContent(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") {
-              e.preventDefault()
-              void handleAdd()
-            }
-          }}
-          placeholder={t("memory.addPlaceholder", lang)}
-          className="rounded-lg border border-spark-line bg-spark-bg px-3 py-2 text-sm text-spark-text outline-none focus:border-spark-accent"
-        />
-        <div className="grid grid-cols-2 gap-2 sm:contents">
-          <select
-            value={newType}
-            onChange={(e) => setNewType(e.target.value)}
-            className="rounded-lg border border-spark-line bg-spark-bg px-2 py-2 text-xs text-spark-text"
-          >
-            <option value="preference">preference</option>
-            <option value="project">project</option>
-            <option value="lesson">lesson</option>
-            <option value="general">general</option>
-          </select>
-          <button
-            type="button"
-            onClick={handleAdd}
-            disabled={busy || !newContent.trim()}
-            className="rounded-lg bg-spark-accent px-3 py-2 text-xs font-bold text-spark-on-accent hover:opacity-90 disabled:opacity-50"
-          >
-            {t("memory.add", lang)}
-          </button>
+      <div className="flex flex-col gap-2 border-t border-line pt-3">
+        <Field label="新增记忆">
+          <div className="flex gap-2">
+            <TextInput
+              value={newContent}
+              onChange={(e) => setNewContent(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault()
+                  void handleAdd()
+                }
+              }}
+              placeholder="手动添加一条记忆"
+              className="flex-1"
+            />
+            <Select value={newType} onChange={(e) => setNewType(e.target.value)} className="w-32 shrink-0">
+              <option value="preference">preference</option>
+              <option value="project">project</option>
+              <option value="lesson">lesson</option>
+              <option value="general">general</option>
+            </Select>
+          </div>
+        </Field>
+        <div className="flex gap-2">
+          <Button variant="primary" full onClick={handleAdd} disabled={busy || !newContent.trim()}>
+            添加
+          </Button>
+          <Button variant="outline" onClick={handleOptimize} disabled={busy}>
+            立即优化
+          </Button>
         </div>
-        <button
-          type="button"
-          onClick={handleOptimize}
-          disabled={busy}
-          className="rounded-lg bg-spark-line px-3 py-2 text-xs font-bold text-spark-text hover:opacity-80 disabled:opacity-50"
-        >
-          {t("memory.optimize", lang)}
-        </button>
       </div>
-      {report && <div className="rounded-lg border border-spark-line px-3 py-2 text-xs text-spark-muted">{report}</div>}
+
+      {report && <div className="rounded-lg border border-line bg-panel2 px-3 py-2 text-xs text-ink2">{report}</div>}
     </div>
   )
 }

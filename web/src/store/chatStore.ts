@@ -1,50 +1,77 @@
 import { create } from "zustand"
-import type { ChatEvent } from "../types"
-import type { ChatItem } from "../components/ChatMessage"
+import type { ChatEvent, PlanStep } from "../types"
 import { streamChat, fetchHistory } from "../api"
 import { useSessionStore } from "./sessionStore"
 import { useUiStore } from "./uiStore"
 import { t } from "../i18n"
 
+export interface ToolCallState {
+  id: string
+  name: string
+  arguments: unknown
+  status: "running" | "ok" | "error"
+  startedAt: number
+  durationMs?: number
+  result?: unknown
+}
+
+/** 助手消息内部的顺序片段，忠实还原"思考→计划→工具→文本"交错顺序 */
+export type Segment =
+  | { kind: "text"; text: string }
+  | { kind: "thinking"; text: string }
+  | { kind: "plan"; steps: PlanStep[] }
+  | { kind: "tool"; tool: ToolCallState }
+
+export interface ChatMsg {
+  id: string
+  role: "user" | "assistant" | "error" | "notice" | "summary"
+  /** 全文（复制用），与 segments 中的文本一致 */
+  text: string
+  images?: string[]
+  streaming?: boolean
+  segments: Segment[]
+  meta?: {
+    compacted?: { before: number; after: number; summarized: number }
+  }
+}
+
+export function uid(): string {
+  try {
+    return crypto.randomUUID()
+  } catch {
+    return `m-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
+  }
+}
+
 interface ChatState {
-  items: ChatItem[]
+  items: ChatMsg[]
   input: string
   streaming: boolean
-  thinking: { text: string; active: boolean } | null
-  showNotices: boolean
   loading: boolean
   abortController: AbortController | null
-  streamStatus: "idle" | "streaming" | "error" | "reconnecting"
   setInput: (v: string) => void
   setStreaming: (v: boolean) => void
-  setThinking: (v: { text: string; active: boolean } | null) => void
-  setItems: (items: ChatItem[]) => void
+  setItems: (items: ChatMsg[]) => void
+  setLoading: (v: boolean) => void
   addErrorItem: (text: string) => void
   send: (images?: string[]) => Promise<void>
   loadInitialHistory: () => Promise<void>
   cancel: () => void
 }
 
-function patchLast(items: ChatItem[], mutate: (item: ChatItem) => ChatItem): ChatItem[] {
-  if (items.length === 0) return items
-  return [...items.slice(0, -1), mutate(items[items.length - 1])]
-}
-
 export const useChatStore = create<ChatState>((set, get) => ({
   items: [],
   input: "",
   streaming: false,
-  thinking: null,
-  showNotices: true,
   loading: false,
   abortController: null,
-  streamStatus: "idle" as const,
 
   setInput: (v) => set({ input: v }),
   setStreaming: (v) => set({ streaming: v }),
-  setThinking: (v) => set({ thinking: v }),
   setItems: (items) => set({ items }),
-  addErrorItem: (text) => set((s) => ({ items: [...s.items, { kind: "message", role: "error", text }] })),
+  setLoading: (v) => set({ loading: v }),
+
+  addErrorItem: (text) => set((s) => ({ items: [...s.items, { id: uid(), role: "error", text, segments: [] }] })),
 
   cancel: () => {
     const { abortController } = get()
@@ -58,15 +85,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set({ loading: true })
     try {
       const h = await fetchHistory()
-      const items = h.messages.map((m) =>
-        m.role === "tool"
-          ? { kind: "tool" as const, role: "assistant" as const, text: "", call: { id: "", name: m.name || "tool", arguments: {} }, result: m.content, ok: true }
-          : { kind: "message" as const, role: m.role, text: m.content, images: m.images },
-      )
+      const items = historyToItems(h.messages)
       set({ items, loading: false })
+      useSessionStore.getState().syncPlanFromItems(items)
     } catch {
       set({ loading: false })
-      useUiStore.getState().pushToast(t("toast.historyLoadFailed", useUiStore.getState().lang))
+      useUiStore.getState().pushToast("toast.historyLoadFailed", "error")
     }
   },
 
@@ -75,32 +99,68 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const prompt = input.trim()
     if ((!prompt && images.length === 0) || streaming) return
 
-    // Cancel any previous in-flight stream before starting a new one
-    if (abortController) {
-      abortController.abort()
-    }
+    if (abortController) abortController.abort()
     const ac = new AbortController()
-    set({ input: "", streaming: true, thinking: null, abortController: ac })
+    set({ input: "", streaming: true, abortController: ac })
+    const assistantId = uid()
     set((s) => ({
       items: [
         ...s.items,
-        { kind: "message", role: "user", text: prompt, images },
-        { kind: "message", role: "assistant", text: "", streaming: true },
+        { id: uid(), role: "user", text: prompt, images, segments: [] },
+        { id: assistantId, role: "assistant", text: "", streaming: true, segments: [] },
       ],
     }))
 
-    const buf = { text: "", think: "", gotText: false }
+    const buf = { text: "", think: "" }
     let rafPending = false
+
+    /** 修改当前助手消息；无则 no-op */
+    function patchLast(fn: (it: ChatMsg) => ChatMsg) {
+      set((s) => {
+        const idx = s.items.findIndex((m) => m.id === assistantId)
+        if (idx < 0) return s
+        const next = [...s.items]
+        next[idx] = fn(next[idx])
+        return { items: next }
+      })
+    }
+
+    /** 追加文本片段：若末段已是 text 则合并，否则新建 */
+    function appendText(it: ChatMsg, add: string): ChatMsg {
+      const segs = [...it.segments]
+      const last = segs[segs.length - 1]
+      if (last && last.kind === "text") {
+        segs[segs.length - 1] = { kind: "text", text: last.text + add }
+      } else {
+        segs.push({ kind: "text", text: add })
+      }
+      return { ...it, segments: segs, text: it.text + add }
+    }
+
+    /** 追加思考片段 */
+    function appendThinking(it: ChatMsg, add: string): ChatMsg {
+      const segs = [...it.segments]
+      const last = segs[segs.length - 1]
+      if (last && last.kind === "thinking") {
+        segs[segs.length - 1] = { kind: "thinking", text: last.text + add }
+      } else {
+        segs.push({ kind: "thinking", text: add })
+      }
+      return { ...it, segments: segs }
+    }
 
     function flush() {
       rafPending = false
       if (buf.text) {
         const add = buf.text
         buf.text = ""
-        set((s) => ({ items: patchLast(s.items, (it) => (it.kind === "message" ? { ...it, text: it.text + add } : it)) }))
+        patchLast((it) => appendText(it, add))
       }
-      const chat = useChatStore.getState()
-      chat.setThinking(buf.think ? { text: buf.think, active: !buf.gotText } : null)
+      if (buf.think) {
+        const add = buf.think
+        buf.think = ""
+        patchLast((it) => appendThinking(it, add))
+      }
     }
 
     function schedule() {
@@ -111,12 +171,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
 
     const onEvent = (ev: ChatEvent) => {
-      const session = useSessionStore.getState()
-      const showNotices = session.status?.display?.show_notices ?? true
-
       switch (ev.type) {
         case "text_delta":
-          buf.gotText = true
           buf.text += ev.text
           schedule()
           break
@@ -126,79 +182,112 @@ export const useChatStore = create<ChatState>((set, get) => ({
           break
         case "tool_start": {
           flush()
-          set((s) => ({ items: patchLast(s.items, (it) => (it.kind === "message" ? { ...it, streaming: false } : it)) }))
-          set((s) => ({ items: [...s.items, { kind: "tool", role: "assistant", text: "", call: ev.tool }] }))
+          patchLast((it) => ({
+            ...it,
+            segments: [
+              ...it.segments,
+              {
+                kind: "tool",
+                tool: { id: ev.tool.id, name: ev.tool.name, arguments: ev.tool.arguments, status: "running", startedAt: Date.now() },
+              },
+            ],
+          }))
           break
         }
         case "tool_end": {
           flush()
-          set((s) => {
-            const next = [...s.items]
-            for (let i = next.length - 1; i >= 0; i -= 1) {
-              if (next[i].kind === "tool" && next[i].call?.id === ev.tool.id) {
-                next[i] = { ...next[i], result: ev.result, ok: ev.ok }
-                break
-              }
-            }
-            return { items: next }
-          })
-          set((s) => ({
-            items: s.items.some((it) => it.kind === "message" && it.streaming)
-              ? s.items
-              : [...s.items, { kind: "message", role: "assistant", text: "", streaming: true }],
+          patchLast((it) => ({
+            ...it,
+            segments: it.segments.map((seg) =>
+              seg.kind === "tool" && seg.tool.id === ev.tool.id
+                ? {
+                    ...seg,
+                    tool: {
+                      ...seg.tool,
+                      status: ev.ok ? "ok" : "error",
+                      result: ev.result,
+                      durationMs: seg.tool.startedAt ? Date.now() - seg.tool.startedAt : undefined,
+                    },
+                  }
+                : seg,
+            ),
           }))
           break
         }
         case "approval_needed":
-          session.setApproval(ev.approval)
+          useSessionStore.getState().setApproval({ info: ev.approval, tool: ev.tool })
           break
         case "compaction": {
           if (ev.data?.usage) {
-            const s = useSessionStore.getState()
-            s.setStatus(s.status ? { ...s.status, context: ev.data.usage } : s.status)
+            useSessionStore.getState().patchStatus({ context: ev.data.usage })
           }
-          if (ev.data?.before_tokens && showNotices) {
+          if (ev.data?.before_tokens) {
             flush()
-            const text = t("context.compacted", useUiStore.getState().lang, { before: ev.data.before_tokens ?? 0, after: ev.data.after_tokens ?? 0, summarized: ev.data.summarized_messages ?? 0 })
-            set((s) => {
-              const idx = s.items.findIndex((it) => it.kind === "summary")
-              if (idx >= 0) {
-                const next = [...s.items]
-                next[idx] = { ...next[idx], text }
-                return { items: next }
-              }
-              return {
-                items: [...s.items, { kind: "summary" as const, role: "assistant" as const, text }],
-              }
+            const lang = useUiStore.getState().lang
+            const text = t("context.compacted", lang, {
+              before: ev.data.before_tokens ?? 0,
+              after: ev.data.after_tokens ?? 0,
+              summarized: ev.data.summarized_messages ?? 0,
             })
+            set((s) => ({
+              items: [
+                ...s.items,
+                {
+                  id: uid(),
+                  role: "notice",
+                  text,
+                  segments: [],
+                  meta: {
+                    compacted: {
+                      before: ev.data.before_tokens ?? 0,
+                      after: ev.data.after_tokens ?? 0,
+                      summarized: ev.data.summarized_messages ?? 0,
+                    },
+                  },
+                },
+              ],
+            }))
           }
           break
         }
         case "context": {
           if (ev.data?.usage) {
-            const s = useSessionStore.getState()
-            s.setStatus(s.status ? { ...s.status, context: ev.data.usage } : s.status)
+            useSessionStore.getState().patchStatus({ context: ev.data.usage })
           }
           break
         }
-        case "plan":
-          if (ev.data?.steps) useSessionStore.getState().setPlan(ev.data.steps)
+        case "plan": {
+          if (ev.data?.steps) {
+            const steps = ev.data.steps
+            useSessionStore.getState().setPlan(steps)
+            patchLast((it) => {
+              const segs = [...it.segments]
+              const last = segs[segs.length - 1]
+              if (last && last.kind === "plan") {
+                segs[segs.length - 1] = { kind: "plan", steps }
+              } else {
+                segs.push({ kind: "plan", steps })
+              }
+              return { ...it, segments: segs }
+            })
+          }
           break
+        }
         case "turn_end":
           flush()
-          set((s) => ({
-            items: patchLast(s.items, (it) =>
-              it.kind === "message" ? { ...it, streaming: false, text: ev.text && it.text ? it.text : ev.text || it.text } : it,
-            ),
+          patchLast((it) => ({
+            ...it,
+            streaming: false,
+            text: ev.text && !it.text ? ev.text : it.text,
           }))
           break
         case "turn_error":
           flush()
-          set((s) => ({ items: [...s.items, { kind: "message", role: "error", text: ev.text || "turn error" }] }))
+          set((s) => ({ items: [...s.items, { id: uid(), role: "error", text: ev.text || "turn error", segments: [] }] }))
           break
         case "done":
           flush()
-          set((s) => ({ items: patchLast(s.items, (it) => (it.kind === "message" ? { ...it, streaming: false } : it)) }))
+          patchLast((it) => ({ ...it, streaming: false }))
           break
       }
     }
@@ -209,14 +298,46 @@ export const useChatStore = create<ChatState>((set, get) => ({
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
       flush()
-      set((s) => ({ items: s.items.filter((it) => !(it.kind === "message" && it.role === "assistant" && !it.text)) }))
-      get().addErrorItem(msg)
-      useUiStore.getState().pushToast(t("toast.sendFailed", useUiStore.getState().lang))
+      const isAbort = e instanceof DOMException && e.name === "AbortError"
+      if (!isAbort) {
+        set((s) => ({
+          items: s.items.filter((m) => !(m.id === assistantId && !m.text && !m.segments.length)),
+        }))
+        get().addErrorItem(msg)
+        useUiStore.getState().pushToast("toast.sendFailed", "error")
+      }
     } finally {
       set({ streaming: false, abortController: null })
       useSessionStore.getState().setApproval(null)
-      set((s) => ({ thinking: s.thinking ? { ...s.thinking, active: false } : s.thinking }))
       await useSessionStore.getState().refreshSessions()
     }
   },
 }))
+
+/** 后端 history（user/assistant/tool 平铺）→ 前端分组 + 顺序片段模型 */
+export function historyToItems(msgs: { role: string; content: string; name?: string; images?: string[] }[]): ChatMsg[] {
+  const out: ChatMsg[] = []
+  for (const m of msgs) {
+    if (m.role === "tool") {
+      const tool: ToolCallState = {
+        id: `h-${out.length}-${Date.now()}`,
+        name: m.name || "tool",
+        arguments: {},
+        status: "ok",
+        startedAt: 0,
+        result: m.content,
+      }
+      const last = out[out.length - 1]
+      if (last && last.role === "assistant") {
+        last.segments.push({ kind: "tool", tool })
+      } else {
+        out.push({ id: uid(), role: "assistant", text: "", segments: [{ kind: "tool", tool }] })
+      }
+    } else if (m.role === "user") {
+      out.push({ id: uid(), role: "user", text: m.content, images: m.images, segments: [] })
+    } else {
+      out.push({ id: uid(), role: "assistant", text: m.content, segments: [{ kind: "text", text: m.content }] })
+    }
+  }
+  return out
+}
