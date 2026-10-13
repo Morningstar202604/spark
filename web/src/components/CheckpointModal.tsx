@@ -7,7 +7,7 @@ import { Button, cls, IconButton, Spinner } from "./ui"
 import { IconClock, IconHistory, IconX } from "./icons"
 import { historyToItems } from "../store/chatStore"
 
-export const CheckpointPanel = memo(function CheckpointPanel() {
+export const CheckpointModal = memo(function CheckpointModal() {
   const open = useUiStore((s) => s.checkpointsOpen)
   const close = useUiStore((s) => s.closeCheckpoints)
   const busy = useUiStore((s) => s.cpsBusy)
@@ -34,6 +34,15 @@ export const CheckpointPanel = memo(function CheckpointPanel() {
     if (open) load()
   }, [open, load])
 
+  useEffect(() => {
+    if (!open) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") close()
+    }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [open, close])
+
   async function doRollback(id: number) {
     setRolling(id)
     try {
@@ -59,9 +68,9 @@ export const CheckpointPanel = memo(function CheckpointPanel() {
 
   if (!open) return null
   return (
-    <div className="fixed inset-0 z-50 flex justify-end bg-black/40" onClick={close}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-[2px]" onClick={close}>
       <aside
-        className="anim-fade flex h-full w-[min(92vw,340px)] flex-col border-l border-line bg-sidebar shadow-[var(--shadow)]"
+        className="anim-fade flex h-[min(80vh,560px)] w-[min(94vw,560px)] flex-col overflow-hidden rounded-2xl border border-line bg-canvas shadow-[var(--shadow)]"
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-label="检查点回滚"

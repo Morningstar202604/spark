@@ -76,7 +76,12 @@ export default function SettingsDrawer({ onClose, onSaved }: Props) {
         if (!dirtyRef.current.md) setAgentsMd(d)
       })
       .catch((e) => setNotice(`项目记忆加载失败：${e instanceof Error ? e.message : String(e)}`))
-  }, [])
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose()
+    }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [onClose])
 
   async function handleSave() {
     if (!cfg) return
@@ -205,8 +210,8 @@ export default function SettingsDrawer({ onClose, onSaved }: Props) {
 
   if (!cfg) {
     return (
-      <div className="fixed inset-0 z-50 flex justify-end bg-black/40" onClick={onClose}>
-        <div className="flex h-full w-[min(94vw,420px)] items-center justify-center border-l border-line bg-sidebar">
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-[2px]" onClick={onClose}>
+        <div className="flex h-[min(92vh,680px)] w-[min(96vw,920px)] items-center justify-center rounded-2xl border border-line bg-canvas shadow-[var(--shadow)]">
           <Spinner size={20} className="text-accent" />
         </div>
       </div>
@@ -223,39 +228,53 @@ export default function SettingsDrawer({ onClose, onSaved }: Props) {
   ]
 
   return (
-    <div className="fixed inset-0 z-50 flex justify-end bg-black/40" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-[2px]" onClick={onClose}>
       <aside
-        className="anim-fade flex h-full w-[min(96vw,440px)] flex-col border-l border-line bg-canvas shadow-[var(--shadow)]"
+        className="anim-fade flex h-[min(92vh,680px)] w-[min(96vw,920px)] flex-col overflow-hidden rounded-2xl border border-line bg-canvas shadow-[var(--shadow)]"
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-label="设置"
       >
-        {/* 头部 */}
-        <div className="flex items-center gap-2 border-b border-line px-4 py-3">
-          <IconSettings size={16} className="text-ink2" />
-          <span className="text-sm font-semibold text-ink">设置</span>
-          <IconButton title="关闭" onClick={onClose} className="ml-auto">
-            <IconX size={15} />
-          </IconButton>
-        </div>
+        <div className="flex h-full">
+          {/* 左导航（桌面） */}
+          <nav className="hidden w-[200px] shrink-0 flex-col border-r border-line bg-sidebar sm:flex">
+            <div className="flex items-center gap-2 px-4 py-3.5">
+              <IconSettings size={16} className="text-accent" />
+              <span className="text-[14px] font-semibold text-ink">设置</span>
+            </div>
+            <div className="flex flex-1 flex-col gap-1 overflow-y-auto px-2 py-1">
+              {TABS.map((t) => (
+                <button
+                  key={t.key}
+                  type="button"
+                  onClick={() => setTab(t.key)}
+                  className={cls(
+                    "flex items-center gap-2.5 rounded-lg px-3 py-2 text-left text-[13px] font-medium transition-colors",
+                    tab === t.key ? "bg-selected text-ink" : "text-ink2 hover:bg-hover",
+                  )}
+                >
+                  <span className={cls("shrink-0", tab === t.key ? "text-accent" : "text-ink3")}>{t.icon}</span>
+                  {t.label}
+                  {tab === t.key && <span className="ml-auto h-1.5 w-1.5 rounded-full bg-accent" />}
+                </button>
+              ))}
+            </div>
+            <div className="px-3 pb-3 pt-1">
+              <div className="rounded-lg border border-line bg-panel2 px-3 py-2">
+                <p className="text-[10px] font-bold tracking-wide text-ink3">SPARK</p>
+                <p className="mt-0.5 text-[11px] leading-snug text-ink2">本地自托管的 AI 编程智能体</p>
+              </div>
+            </div>
+          </nav>
 
-        {/* Tabs */}
-        <div className="flex gap-1 overflow-x-auto border-b border-line px-3 py-2">
-          {TABS.map((t) => (
-            <button
-              key={t.key}
-              type="button"
-              onClick={() => setTab(t.key)}
-              className={cls(
-                "flex shrink-0 items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[12px] font-medium transition-colors",
-                tab === t.key ? "bg-selected text-ink" : "text-ink2 hover:bg-hover",
-              )}
-            >
-              {t.icon}
-              {t.label}
-            </button>
-          ))}
-        </div>
+          {/* 右栏 */}
+          <div className="flex min-w-0 flex-1 flex-col">
+            <div className="flex items-center gap-2 border-b border-line px-4 py-3">
+              <span className="text-sm font-semibold text-ink">设置</span>
+              <IconButton title="关闭" onClick={onClose} className="ml-auto">
+                <IconX size={15} />
+              </IconButton>
+            </div>
 
         {/* 内容 */}
         <div className="flex-1 overflow-y-auto p-4">
@@ -596,7 +615,9 @@ export default function SettingsDrawer({ onClose, onSaved }: Props) {
               )}
             </Button>
           </div>
-        )}
+          )}
+          </div>
+        </div>
       </aside>
     </div>
   )

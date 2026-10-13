@@ -61,13 +61,13 @@ export const useUiStore = create<UiState>((set) => ({
     set({ theme: next })
   },
 
-  openSettings: () => set({ settingsOpen: true }),
+  openSettings: () => set({ settingsOpen: true, checkpointsOpen: false }),
   closeSettings: () => set({ settingsOpen: false }),
   toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen })),
   setSidebarOpen: (open) => set({ sidebarOpen: open }),
   setPaletteOpen: (open) => set({ paletteOpen: open }),
 
-  openCheckpoints: () => set({ checkpointsOpen: true, cpsBusy: true }),
+  openCheckpoints: () => set({ checkpointsOpen: true, settingsOpen: false }),
   closeCheckpoints: () => set({ checkpointsOpen: false }),
   setCheckpoints: (rows) => set({ checkpoints: rows }),
   setCpsBusy: (busy) => set({ cpsBusy: busy }),

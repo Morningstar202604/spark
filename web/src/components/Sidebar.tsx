@@ -1,9 +1,15 @@
 import { memo, useMemo, useState } from "react"
 import type { SessionRow } from "../types"
-import { IconHistory, IconPlus, IconSearch, IconSettings, IconSpark, IconTrash, IconX } from "./icons"
+import { IconHistory, IconMonitor, IconMoon, IconPlus, IconSearch, IconSettings, IconSpark, IconSun, IconTrash, IconX } from "./icons"
 import { cls, IconButton } from "./ui"
 import { useUiStore } from "../store/uiStore"
 import { useSessionStore } from "../store/sessionStore"
+
+function ThemeGlyph({ theme }: { theme: "light" | "dark" | "system" }) {
+  if (theme === "light") return <IconSun size={14} />
+  if (theme === "dark") return <IconMoon size={14} />
+  return <IconMonitor size={14} />
+}
 
 function timeLabel(ts: number): string {
   const d = new Date(ts * 1000)
@@ -37,6 +43,9 @@ export const Sidebar = memo(function Sidebar() {
   const sidebarOpen = useUiStore((s) => s.sidebarOpen)
   const setSidebarOpen = useUiStore((s) => s.setSidebarOpen)
   const openSettings = useUiStore((s) => s.openSettings)
+  const openCheckpoints = useUiStore((s) => s.openCheckpoints)
+  const cycleTheme = useUiStore((s) => s.cycleTheme)
+  const theme = useUiStore((s) => s.theme)
   const showKeywords = useSessionStore((s) => s.status?.display?.show_keywords ?? true)
 
   const [query, setQuery] = useState("")
@@ -78,9 +87,6 @@ export const Sidebar = memo(function Sidebar() {
           </div>
           <span className="text-[15px] font-bold tracking-tight text-ink">Spark</span>
           <div className="ml-auto flex items-center gap-0.5">
-            <IconButton title="打开设置" onClick={openSettings} className="lg:hidden">
-              <IconSettings size={16} />
-            </IconButton>
             <IconButton title="收起侧边栏" onClick={() => setSidebarOpen(false)} className="lg:hidden">
               <IconX size={16} />
             </IconButton>
@@ -215,7 +221,7 @@ export const Sidebar = memo(function Sidebar() {
           ))}
         </div>
 
-        {/* 底部：模型 + 工作目录 */}
+        {/* 底部：模型 + 工作目录 + 设置入口 */}
         <div className="border-t border-line p-3">
           <div className="flex items-center gap-2 rounded-lg bg-panel px-3 py-2">
             <span className="flex h-6 w-6 items-center justify-center rounded-md bg-hover text-[10px] font-bold text-accent">
@@ -227,9 +233,32 @@ export const Sidebar = memo(function Sidebar() {
                 {status?.workdir ?? ""}
               </p>
             </div>
-            <IconButton title="设置" onClick={openSettings} className="ml-auto hidden lg:inline-flex">
-              <IconSettings size={15} />
-            </IconButton>
+          </div>
+          <div className="mt-2 grid grid-cols-3 gap-1.5">
+            <button
+              type="button"
+              onClick={openSettings}
+              className="flex h-8 items-center justify-center gap-1.5 rounded-lg bg-hover text-[12px] font-medium text-ink transition-colors hover:bg-selected active:scale-[0.99]"
+            >
+              <IconSettings size={13} />
+              设置
+            </button>
+            <button
+              type="button"
+              title="检查点回滚"
+              onClick={openCheckpoints}
+              className="flex h-8 items-center justify-center rounded-lg bg-hover text-ink2 transition-colors hover:bg-selected active:scale-[0.99]"
+            >
+              <IconHistory size={14} />
+            </button>
+            <button
+              type="button"
+              title={`主题：${theme === "light" ? "亮色" : theme === "dark" ? "暗色" : "跟随系统"}（点击切换）`}
+              onClick={cycleTheme}
+              className="flex h-8 items-center justify-center rounded-lg bg-hover text-ink2 transition-colors hover:bg-selected active:scale-[0.99]"
+            >
+              <ThemeGlyph theme={theme} />
+            </button>
           </div>
         </div>
       </aside>

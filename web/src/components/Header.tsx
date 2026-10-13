@@ -3,27 +3,16 @@ import { useSessionStore } from "../store/sessionStore"
 import { useUiStore } from "../store/uiStore"
 import { ContextMeter } from "./ContextMeter"
 import { IconButton } from "./ui"
-import { IconCommand, IconHistory, IconMenu, IconMoon, IconSettings, IconSun, IconMonitor } from "./icons"
-import type { Theme } from "../theme"
-
-function ThemeIcon({ theme }: { theme: Theme }) {
-  if (theme === "light") return <IconSun size={15} />
-  if (theme === "dark") return <IconMoon size={15} />
-  return <IconMonitor size={15} />
-}
+import { IconCommand, IconMenu } from "./icons"
 
 export const Header = memo(function Header() {
   const status = useSessionStore((s) => s.status)
   const handleCancel = useSessionStore((s) => s.handleCancel)
   const streaming = useChatStoreStreaming()
   const toggleSidebar = useUiStore((s) => s.toggleSidebar)
-  const openSettings = useUiStore((s) => s.openSettings)
-  const openCheckpoints = useUiStore((s) => s.openCheckpoints)
-  const cycleTheme = useUiStore((s) => s.cycleTheme)
-  const theme = useUiStore((s) => s.theme)
   const setPaletteOpen = useUiStore((s) => s.setPaletteOpen)
 
-  const title = status && status.session_id && sessionTitle() || "新对话"
+  const title = (status && status.session_id && sessionTitle()) || "新对话"
 
   return (
     <header className="flex h-12 shrink-0 items-center gap-1 border-b border-line bg-canvas/90 px-2 backdrop-blur-sm sm:px-3">
@@ -46,17 +35,8 @@ export const Header = memo(function Header() {
       )}
 
       <ContextMeter />
-      <IconButton title="检查点回滚" onClick={openCheckpoints}>
-        <IconHistory size={16} />
-      </IconButton>
       <IconButton title="命令面板 (Ctrl+K)" onClick={() => setPaletteOpen(true)}>
         <IconCommand size={16} />
-      </IconButton>
-      <IconButton title={`主题：${theme === "light" ? "亮色" : theme === "dark" ? "暗色" : "跟随系统"}（点击切换）`} onClick={cycleTheme}>
-        <ThemeIcon theme={theme} />
-      </IconButton>
-      <IconButton title="设置" onClick={openSettings}>
-        <IconSettings size={16} />
       </IconButton>
     </header>
   )

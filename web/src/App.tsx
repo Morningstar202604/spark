@@ -5,7 +5,7 @@ import { ChatView } from "./components/ChatView"
 import { Composer } from "./components/Composer"
 import { ApprovalModal } from "./components/ApprovalModal"
 import { CommandPalette } from "./components/CommandPalette"
-import { CheckpointPanel } from "./components/CheckpointPanel"
+import { CheckpointModal } from "./components/CheckpointModal"
 import Toast from "./components/Toast"
 import { fetchStatus } from "./api"
 import type { Status } from "./types"
@@ -13,7 +13,7 @@ import { useChatStore } from "./store/chatStore"
 import { useSessionStore } from "./store/sessionStore"
 import { useUiStore } from "./store/uiStore"
 
-const SettingsDrawer = lazy(() => import("./components/SettingsDrawer"))
+const SettingsModal = lazy(() => import("./components/SettingsModal"))
 
 export default function App() {
   const { setStatus, setPlan, refreshSessions } = useSessionStore()
@@ -66,10 +66,10 @@ export default function App() {
       </div>
       <ApprovalModal />
       <CommandPalette />
-      <CheckpointPanel />
+      <CheckpointModal />
       {settingsOpen && (
         <Suspense fallback={null}>
-          <SettingsDrawer onClose={closeSettings} onSaved={handleSaved} />
+          <SettingsModal onClose={closeSettings} onSaved={handleSaved} />
         </Suspense>
       )}
     </div>
