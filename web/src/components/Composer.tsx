@@ -121,7 +121,7 @@ export const Composer = memo(function Composer() {
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={onKey}
             onPaste={onPaste}
-            placeholder={streaming ? "模型正在回复…（Esc 停止）" : "给 Spark 发送任务，Enter 发送 / Shift+Enter 换行"}
+            placeholder={streaming ? "模型正在回复…（Esc 停止）" : "给 Spark 发送任务，Enter 发送 / Shift+Enter 换行（/test 跑测试）"}
             className="block max-h-[200px] w-full resize-none overflow-y-auto bg-transparent px-4 pt-3.5 pb-1 text-[14px] leading-relaxed outline-none placeholder:text-ink3"
           />
           <div className="flex items-center justify-between gap-2 px-2.5 pb-2.5">

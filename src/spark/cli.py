@@ -221,6 +221,28 @@ async def _exec_async(
         approver=None,
     )
     try:
+        from spark.slash import handle_test, parse_slash
+
+        slash = parse_slash(prompt)
+        if slash is not None and slash.name == "test":
+            # spark exec /test [目录]：脚本化跑测试，失败则把 traceback 回灌进 loop
+            result = await asyncio.to_thread(handle_test, sandbox, slash.args)
+            typer.echo(result.summary)
+            if result.output:
+                typer.echo(result.output)
+            if result.ok or not result.feedback:
+                raise typer.Exit(0)
+            final = ""
+            async for event in loop.iter_turn(result.feedback):
+                if event.type == "turn_end" and event.text:
+                    final = event.text
+                if event.type == "turn_error" and event.text:
+                    typer.echo(event.text, err=True)
+                    raise typer.Exit(1)
+            if final:
+                typer.echo(final)
+            raise typer.Exit(1)
+
         events = await loop.run(prompt)
         final = ""
         for event in events:
