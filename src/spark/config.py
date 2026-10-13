@@ -131,6 +131,9 @@ class ContextConfig(BaseModel):
     max_context_tokens: int = Field(default=32768, ge=1024, le=10_000_000)
     compact_threshold: float = Field(default=0.85, ge=0.1, le=0.99)
     keep_recent_messages: int = Field(default=8, ge=2, le=200)
+    # P0-10: tree-sitter repo-map 代码索引注入
+    repo_map_enabled: bool = True
+    repo_map_max_chars: int = Field(default=6000, ge=500, le=60_000)
 
 
 class McpTransportConfig(BaseModel):

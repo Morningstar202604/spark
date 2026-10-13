@@ -172,7 +172,22 @@ def system_prompt(workdir: Path, cfg: SparkConfig) -> str:
     mode_hint = MODE_HINTS.get(getattr(cfg.agent, "sandbox_mode", "workspace"))
     if mode_hint:
         text += f"\n{mode_hint}"
-    return inject_skills(text, discover_skills(workdir))
+    text = inject_skills(text, discover_skills(workdir))
+    # P0-10: repo-map 代码索引（aider 范式）——树里符号定位，减少全仓读取
+    if getattr(cfg.context, "repo_map_enabled", True):
+        try:
+            from spark.repo_map import RepoMapConfig, build_repo_map
+
+            repo_map = build_repo_map(
+                workdir,
+                RepoMapConfig(max_chars=cfg.context.repo_map_max_chars),
+            )
+            if repo_map:
+                text += f"\n\n{repo_map}"
+        except Exception:
+            # 索引失败不影响主流程：静默降级（地图是增强，不是依赖）
+            logger.debug("repo_map generation failed", exc_info=True)
+    return text
 
 
 def build_messages(
