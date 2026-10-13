@@ -307,6 +307,38 @@ spark/
 3. 在 `providers/factory.py` 的 `create_provider()` 中添加分支
 4. 在 `config.py` 的 `ProviderName` Literal 中添加类型
 
+### 声明式子代理（.claude/agents/，P1-4）
+
+「文件即 subagent」：在仓库 `.claude/agents/*.md`（项目级）或
+`~/.claude/agents/*.md`（用户级）放置一个 Markdown 文件，即声明一个可委派的专家子代理。
+加载器为 `src/spark/agents.py`（frontmatter 语法与 `skills.py` 对齐，零 YAML 依赖）：
+
+```markdown
+---
+name: reader                  # 必填，spawn 句柄
+description: 只读代码探索      # 一行摘要，注入 <available_subagents>
+when_to_use: 探索陌生代码时    # 可选，委派时机提示
+tools: read_file, grep        # 可选；缺省 = 全部工具
+---
+
+这里是子代理的 system prompt：角色、规则、输出格式。
+```
+
+行为约定：
+
+- **发现**：`discover_declared_agents(workdir)` 扫描两个目录，项目级同名文件优先；
+  非法文件（缺 frontmatter / 缺 name / 空 body）在发现时跳过并告警，按名 spawn 时严格拒绝并报错。
+- **注入**：系统 prompt 追加 `<available_subagents>` 列表（name/description/when_to_use）。
+- **spawn**：`task` 工具传 `{"agent": "reader", "prompt": "..."}`；并行模式传
+  `tasks: [{"agent": "reader", "prompt": "..."}, ...]`（最多 4 个）。子代理 body 经
+  `subagent_system_prompt()` 包裹后写入**子回路自己的 system 槽**（`AgentLoop._extra_system_prompt`），
+  `tools` 字段经 `ToolRegistry.tool_allowlist` 收敛其工具 schema。
+- **复用**：不新建执行器——声明式子代理走的就是既有并行 task 执行器
+  `AgentLoop.spawn_subtask` / `spawn_subtasks_parallel`（`src/spark/core/loop.py`），
+  仅多传 `system_extra` / `tools_allowlist` 两个可选参数。
+
+仓库内置示例：`.claude/agents/reader.md`（只读代码探索）、`.claude/agents/tester.md`（跑测试汇总结论）。
+
 ## 设计原则
 
 - **本地优先**：所有数据存储本地，不依赖云服务

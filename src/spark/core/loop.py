@@ -86,6 +86,8 @@ class AgentLoop:
         self._call_counts: dict[str, int] = {}
         self._turn_tokens = 0
         self._active_children: list[AgentLoop] = []
+        # P1-4: 声明式子代理的专属 system prompt（body 注入 system 槽，而非用户消息）
+        self._extra_system_prompt: str = ""
         # Provider 协议为鸭子类型：测试与第三方 provider 可能不接收 effort 参数。
         # 探测一次签名，仅在支持时透传 effort（保持向后兼容）。
         self._stream_extra: dict[str, str] = {}
@@ -485,6 +487,11 @@ class AgentLoop:
                 memory_block=memory_block,
                 _compactor=self._compactor,
             )
+            if self._extra_system_prompt and messages and messages[0].role == "system":
+                base_system = messages[0].content or ""
+                messages[0] = messages[0].model_copy(
+                    update={"content": f"{base_system}\n\n{self._extra_system_prompt}"}
+                )
             text_parts: list[str] = []
             reasoning_parts: list[str] = []
             tool_calls: list[ToolCall] = []
@@ -750,25 +757,63 @@ class AgentLoop:
                 self.allow_always.add(call_signature(call))
             approval_label = verdict.action
         if call.name == "task" and self.registry.ctx.task_runner is not None:
-            prompts: list[str] = []
+            # P1-4: 声明式子代理（.claude/agents/*.md）。agent 为该文件的 name，
+            # 其 body 作为子代理的 system prompt，tools 字段收敛子代理工具集。
+            from spark.agents import (
+                AgentFileError,
+                get_declared_agent,
+                subagent_system_prompt,
+            )
+
+            items: list[tuple[str, object]] = []  # (prompt, DeclaredAgent|None)
+            task_error = ""
+
+            def _resolve_agent(agent_name: str) -> tuple[object, str]:
+                try:
+                    resolved = get_declared_agent(self.workdir, agent_name)
+                except AgentFileError as exc:
+                    return None, f"invalid agent file '{agent_name}': {exc}"
+                if resolved is None:
+                    return None, f"unknown declared agent: {agent_name}"
+                return resolved, ""
+
             raw_tasks = call.arguments.get("tasks")
             if isinstance(raw_tasks, list):
-                prompts = [
-                    str(t.get("prompt") or "").strip()
-                    for t in raw_tasks
-                    if isinstance(t, dict)
-                ]
-                prompts = [p for p in prompts if p]
+                for t in raw_tasks:
+                    if not isinstance(t, dict):
+                        continue
+                    prompt = str(t.get("prompt") or "").strip()
+                    if not prompt:
+                        continue
+                    agent = None
+                    agent_name = str(t.get("agent") or "").strip()
+                    if agent_name:
+                        agent, err = _resolve_agent(agent_name)
+                        if err:
+                            task_error = err
+                            break
+                    items.append((prompt, agent))
             else:
                 prompt = str(call.arguments.get("prompt") or "").strip()
-                if prompt:
-                    prompts = [prompt]
-            if not prompts:
+                agent = None
+                agent_name = str(call.arguments.get("agent") or "").strip()
+                if prompt and agent_name:
+                    agent, task_error = _resolve_agent(agent_name)
+                if prompt and not task_error:
+                    items.append((prompt, agent))
+            if task_error:
+                result = ToolResult(ok=False, payload={"error": task_error})
+            elif not items:
                 result = ToolResult(ok=False, payload={"error": "prompt required"})
-            elif len(prompts) == 1:
+            elif len(items) == 1:
+                prompt, agent = items[0]
+                system_extra = subagent_system_prompt(agent) if agent else ""
+                allowlist = list(agent.tools) if agent and agent.tools else None
                 summary_text = ""
                 error_text = ""
-                async for sub_event in self.registry.ctx.task_runner(prompts[0]):
+                async for sub_event in self.spawn_subtask(
+                    prompt, system_extra=system_extra, tools_allowlist=allowlist
+                ):
                     if sub_event.type in {
                         "tool_start",
                         "tool_end",
@@ -786,10 +831,21 @@ class AgentLoop:
                     else ToolResult(ok=False, payload={"error": error_text})
                 )
             else:
-                if len(prompts) > 4:
-                    prompts = prompts[:4]
+                if len(items) > 4:
+                    items = items[:4]
+                prompts = [p for p, _ in items]
+                system_extras = [
+                    subagent_system_prompt(a) if a else "" for _, a in items
+                ]
+                allowlists = [
+                    list(a.tools) if a and a.tools else None for _, a in items
+                ]
                 summary_parts: list[str] = []
-                async for sub_event in self.registry.ctx.task_runner_parallel(prompts):
+                async for sub_event in self.spawn_subtasks_parallel(
+                    prompts,
+                    system_extras=system_extras,
+                    tools_allowlists=allowlists,
+                ):
                     if sub_event.type in {
                         "tool_start",
                         "tool_end",
@@ -851,13 +907,25 @@ class AgentLoop:
                 sub_registry.add_mcp_schema(schema)
         sub_registry.readonly_mcp |= set(self.registry.readonly_mcp)
 
-    async def spawn_subtask(self, prompt: str):
-        """Run a self-contained sub-agent with a fresh context; yield its events, final turn_end carries the summary."""
+    async def spawn_subtask(
+        self,
+        prompt: str,
+        *,
+        system_extra: str = "",
+        tools_allowlist: list[str] | None = None,
+    ):
+        """Run a self-contained sub-agent with a fresh context; yield its events, final turn_end carries the summary.
+
+        P1-4: ``system_extra`` becomes the sub-agent's own system-prompt slot
+        (declared-agent body); ``tools_allowlist`` restricts its tool schemas.
+        """
         from pathlib import Path as _Path
 
         sub_ctx = self._make_sub_context()
         sub_registry = ToolRegistry(sub_ctx)
         self._inherit_registry(sub_registry)
+        if tools_allowlist:
+            sub_registry.tool_allowlist = set(tools_allowlist)
         sub_cfg = sub_ctx.config
         sub_store = SessionStore(_Path(":memory:"))
         sid = sub_store.create_session(
@@ -874,6 +942,7 @@ class AgentLoop:
             memory=None,
         )
         sub_loop.allow_always = set(self.allow_always)
+        sub_loop._extra_system_prompt = system_extra
         self._active_children.append(sub_loop)
         final_text = ""
         try:
@@ -891,13 +960,32 @@ class AgentLoop:
             self._active_children.remove(sub_loop)
             sub_store.close()
 
-    async def spawn_subtasks_parallel(self, prompts: list[str]):
+    async def spawn_subtasks_parallel(
+        self,
+        prompts: list[str],
+        *,
+        system_extras: list[str] | None = None,
+        tools_allowlists: list[list[str] | None] | None = None,
+    ):
         """Run several sub-agents concurrently; each gets its own context. Yields each sub-agent's
-        tool/plan events live, then one combined turn_end carrying all summaries."""
+        tool/plan events live, then one combined turn_end carrying all summaries.
+
+        P1-4: ``system_extras`` / ``tools_allowlists`` align 1:1 with prompts
+        (declared-agent body + tool allowlist per parallel item); defaults are
+        empty, preserving the pre-P1-4 behavior exactly.
+        """
         import asyncio as _asyncio
 
+        if system_extras is None:
+            system_extras = [""] * len(prompts)
+        if tools_allowlists is None:
+            tools_allowlists = [None] * len(prompts)
         if len(prompts) == 1:
-            async for event in self.spawn_subtask(prompts[0]):
+            async for event in self.spawn_subtask(
+                prompts[0],
+                system_extra=system_extras[0],
+                tools_allowlist=tools_allowlists[0],
+            ):
                 yield event
             return
 
@@ -906,7 +994,13 @@ class AgentLoop:
 
         async def runner(index: int, prompt: str) -> tuple[int, str]:
             try:
-                summary = await self._collect_subtask_events(index, prompt, queue)
+                summary = await self._collect_subtask_events(
+                    index,
+                    prompt,
+                    queue,
+                    system_extra=system_extras[index],
+                    tools_allowlist=tools_allowlists[index],
+                )
                 return index, summary
             except Exception as exc:
                 await queue.put((index, None))
@@ -952,13 +1046,23 @@ class AgentLoop:
                 type="turn_end", text=f"{label} {summaries.get(i, 'no output')}"
             )
 
-    async def _collect_subtask_events(self, index: int, prompt: str, queue) -> str:
+    async def _collect_subtask_events(
+        self,
+        index: int,
+        prompt: str,
+        queue,
+        *,
+        system_extra: str = "",
+        tools_allowlist: list[str] | None = None,
+    ) -> str:
         """Run one subtask; stream its tool events into the queue tagged by index; return summary."""
         from pathlib import Path as _Path
 
         sub_ctx = self._make_sub_context()
         sub_registry = ToolRegistry(sub_ctx)
         self._inherit_registry(sub_registry)
+        if tools_allowlist:
+            sub_registry.tool_allowlist = set(tools_allowlist)
         sub_cfg = sub_ctx.config
         sub_store = SessionStore(_Path(":memory:"))
         sid = sub_store.create_session(
@@ -975,6 +1079,7 @@ class AgentLoop:
             memory=None,
         )
         sub_loop.allow_always = set(self.allow_always)
+        sub_loop._extra_system_prompt = system_extra
         self._active_children.append(sub_loop)
         final_text = ""
         try:

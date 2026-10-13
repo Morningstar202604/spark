@@ -50,6 +50,8 @@ class ToolRegistry:
         self.readonly_mcp: set[str] = set()
         self.plan: list[dict[str, Any]] = []
         self._registered_scopes: dict[str, set[str]] = {}
+        # P1-4: 声明式子代理的工具白名单（None = 全部工具，行为不变）
+        self.tool_allowlist: set[str] | None = None
 
     @property
     def schema_revision(self) -> int:
@@ -143,11 +145,18 @@ class ToolRegistry:
                 "Spawn one or more sub-agents, each with its own context window, to handle self-contained "
                 "research or exploration work. Pass 'prompt' for a single sub-agent, or 'tasks' (array of "
                 "{prompt}) to run up to 4 sub-agents in parallel - e.g. explore different modules at once. "
+                "Optionally pass 'agent' (or per-item 'agent') with a name listed in <available_subagents> "
+                "to delegate to a declared specialist sub-agent (its .claude/agents/*.md body becomes its "
+                "system prompt and its tools: list restricts its toolset). "
                 "Sub-agents have all tools except task; you only receive their final summaries.",
                 {"prompt": {"type": "string", "description": "single sub-agent mode: complete instructions"},
+                 "agent": {"type": "string", "description": "optional: declared sub-agent name from <available_subagents>"},
                  "tasks": {"type": "array",
-                           "description": 'parallel mode: up to 4 items, each {"prompt": "..."}',
-                           "items": {"type": "object", "properties": {"prompt": {"type": "string"}}, "required": ["prompt"]}}},
+                           "description": 'parallel mode: up to 4 items, each {"prompt": "...", optional "agent": "..."}',
+                           "items": {"type": "object",
+                                     "properties": {"prompt": {"type": "string"},
+                                                    "agent": {"type": "string"}},
+                                     "required": ["prompt"]}}},
                 []),
             _schema("read_notebook",
                 "Read a Jupyter notebook (.ipynb): list cells with index, type, source and output previews.",
@@ -242,7 +251,14 @@ class ToolRegistry:
                 {"name": {"type": "string", "description": "skill name from available_skills"}},
                 ["name"]),
         ]
-        return builtin + self._extra_schemas
+        schemas = builtin + self._extra_schemas
+        if self.tool_allowlist:
+            schemas = [
+                s
+                for s in schemas
+                if s.get("function", {}).get("name", "") in self.tool_allowlist
+            ]
+        return schemas
 
     def add_mcp_schema(self, schema: dict[str, Any]) -> None:
         self._extra_schemas.append(schema)

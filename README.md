@@ -37,12 +37,12 @@ Open `http://localhost:8000` to start conversing.
 |----------|----------|
 | Chat | SSE streaming render, Markdown code blocks, image attachment upload |
 | Tools | File read/write, grep/glob search, Shell commands, Jupyter, Web Fetch |
-| Planning | Multi-step task plans, parallel sub-Agent delegation (up to 4) |
+| Planning | Multi-step task plans, parallel sub-Agent delegation (up to 4), declarative sub-agents (`.claude/agents/*.md`, "file as subagent") |
 | Permissions | Four-level sandbox, tool approval flow, protected path list |
 | Memory | AGENTS.md injection, long-term memory retrieval, auto keyword tagging |
 | Persistence | Session management, checkpoint & rollback, hot-reload configuration |
 | Models | DeepSeek, OpenAI, Ollama local models, multi-profile switching |
-| Extension | MCP protocol compatible, custom Provider, project-level skills (`.spark/skills/`) |
+| Extension | MCP protocol compatible, custom Provider, project-level skills (`.spark/skills/`), specialist sub-agents (`.claude/agents/`) |
 
 ## Architecture
 
