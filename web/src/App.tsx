@@ -8,6 +8,8 @@ import { CommandPalette } from "./components/CommandPalette"
 import { CheckpointModal } from "./components/CheckpointModal"
 import { FileViewer } from "./components/FileViewer"
 import { BrowserModal } from "./components/BrowserModal"
+import { Terminal } from "./components/Terminal"
+import { ExecutionGraph } from "./components/ExecutionGraph"
 import Toast from "./components/Toast"
 import { fetchStatus } from "./api"
 import type { Status } from "./types"
@@ -44,6 +46,13 @@ export default function App() {
         e.preventDefault()
         useUiStore.getState().toggleSidebar()
       }
+      // Ctrl+` 切换内置终端（P1-5）
+      if ((e.metaKey || e.ctrlKey) && e.key === "`") {
+        e.preventDefault()
+        const s = useUiStore.getState()
+        if (s.terminalOpen) s.closeTerminal()
+        else s.openTerminal()
+      }
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
@@ -71,6 +80,8 @@ export default function App() {
       <CheckpointModal />
       <FileViewer />
       <BrowserModal />
+      <Terminal />
+      <ExecutionGraph />
       {settingsOpen && (
         <Suspense fallback={null}>
           <SettingsModal onClose={closeSettings} onSaved={handleSaved} />

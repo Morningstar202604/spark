@@ -3,7 +3,7 @@ import { useSessionStore } from "../store/sessionStore"
 import { useUiStore } from "../store/uiStore"
 import { ContextMeter } from "./ContextMeter"
 import { IconButton } from "./ui"
-import { IconCommand, IconFolder, IconGlobe, IconMenu } from "./icons"
+import { IconCommand, IconFolder, IconGlobe, IconMenu, IconSpark, IconTerminal } from "./icons"
 
 export const Header = memo(function Header() {
   const status = useSessionStore((s) => s.status)
@@ -13,6 +13,8 @@ export const Header = memo(function Header() {
   const setPaletteOpen = useUiStore((s) => s.setPaletteOpen)
   const openFiles = useUiStore((s) => s.openFiles)
   const openBrowser = useUiStore((s) => s.openBrowser)
+  const openTerminal = useUiStore((s) => s.openTerminal)
+  const openGraph = useUiStore((s) => s.openGraph)
 
   const title = (status && status.session_id && sessionTitle()) || "新对话"
 
@@ -42,6 +44,12 @@ export const Header = memo(function Header() {
       </IconButton>
       <IconButton title="网页阅读" onClick={openBrowser}>
         <IconGlobe size={16} />
+      </IconButton>
+      <IconButton title="执行图" onClick={openGraph}>
+        <IconSpark size={16} />
+      </IconButton>
+      <IconButton title="内置终端 (Ctrl+`)" onClick={openTerminal}>
+        <IconTerminal size={16} />
       </IconButton>
       <IconButton title="命令面板 (Ctrl+K)" onClick={() => setPaletteOpen(true)}>
         <IconCommand size={16} />

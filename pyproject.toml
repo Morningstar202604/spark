@@ -52,6 +52,11 @@ telemetry = [
     "opentelemetry-sdk>=1.28",
     "opentelemetry-exporter-otlp-proto-grpc>=1.28",
 ]
+# P1-5: 内置终端（真实 PTY）。Windows 不支持（需 winpty/ConPTY），
+# 故用环境标记排除；未安装时 spark.pty 可导入但 PtyManager() 给出清晰报错。
+pty = [
+    "ptyprocess>=0.7; sys_platform != 'win32'",
+]
 desktop = [
     "pywebview>=5.0",
 ]
