@@ -3762,6 +3762,15 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/f2/cf/77d3e19b7fabd03895caca7857ef51e4c409e0ca6b37ee6e9f7daa50b642/proxy_tools-0.1.0.tar.gz", hash = "sha256:ccb3751f529c047e2d8a58440d86b205303cf0fe8146f784d1cbcd94f0a28010", size = 2978, upload-time = "2014-05-05T21:02:24.606Z" }
 
 [[package]]
+name = "ptyprocess"
+version = "0.7.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/20/e5/16ff212c1e452235a90aeb09066144d0c5a6a8c0834397e03f5224495c4e/ptyprocess-0.7.0.tar.gz", hash = "sha256:5c5d0a3b48ceee0b48485e0c26037c0acd7d29765ca3fbb5cb3831d347423220", size = 70762, upload-time = "2020-12-28T15:15:30.155Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/22/a6/858897256d0deac81a172289110f31629fc4cee19b6f01283303e18c8db3/ptyprocess-0.7.0-py2.py3-none-any.whl", hash = "sha256:4b41f3967fce3af57cc7e94b888626c18bf37a083e3651ca8feeb66d492fef35", size = 13993, upload-time = "2020-12-28T15:15:28.35Z" },
+]
+
+[[package]]
 name = "pybase64"
 version = "1.5.1"
 source = { registry = "https://pypi.org/simple" }
@@ -4888,6 +4897,9 @@ dev = [
     { name = "pytest-cov" },
     { name = "ruff" },
 ]
+pty = [
+    { name = "ptyprocess", marker = "sys_platform != 'win32'" },
+]
 telemetry = [
     { name = "opentelemetry-api" },
     { name = "opentelemetry-exporter-otlp-proto-grpc" },
@@ -4911,6 +4923,7 @@ requires-dist = [
     { name = "opentelemetry-exporter-otlp-proto-grpc", marker = "extra == 'telemetry'", specifier = ">=1.28" },
     { name = "opentelemetry-sdk", marker = "extra == 'telemetry'", specifier = ">=1.28" },
     { name = "pre-commit", marker = "extra == 'dev'", specifier = ">=3.6" },
+    { name = "ptyprocess", marker = "sys_platform != 'win32' and extra == 'pty'", specifier = ">=0.7" },
     { name = "pydantic", specifier = ">=2.7,<3.0" },
     { name = "pydantic-settings", specifier = ">=2.0,<3.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
@@ -4922,7 +4935,7 @@ requires-dist = [
     { name = "tomlkit", specifier = ">=0.13,<1.0" },
     { name = "typer", specifier = ">=0.12,<1.0" },
 ]
-provides-extras = ["dev", "telemetry", "desktop"]
+provides-extras = ["dev", "telemetry", "pty", "desktop"]
 
 [[package]]
 name = "sqlalchemy"
