@@ -24,6 +24,15 @@ if _LITELLM_TOKENIZERS.is_dir():
         (str(_LITELLM_TOKENIZERS), "litellm/litellm_core_utils/tokenizers")
     )
 
+# rfc3987_syntax 经 importlib.resources 读取 .lark 语法文件（Lark 语法定义），
+# PyInstaller 静态分析覆盖不到，冻结后 FileNotFoundError；递归收集整个包（排除 .pyc）。
+_rfc3987_dir = Path(importlib.util.find_spec("rfc3987_syntax").origin).parent
+for _p in sorted(_rfc3987_dir.rglob("*")):
+    if _p.is_file() and not _p.name.endswith(".pyc"):
+        _rel = _p.parent.relative_to(_rfc3987_dir)
+        _dest = "rfc3987_syntax" if str(_rel) == "." else f"rfc3987_syntax/{_rel.as_posix()}"
+        _LITELLM_DATA.append((str(_p), _dest))
+
 a = Analysis(
     ['src/spark/__main__.py'],
     pathex=[],

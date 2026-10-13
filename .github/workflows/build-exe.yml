@@ -1,0 +1,65 @@
+name: build-exe
+
+# push 即构建单文件可执行程序（Windows EXE），也可手动触发。
+# 产出 spark.exe 作为 Actions artifact 供下载；打 tag 走 release.yml 发布。
+on:
+  workflow_dispatch:
+  push:
+    branches: ["main"]
+    paths:
+      - "spark-onefile.spec"
+      - "spark.spec"
+      - "pyproject.toml"
+      - "uv.lock"
+      - "src/**"
+      - "web/**"
+
+permissions:
+  contents: read
+
+jobs:
+  windows-exe:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install backend dependencies
+        run: uv sync --extra dev --extra telemetry
+
+      - name: Build frontend (dist 写入 src/spark/web/dist)
+        working-directory: web
+        run: |
+          npm install --no-audit --no-fund
+          npm run build
+
+      - name: Install PyInstaller
+        run: uv pip install pyinstaller
+
+      - name: Build single-file executable
+        run: uv run pyinstaller spark-onefile.spec --distpath dist --workpath build --noconfirm
+
+      - name: Smoke test
+        shell: bash
+        run: |
+          set -e
+          ./dist/spark.exe --version >/tmp/spark-exe-version.txt 2>&1 || true
+          cat /tmp/spark-exe-version.txt | tail -3
+          test -s dist/spark.exe && echo "spark.exe OK"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: spark-windows-x86_64
+          path: dist/spark.exe
+          if-no-files-found: error
+          compression-level: 0
