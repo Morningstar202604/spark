@@ -341,6 +341,7 @@ class SparkWebState:
                 "max_repeat_calls": self.cfg.agent.max_repeat_calls,
                 "max_turn_tokens": self.cfg.agent.max_turn_tokens,
                 "max_output_chars": self.cfg.agent.max_output_chars,
+                "effort": self.cfg.agent.effort,
                 "show_thinking": self.cfg.agent.show_thinking,
                 "show_tools": self.cfg.agent.show_tools,
                 "show_plan": self.cfg.agent.show_plan,

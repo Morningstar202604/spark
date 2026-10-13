@@ -19,7 +19,7 @@ import base64 as _b64mod
 import logging
 import socket
 import threading
-from typing import cast
+from typing import Literal, cast
 
 from spark.config import (
     ApprovalMode,
@@ -624,6 +624,14 @@ def _handle_settings(handler: HandlerBase, body: dict) -> None:
         )
         return
     state.cfg.agent.sandbox_mode = cast(SandboxMode, sandbox_mode)
+
+    effort = str(
+        agent_in.get("effort") or state.cfg.agent.effort
+    ).strip()
+    if effort not in {"low", "medium", "high"}:
+        handler._json(400, {"error": "effort must be low, medium or high"})
+        return
+    state.cfg.agent.effort = cast(Literal["low", "medium", "high"], effort)
 
     display_flags = {
         k: bool(agent_in[k])

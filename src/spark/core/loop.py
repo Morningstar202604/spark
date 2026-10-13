@@ -79,6 +79,18 @@ class AgentLoop:
         self._call_counts: dict[str, int] = {}
         self._turn_tokens = 0
         self._active_children: list[AgentLoop] = []
+        # Provider 协议为鸭子类型：测试与第三方 provider 可能不接收 effort 参数。
+        # 探测一次签名，仅在支持时透传 effort（保持向后兼容）。
+        self._stream_extra: dict[str, str] = {}
+        if self.provider is not None:
+            try:
+                import inspect
+
+                sig = inspect.signature(self.provider.stream)
+                if "effort" in sig.parameters:
+                    self._stream_extra = {"effort": getattr(self.cfg.agent, "effort", "medium")}
+            except (TypeError, ValueError, AttributeError):
+                self._stream_extra = {}
         self.hooks = HookRegistry.from_config(
             [hook.model_dump() for hook in getattr(cfg, "hooks", [])], workdir
         )
@@ -445,14 +457,16 @@ class AgentLoop:
             tool_calls: list[ToolCall] = []
             try:
                 async for delta in self.provider.stream(
-                    messages, self.registry.schemas()
+                    messages, self.registry.schemas(), **self._stream_extra
                 ):
                     if self.cancelled:
                         yield TurnEvent(type="turn_error", text="Turn cancelled")
                         return
                     if delta.type == "reasoning" and delta.text:
                         reasoning_parts.append(delta.text)
-                        yield TurnEvent(type="reasoning_delta", text=delta.text)
+                        # show_thinking=False 时不下发 SSE（节省带宽），仍计入 token 用量
+                        if self.cfg.agent.show_thinking:
+                            yield TurnEvent(type="reasoning_delta", text=delta.text)
                     elif delta.type == "text" and delta.text:
                         text_parts.append(delta.text)
                         yield TurnEvent(type="text_delta", text=delta.text)

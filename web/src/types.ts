@@ -57,6 +57,7 @@ export interface FullConfig {
     max_repeat_calls: number
     max_turn_tokens: number
     max_output_chars: number
+    effort: "low" | "medium" | "high"
     show_thinking: boolean
     show_tools: boolean
     show_plan: boolean

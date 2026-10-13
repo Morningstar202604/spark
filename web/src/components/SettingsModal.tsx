@@ -308,6 +308,13 @@ export default function SettingsDrawer({ onClose, onSaved }: Props) {
                 <Field label="Model">
                   <TextInput value={cfg.provider.model} onChange={(e) => { dirtyRef.current.cfg = true; setCfg((c) => (c ? { ...c, provider: { ...c.provider, model: e.target.value } } : c)) }} placeholder="model-id" />
                 </Field>
+                <Field label="推理强度（effort）" hint="映射为 reasoning_effort / DeepSeek thinking budget，影响深度与成本">
+                  <Select value={cfg.agent.effort ?? "medium"} onChange={(e) => patchAgent({ effort: e.target.value as "low" | "medium" | "high" })}>
+                    <option value="low">低（快速 / 省 token）</option>
+                    <option value="medium">中（默认）</option>
+                    <option value="high">高（深度推理 / 更贵）</option>
+                  </Select>
+                </Field>
                 {probe && (
                   <div className={cls("rounded-lg border px-3 py-2 text-xs", probe.ok ? "border-ok/40 bg-ok/8 text-ok" : "border-err/40 bg-err/8 text-err")}>
                     {probe.ok ? `连接成功 · 延迟 ${probe.latency_ms}ms · ${probe.model}` : `连接失败：${probe.error}`}

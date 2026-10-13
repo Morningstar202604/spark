@@ -17,7 +17,9 @@ class MockProvider:
         self.rounds = list(rounds) if rounds is not None else None
         self.calls = 0
 
-    async def stream(self, messages: list[ChatMessage], tools: list[dict]) -> AsyncIterator[ChatDelta]:
+    async def stream(
+        self, messages: list[ChatMessage], tools: list[dict], effort: str | None = None
+    ) -> AsyncIterator[ChatDelta]:
         self.calls += 1
         if self.rounds is not None:
             if self.rounds:

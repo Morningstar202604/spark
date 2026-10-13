@@ -99,6 +99,7 @@ class AgentConfig(BaseModel):
     max_repeat_calls: int = Field(default=4, ge=0, le=10000)
     max_turn_tokens: int = Field(default=0, ge=0, le=100_000_000)
     max_output_chars: int = Field(default=8000, ge=200, le=1_000_000)
+    effort: Literal["low", "medium", "high"] = "medium"
     show_thinking: bool = True
     show_tools: bool = True
     show_plan: bool = True
@@ -567,6 +568,7 @@ def save_config(cfg: SparkConfig, path: Path | None = None) -> Path:
     agent.add("show_context", cfg.agent.show_context)
     agent.add("show_keywords", cfg.agent.show_keywords)
     agent.add("show_notices", cfg.agent.show_notices)
+    agent.add("effort", cfg.agent.effort)
     doc.add("agent", agent)
 
     # [context]

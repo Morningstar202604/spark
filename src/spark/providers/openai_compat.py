@@ -176,6 +176,7 @@ class OpenAICompatProvider:
         self,
         messages: list[ChatMessage],
         tools: list[dict],
+        effort: str | None = None,
     ) -> AsyncIterator[ChatDelta]:
         """Stream completion deltas.
 
@@ -185,11 +186,17 @@ class OpenAICompatProvider:
         retried — they indicate a problem with the request itself.
         Yields :class:`~spark.models.ChatDelta` chunks identical to the previous
         implementation so upstream consumers (``AgentLoop``) are unaffected.
+
+        *effort* maps to provider-native reasoning/thinking budget:
+        ``low|medium|high`` → OpenAI-style ``reasoning_effort``; for DeepSeek
+        chat models it additionally enables the official ``thinking`` block
+        with a budget scaled to the effort tier (cache-friendly: the fixed
+        system + tools stay a stable prefix, effort only varies the tail).
         """
         last_exc: Exception | None = None
         for attempt in range(self.max_retries + 1):
             try:
-                response = await litellm.acompletion(
+                completion_kwargs: dict[str, Any] = dict(
                     model=self.model,
                     messages=_to_openai(messages),
                     tools=tools or None,
@@ -200,6 +207,20 @@ class OpenAICompatProvider:
                     drop_params=True,  # pass through non-standard fields (e.g. reasoning_content)
                     timeout=120.0,  # httpx.Timeout(120.0) equivalent for LiteLLM
                 )
+                if effort:
+                    completion_kwargs["reasoning_effort"] = effort
+                    if "deepseek" in self.model.lower():
+                        completion_kwargs["extra_body"] = {
+                            "thinking": {
+                                "type": "enabled",
+                                "budget_tokens": {
+                                    "low": 2048,
+                                    "medium": 4096,
+                                    "high": 8192,
+                                }[effort],
+                            }
+                        }
+                response = await litellm.acompletion(**completion_kwargs)
             except Exception as exc:
                 last_exc = exc
                 status = self._extract_status_code(exc)

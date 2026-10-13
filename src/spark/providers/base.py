@@ -7,5 +7,8 @@ from spark.models import ChatDelta, ChatMessage
 
 class Provider(Protocol):
     def stream(
-        self, messages: list[ChatMessage], tools: list[dict]
+        self,
+        messages: list[ChatMessage],
+        tools: list[dict],
+        effort: str | None = None,
     ) -> AsyncIterator[ChatDelta]: ...

@@ -126,7 +126,7 @@ def test_loop_pre_tool_hook_blocks_execution(tmp_path: Path) -> None:
         def __init__(self):
             self.n = 0
 
-        async def stream(self, messages, tools):
+        async def stream(self, messages, tools, effort=None):
             self.n += 1
             if self.n == 1:
                 yield ChatDelta(
