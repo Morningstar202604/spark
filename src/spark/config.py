@@ -65,10 +65,10 @@ def validate_choice(value: str | None, allowed: tuple[str, ...], label: str) -> 
     if value is None:
         return ""
     if value not in allowed:
-        raise ConfigError(
-            f"unknown {label}: {value!r} (choose one of: {', '.join(allowed)})"
-        )
+        raise ConfigError(f"unknown {label}: {value!r} (choose one of: {', '.join(allowed)})")
     return value
+
+
 DisplayConfigKey = Literal[
     "show_thinking",
     "show_tools",
@@ -151,6 +151,12 @@ class McpServerConfig(BaseModel):
     readonly_tools: list[str] = Field(default_factory=list)
     transport: Literal["stdio", "sse", "streamable_http"] = "stdio"
     http: McpTransportConfig | None = None  # for the sse / streamable_http transports
+    # P1-9: 第三方 MCP server 最小权限白名单。
+    # 空列表 = 向后兼容：该 server 公告的全部工具都暴露（历史行为）。
+    # 非空 = 最小权限模式：只注册/调用名字命中任意 glob 的工具（"*" 表示全部），
+    # 未声明的工具一律拒绝注册与调用（默认拒绝未声明项）。glob 语义同
+    # policy._wildcard_match（'*' 单段、'**' 跨段、'?' 单字符）。
+    allowed_tools: list[str] = Field(default_factory=list)
 
 
 class MemoryConfig(BaseModel):
@@ -311,6 +317,9 @@ auto_extract = true
 # args = ["-y", "@example/mcp-server"]
 # transport = "stdio"
 # readonly_tools = []
+# # P1-9 最小权限白名单（可选）：非空时只暴露/调用命中 glob 的工具，
+# # 未声明的一律拒绝；["*"] 显式放行全部。空 = 暴露 server 公告的全部工具。
+# allowed_tools = ["list_*", "get_*"]
 
 # MCP server — SSE transport example (uncomment to enable)
 # [[mcp.servers]]
@@ -558,7 +567,9 @@ def save_config(cfg: SparkConfig, path: Path | None = None) -> Path:
 
     doc = tomlkit.document()
     doc.add("active_profile_id", cfg.active_profile_id or "")
-    doc.add(tomlkit.comment("Spark agent configuration — edit with: spark config set <key> <value>"))
+    doc.add(
+        tomlkit.comment("Spark agent configuration — edit with: spark config set <key> <value>")
+    )
     doc.add(tomlkit.nl())
 
     # [provider]
@@ -619,6 +630,8 @@ def save_config(cfg: SparkConfig, path: Path | None = None) -> Path:
             if server.transport == "sse":
                 srv_table.add("transport", "sse")
                 srv_table.add("readonly_tools", list(server.readonly_tools))
+                if server.allowed_tools:
+                    srv_table.add("allowed_tools", list(server.allowed_tools))
                 if server.http:
                     http = tomlkit.table()
                     http.add("url", server.http.url)
@@ -630,6 +643,8 @@ def save_config(cfg: SparkConfig, path: Path | None = None) -> Path:
                 srv_table.add("command", server.command)
                 srv_table.add("args", list(server.args))
                 srv_table.add("readonly_tools", list(server.readonly_tools))
+                if server.allowed_tools:
+                    srv_table.add("allowed_tools", list(server.allowed_tools))
             mcp_aot.append(srv_table)
         doc.add("mcp", tomlkit.table().add("servers", mcp_aot))
 

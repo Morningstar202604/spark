@@ -28,6 +28,7 @@ from mcp.client.streamable_http import streamable_http_client
 
 from spark.config import McpServerConfig
 from spark.models import ToolResult
+from spark.policy import mcp_tool_allowed
 from spark.tools.registry import ToolRegistry
 
 logger = logging.getLogger(__name__)
@@ -84,7 +85,9 @@ class _McpConnection:
             {
                 "name": t.name,
                 "description": t.description or "",
-                "inputSchema": t.inputSchema if isinstance(t.inputSchema, dict) else {"type": "object"},
+                "inputSchema": t.inputSchema
+                if isinstance(t.inputSchema, dict)
+                else {"type": "object"},
             }
             for t in listed.tools
         ]
@@ -152,9 +155,7 @@ class McpBridge:
         # uncallable as soon as that loop closes — which is every CLI command and
         # every web turn. Owning a loop keeps sessions alive for the process.
         self._loop = asyncio.new_event_loop()
-        self._loop_thread = threading.Thread(
-            target=self._run_loop, name="mcp-loop", daemon=True
-        )
+        self._loop_thread = threading.Thread(target=self._run_loop, name="mcp-loop", daemon=True)
         self._loop_thread.start()
 
     def _run_loop(self) -> None:
@@ -179,7 +180,8 @@ class McpBridge:
                         "function": {
                             "name": ns,
                             "description": tool.get("description") or ns,
-                            "parameters": tool.get("inputSchema") or {"type": "object", "properties": {}},
+                            "parameters": tool.get("inputSchema")
+                            or {"type": "object", "properties": {}},
                         },
                     }
                 )
@@ -191,9 +193,7 @@ class McpBridge:
         """Connect to all MCP servers in *configs* and register their tools."""
         await self._on_owner(self._start_on_owner(configs, registry))
 
-    async def _start_on_owner(
-        self, configs: list[McpServerConfig], registry: ToolRegistry
-    ) -> None:
+    async def _start_on_owner(self, configs: list[McpServerConfig], registry: ToolRegistry) -> None:
         for cfg in configs:
             conn = _McpConnection(cfg)
             try:
@@ -203,6 +203,31 @@ class McpBridge:
                 self.errors.append(f"MCP {cfg.name} failed: {exc}")
                 await conn.close()
                 continue
+            # P1-9: 最小权限白名单（加载路径强制）。
+            # allowed_tools 非空 = 该 server 进入最小权限模式：公告的工具里
+            # 未声明的一律不注册（默认拒绝），并记录被拦截的工具名，
+            # 便于用户及时发现 server 新增了未授权能力。
+            if cfg.allowed_tools:
+                kept: list[dict[str, Any]] = []
+                dropped: list[str] = []
+                for tool in conn.tools:
+                    tname = tool.get("name") or ""
+                    if mcp_tool_allowed(cfg.allowed_tools, tname):
+                        kept.append(tool)
+                    else:
+                        dropped.append(tname)
+                if dropped:
+                    logger.warning(
+                        "MCP server '%s' blocked %d tool(s) outside whitelist %s: %s",
+                        cfg.name,
+                        len(dropped),
+                        cfg.allowed_tools,
+                        ", ".join(dropped),
+                    )
+                    self.errors.append(
+                        f"MCP {cfg.name} blocked tools outside whitelist: {', '.join(dropped)}"
+                    )
+                conn.tools = kept
             self.servers[cfg.name] = conn
         self.register_into(registry)
 
@@ -210,9 +235,7 @@ class McpBridge:
         """Call a namespaced MCP tool: ``mcp__<server>__<tool>``."""
         return await self._on_owner(self._call_on_owner(namespaced, arguments))
 
-    async def _call_on_owner(
-        self, namespaced: str, arguments: dict[str, Any]
-    ) -> ToolResult:
+    async def _call_on_owner(self, namespaced: str, arguments: dict[str, Any]) -> ToolResult:
         parts = namespaced.split("__", 2)
         if len(parts) != 3:
             return ToolResult(ok=False, payload={"error": f"Bad MCP tool name: {namespaced}"})
@@ -222,6 +245,19 @@ class McpBridge:
             return ToolResult(
                 ok=False,
                 payload={"error": f"MCP server not available: {server_name}"},
+            )
+        # P1-9: 调用路径复核白名单（防御纵深）。注册时已按 allowed_tools
+        # 过滤，此处再兜底一次：即使 registry 里出现了越权工具，也到不了
+        # server。错误信息显式给出白名单内容，便于用户排障。
+        if not mcp_tool_allowed(server.cfg.allowed_tools, tool_name):
+            return ToolResult(
+                ok=False,
+                payload={
+                    "error": (
+                        f"MCP tool denied by whitelist: mcp__{server_name}__{tool_name}"
+                        f" (allowed_tools={server.cfg.allowed_tools})"
+                    )
+                },
             )
         return await server.call(tool_name, arguments)
 
