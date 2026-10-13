@@ -63,7 +63,7 @@ spark = "spark.cli:app"
 where = ["src"]
 
 [tool.setuptools.package-data]
-spark = ["prompts/*.md", "web/*.html", "web/dist/*", "web/dist/assets/*"]
+spark = ["prompts/*.md", "web/*.html", "web/dist/*", "web/dist/assets/*", "evals/data/*.json"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
