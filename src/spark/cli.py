@@ -241,7 +241,7 @@ def web_cmd(
     approval: str | None = typer.Option(
         None,
         "--approval",
-        help="suggest | auto-edit | full-auto（默认逐项询问，确认后再执行）",
+        help="full-auto | auto-edit | approve-plan | suggest | plan-only | manual（默认逐项询问，确认后再执行）",
     ),
     model: str | None = typer.Option(None, "--model"),
     provider: str | None = typer.Option(None, "--provider"),
@@ -278,7 +278,7 @@ def mcp_serve_cmd(
     approval: str | None = typer.Option(
         None,
         "--approval",
-        help="suggest | auto-edit | full-auto（默认逐项询问，确认后再执行）",
+        help="full-auto | auto-edit | approve-plan | suggest | plan-only | manual（默认逐项询问，确认后再执行）",
     ),
     model: str | None = typer.Option(None, "--model"),
     provider: str | None = typer.Option(None, "--provider"),
@@ -321,7 +321,7 @@ def desktop_cmd(
     approval: str | None = typer.Option(
         None,
         "--approval",
-        help="suggest | auto-edit | full-auto（默认逐项询问，确认后再执行）",
+        help="full-auto | auto-edit | approve-plan | suggest | plan-only | manual（默认逐项询问，确认后再执行）",
     ),
     model: str | None = typer.Option(None, "--model"),
     provider: str | None = typer.Option(None, "--provider"),
@@ -483,7 +483,7 @@ def init_cmd(
         None, "--provider", help="openai_compat | ollama | mock"
     ),
     approval: str | None = typer.Option(
-        None, "--approval", help="suggest | auto-edit | full-auto"
+        None, "--approval", help="full-auto | auto-edit | approve-plan | suggest | plan-only | manual"
     ),
     sandbox_mode: str | None = typer.Option(
         None,
