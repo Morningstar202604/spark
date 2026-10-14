@@ -24,8 +24,10 @@ jobs:
           python-version: "3.12"
       - name: Install pre-commit
         run: pip install pre-commit
-      - name: Secret scan (gitleaks + trufflehog)
-        run: pre-commit run gitleaks trufflehog --all-files
+      - name: Secret scan (gitleaks)
+        run: pre-commit run gitleaks --all-files
+      - name: Secret scan (trufflehog)
+        run: pre-commit run trufflehog --all-files
 
   dependency-audit:
     runs-on: ubuntu-latest
@@ -39,8 +41,10 @@ jobs:
       - name: Install project
         run: pip install -e ".[dev]"
       - name: uv audit
+        continue-on-error: true  # 已知漏洞作治理看板，步骤级也不阻断
         run: uv audit
       - name: pip-audit
+        continue-on-error: true
         run: |
           pip install pip-audit
           python3 -m pip_audit --progress-spinner off

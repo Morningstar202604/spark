@@ -4865,7 +4865,7 @@ wheels = [
 
 [[package]]
 name = "spark-agent"
-version = "0.9.1"
+version = "0.9.2"
 source = { editable = "." }
 dependencies = [
     { name = "chromadb" },

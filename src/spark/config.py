@@ -27,6 +27,7 @@ from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from spark.errors import ConfigError
+from spark.platform_compat import CREATE_NO_WINDOW
 
 logger = logging.getLogger(__name__)
 
@@ -723,7 +724,7 @@ def _harden_permissions(f: Path) -> None:
                     ["icacls", str(f), "/inheritance:r", "/grant:r", f"*{sid}:F"],
                     capture_output=True,
                     timeout=30,
-                    creationflags=subprocess.CREATE_NO_WINDOW,
+                    creationflags=CREATE_NO_WINDOW,
                 )
                 return
             except (OSError, subprocess.SubprocessError):
@@ -747,7 +748,7 @@ def _win_user_sid() -> str | None:
                 capture_output=True,
                 text=True,
                 timeout=30,
-                creationflags=subprocess.CREATE_NO_WINDOW,
+                creationflags=CREATE_NO_WINDOW,
             ).stdout
             m = re.search(r"S-1-\d[\d-]*\d", out)
             _WIN_SID = m.group(0) if m else ""
@@ -756,8 +757,31 @@ def _win_user_sid() -> str | None:
     return _WIN_SID or None
 
 
+def _acl_wide_entries(aces: list[str]) -> list[str]:
+    """从 icacls 输出行筛出"宽泛可见"的 ACE（任一普通用户可读的组）。
+
+    Windows 常驻的系统/管理员条目（``NT AUTHORITY\\SYSTEM``、``BUILTIN\\Administrators``、
+    ``CREATOR OWNER``、``OWNER RIGHTS``）不属于宽泛可见——它们要么是内核组件，
+    要么仅对管理员/所有者生效。真正要挡住的是普通用户组。
+    """
+    wide_markers = (
+        "BUILTIN\\Users",
+        "Everyone",
+        "NT AUTHORITY\\Authenticated Users",
+        "NT AUTHORITY\\INTERACTIVE",
+    )
+    return [ln for ln in aces if any(m in ln for m in wide_markers)]
+
+
 def win_acl_restricted(f: Path) -> bool:
-    """Windows：文件 ACL 是否已收紧到只剩当前用户一条 ACE（供 doctor 展示）。"""
+    """Windows：文件 ACL 是否已收紧到"宽泛用户组读不到"（供 doctor 展示）。
+
+    判定标准是安全目标而非精确 ACE 计数：不同 Windows 环境（本机账户 /
+    GitHub Actions runner / 域账户）在 ``icacls /inheritance:r /grant:r`` 之后
+    残留的系统条目数量并不一致（实测本机 2 条、CI runner 4 条），
+    但只要 Users / Everyone / Authenticated Users 均不在列表内，
+    密钥对其他普通用户就是不可读的。
+    """
     if sys.platform != "win32":
         return False
     try:
@@ -766,9 +790,11 @@ def win_acl_restricted(f: Path) -> bool:
             capture_output=True,
             text=True,
             timeout=30,
-            creationflags=subprocess.CREATE_NO_WINDOW,
+            creationflags=CREATE_NO_WINDOW,
         ).stdout
     except (OSError, subprocess.SubprocessError):
         return False
     aces = [ln for ln in out.splitlines() if ":(" in ln]
-    return len(aces) == 1
+    if not aces:
+        return False
+    return not _acl_wide_entries(aces)

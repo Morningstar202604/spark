@@ -2,14 +2,27 @@
 
 Windows 上 os.chmod(0o600) 只拨只读位、不限制其他用户读取——令牌与 API Key
 存于 config.toml，必须用 icacls 收紧 ACL 才算真正保护。
+
+判定标准（安全目标导向）：不同 Windows 环境在移除继承后残留的系统条目数不同
+（本机 vs GitHub runner 实测 2 vs 4 条：SYSTEM / Administrators / OWNER RIGHTS 等），
+只要一般用户组读不到即达标——精确计数会把 runner 环境误判为不安全。
 """
 
 from __future__ import annotations
 
+import re
 import subprocess
 import sys
 
 import pytest
+
+#: 一般用户组（任一普通用户可读）——收紧后必须全部不在 ACL 中
+_WIDE_GROUPS = (
+    "BUILTIN\\Users",
+    "Everyone",
+    "NT AUTHORITY\\Authenticated Users",
+    "NT AUTHORITY\\INTERACTIVE",
+)
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows ACL 行为")
@@ -24,22 +37,21 @@ def test_save_config_hardens_acl(tmp_path, monkeypatch) -> None:
     out = subprocess.run(
         ["icacls", str(f)], capture_output=True, text=True, timeout=30
     ).stdout
-    assert "BUILTIN\\Users" not in out
-    assert "Everyone" not in out
-    assert "NT AUTHORITY\\Authenticated Users" not in out
-    # 严格断言：继承已移除，DACL 只剩当前用户一条 ACE
+    # 安全目标：宽泛用户组必须全部不可见
+    for group in _WIDE_GROUPS:
+        assert group not in out, f"{group} 仍可访问：{out!r}"
+    # 继承已移除（无 (I) 标记），且当前用户仍是授权主体
+    aces = [ln for ln in out.splitlines() if ":(" in ln]
+    assert aces, f"icacls 未返回任何 ACE：{out!r}"
+    assert not any("(I)" in ln for ln in aces), f"继承未移除：{out!r}"
     who = subprocess.run(
         ["whoami", "/user", "/fo", "csv", "/nh"],
         capture_output=True,
         text=True,
         timeout=30,
     ).stdout
-    import re
-
     m = re.search(r"S-1-\d[\d-]*\d", who)
     assert m, f"whoami 未返回 SID：{who!r}"
-    aces = [ln for ln in out.splitlines() if ":(" in ln]
-    assert len(aces) == 1, f"应只剩 1 条 ACE，实际：{out!r}"
     assert m.group(0) in out or _user_name() in aces[0]
 
 

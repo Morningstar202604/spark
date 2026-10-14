@@ -8,32 +8,37 @@ permissions:
   contents: write
 
 jobs:
+  # 先构建三平台产物（各自上传为 workflow artifact，不碰 Release）
   build:
     strategy:
       fail-fast: false
       matrix:
         include:
           - os: windows-latest
-            asset: spark-windows-x86_64
             setup: |
               pip install -e ".[dev]" pyinstaller
               python -m pytest -q
               pyinstaller --clean -y spark.spec
             pack: powershell Compress-Archive -Path dist/spark -DestinationPath spark-windows-x86_64.zip
+            artifact: spark-windows-x86_64
+            files: spark-windows-x86_64.zip
           - os: ubuntu-22.04   # GLIBC 2.35：兼容绝大多数发行版
-            asset: spark-linux-x86_64
             setup: |
               pip install -e ".[dev]" pyinstaller
               python -m pytest -q
               pyinstaller --clean -y spark.spec
             pack: tar -czf spark-linux-x86_64.tar.gz -C dist spark
-          - os: macos-13      # Intel x86_64 runner
-            asset: spark-macos-x86_64
+            artifact: spark-linux-x86_64
+            files: spark-linux-x86_64.tar.gz
+          # macos-13 在免费额度下会长期排队（永不执行）；macos-latest 为 Apple Silicon
+          - os: macos-latest
             setup: |
               pip install -e ".[dev]" pyinstaller
               python -m pytest -q
               pyinstaller --clean -y spark.spec
-            pack: tar -czf spark-macos-x86_64.tar.gz -C dist spark
+            pack: tar -czf spark-macos-arm64.tar.gz -C dist spark
+            artifact: spark-macos-arm64
+            files: spark-macos-arm64.tar.gz
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -48,14 +53,32 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: build-logs-${{ matrix.os }}
+          name: build-logs-${{ matrix.artifact }}
           path: |
             build/spark/warn-spark.txt
             build/spark/xref-spark.html
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.files }}
+          if-no-files-found: error
+
+  # 再由单一 job 汇总上传到 Release：避免多 job 并发写同一 release
+  # （GitHub 的 immutable release 规则：一旦 release 发布，资产就无法再上传）
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist-assets
+          merge-multiple: true
+      - name: List assets
+        run: ls -la dist-assets
       - uses: softprops/action-gh-release@v2
         with:
-          files: |
-            spark-windows-*
-            spark-linux-*
-            spark-macos-*
+          files: dist-assets/*
           generate_release_notes: true

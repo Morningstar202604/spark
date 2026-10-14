@@ -1,18 +1,27 @@
 # Spark: local-first AI coding agent — bandit config
-# Skips are justified for a dev tool that intentionally shells out to
-# user-chosen commands via approval gates and process groups.
+#
+# 键名说明：bandit 只识别 ``skips`` / ``exclude_dirs`` / ``tests`` 等键。
+# 早期版本误用了 ``skipped_tests``（不存在的键），导致整份跳过列表静默失效，
+# CI 的 bandit 步骤长期非零退出。
+#
+# 跳过项均为本工具"用户明确授权后执行命令 / 构建沙箱"这一核心能力带来的误报。
 
-skipped_tests:
-  # 标准的 subprocess / 开发工具误报
-  - B404  # subprocess module — 工具核心能力
-  - B603  # subprocess without shell=true — 不影响安全
-  - B607  # partial path — PATH 查找可执行文件
+skips:
+  # 标准 subprocess / 开发工具误报
+  - B404  # subprocess module — 工具核心能力（用户授权下执行命令）
+  - B603  # subprocess without shell=true — 参数化调用，无注入面
+  - B607  # partial path — 按 PATH 查找用户指定的可执行文件
   - B110  # try/except/pass — 有意为之的错误处理
   - B112  # try/except/continue
-  - B101  # assert — 测试中使用
-  - B311  # pseudo-random — uuid 生成，非安全场景
+  - B101  # assert — 内部不变量与测试
+  - B311  # pseudo-random — 用于会话/作业 ID，非安全场景
   - B105  # hardcoded_password_string — 空字符串默认值
+
   # 业务设计相关
-  - B104  # bind all interfaces — 本地开发服务器设计
-  - B108  # hardcoded_tmp_directory — 隔离测试目录
-  - B608  # SQL injection — 所有查询使用 ? 参数化
+  - B104  # bind all interfaces — 默认仅 127.0.0.1，暴露需显式 --host 0.0.0.0
+  - B108  # hardcoded_tmp_directory — bwrap 沙箱绑定 /tmp、隔离测试目录
+  - B608  # SQL injection — 所有查询使用 ? 参数化占位符
+
+  # 固定数据源 / 静态生成代码
+  - B310  # urlopen for permitted schemes — 仅访问写死的 HTTPS 数据集端点
+  - B102  # exec — MCP handler 由静态 schema 生成，非用户输入（见 mcp_expose.py 注释）

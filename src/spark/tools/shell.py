@@ -14,6 +14,7 @@ from pydantic import BaseModel
 
 from spark.errors import PathEscapeError
 from spark.models import ToolResult
+from spark.platform_compat import CREATE_NEW_PROCESS_GROUP
 from spark.sandbox import SandboxPolicyError, WorkdirSandbox
 from spark.tools._common import clip_text
 
@@ -103,7 +104,7 @@ def run_shell(
         "stderr": subprocess.PIPE,
     }
     if os.name == "nt":
-        process_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+        process_kwargs["creationflags"] = CREATE_NEW_PROCESS_GROUP
     else:
         process_kwargs["start_new_session"] = True
 

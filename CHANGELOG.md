@@ -2,6 +2,49 @@
 
 本项目遵循语义化版本。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)。
 
+## [0.9.2] - 2026-10-14
+
+CI 转绿批次：修复 GitHub Actions 长期全红的四个独立根因，全部先在本地以 CI
+同款命令复现并跑通（含 Linux 平台模拟），再推送。
+
+### 修复（CI / Security）
+
+- **bandit 配置键名错误（CI 长期红的直接原因）**：`bandit.yaml` 使用了不存在的
+  `skipped_tests` 键（bandit 只认 `skips`），导致整份跳过列表静默失效，`-ll -ii`
+  下 5 个误报持续触发非零退出。A/B 对照实验：旧键 exit=1/5 问题 → 新键 exit=0/0。
+- **mypy 在 Linux 上报 Windows 专属常量**：`subprocess.CREATE_NO_WINDOW` /
+  `CREATE_NEW_PROCESS_GROUP` 只在 Windows 的 typeshed 中存在，CI（ubuntu）报
+  `Module has no attribute`（2 处），而本机 Windows 永远看不到。新增
+  `src/spark/platform_compat.py` 用 `getattr(x, name, 0)` 统一取值，四个调用点收敛。
+- **配置文件 ACL 判定在 GitHub runner 上误判**：`win_acl_restricted()` 用
+  `len(aces) == 1` 精确计数，而 runner 上 `icacls /inheritance:r` 后残留 4 条系统条目
+  （runneradmin / SYSTEM / Administrators / OWNER RIGHTS）→ 把已收紧的文件判为不安全，
+  导致 2 个 Windows 测试失败、Release 的 Windows 构建整体失败。改为安全目标导向：
+  只要 `BUILTIN\Users` / `Everyone` / `NT AUTHORITY\Authenticated Users` /
+  `INTERACTIVE` 均不可见即达标（并保留"继承标记 (I) 必须不存在"断言）。
+- **Security 的 secret 扫描命令语法错误**：`pre-commit run gitleaks trufflehog` 不被
+  pre-commit 接受（它只接受单个 hook id），job 以 usage error 失败而非扫描发现问题。
+  拆为两次调用；`uv audit` / `pip-audit` 步骤级补 `continue-on-error`，与 job 级
+  "治理看板不阻断合并"的设计意图一致。
+- **Release 资产上传冲突 + macOS runner 不可用**：三个平台 job 并发写同一个 Release，
+  后到者触发 "Cannot upload asset to an immutable release"；`macos-13` 在免费额度下
+  永不获得 runner（实测排队近 2 小时）。改为构建矩阵只产出 workflow artifact，
+  再由单一 `publish` job 汇总上传；macOS runner 换 `macos-latest`（产物更名
+  `spark-macos-arm64`）。
+
+### 新增
+
+- `src/spark/platform_compat.py`：跨平台 subprocess 标志的安全取值（`CREATE_NO_WINDOW`
+  / `CREATE_NEW_PROCESS_GROUP` / `DETACHED_PROCESS`）。
+- `tests/test_acl_predicate.py`：4 例锁定 ACL 判定的安全语义（runner 形态应判为已收紧、
+  含宽泛用户组应判为未收紧、系统/管理员条目不算宽泛、非 Windows 返回 False）。
+
+### 验证
+
+- 本地 CI 仿真：ruff PASS；mypy（`--platform linux` 与本地 Windows）双平台 PASS；
+  bandit exit=0；pytest **630 passed / 5 skipped / 0 failed**，覆盖率 **73.44%**（门禁 65%）；
+  gitleaks Passed。
+
 ## [0.9.1] - 2026-10-14
 
 开源整理 + 真实模型端到端验证批次。全部改动经真实模型（OpenAI 兼容端点）验证，
