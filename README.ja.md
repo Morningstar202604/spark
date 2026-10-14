@@ -51,7 +51,7 @@ DeepSeek / 通義 / 智譜 / Kimi / 豆包 / Agnes AI / Ollama / 任意の OpenA
 ## クイックスタート
 
 ```bash
-git clone https://gitcode.com/badhope/spark
+git clone https://gitcode.com/badhope/spark        # または GitHub: https://github.com/badhope/spark
 cd spark && python3 -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -e ".[dev]"
 spark web --workdir /your/project

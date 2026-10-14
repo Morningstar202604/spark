@@ -1,0 +1,16 @@
+# 换行规范：仓库内一律 LF（core.autocrlf 已在检出时按平台处理；此处仅为显式声明）
+* text=auto
+
+# 二进制文件不做换行转换
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+
+# 语言统计（避免把内嵌前端产物计入源码占比）
+src/spark/web/dist/** linguist-generated=true
+uv.lock linguist-generated=true

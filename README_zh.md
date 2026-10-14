@@ -72,7 +72,7 @@ Spark 是一个**本地自托管**的 AI 编程 Agent，代码在你手，密钥
 ## 快速开始
 
 ```bash
-git clone https://gitcode.com/badhope/spark
+git clone https://gitcode.com/badhope/spark        # 或 GitHub: https://github.com/badhope/spark
 cd spark && python3 -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -e ".[dev]"
 spark web --workdir /your/project
@@ -139,7 +139,7 @@ dist\spark\spark.exe web                    # 或双击 dist\spark.exe
 ## 社区
 
 - 贡献指南：[CONTRIBUTING.md](CONTRIBUTING.md)
-- 问题反馈：[GitCode Issues](https://gitcode.com/badhope/spark/issues)
+- 问题反馈：使用本仓库的 **Issues** 页
 
 ---
 

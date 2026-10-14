@@ -52,7 +52,7 @@ servidores de terceros. Una **puerta de aprobación** (6 modos) y un **sandbox d
 ## Inicio rápido
 
 ```bash
-git clone https://gitcode.com/badhope/spark
+git clone https://gitcode.com/badhope/spark        # o GitHub: https://github.com/badhope/spark
 cd spark && python3 -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -e ".[dev]"
 spark web --workdir /your/project

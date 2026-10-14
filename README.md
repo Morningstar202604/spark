@@ -71,7 +71,7 @@
 ## Quick Start
 
 ```bash
-git clone https://gitcode.com/badhope/spark
+git clone https://gitcode.com/badhope/spark        # 或 GitHub: https://github.com/badhope/spark
 cd spark && python3 -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -e ".[dev]"
 spark web --workdir /your/project
@@ -138,7 +138,7 @@ Detailed architecture → [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 ## Community
 
 - Contributing: [CONTRIBUTING.md](CONTRIBUTING.md)
-- Issue Tracker: [GitCode Issues](https://gitcode.com/badhope/spark/issues)
+- Issue Tracker: use the **Issues** tab of this repository
 
 ---
 
