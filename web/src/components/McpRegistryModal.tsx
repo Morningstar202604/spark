@@ -1,7 +1,9 @@
 import { memo, useEffect, useState } from "react"
 import { searchMcpRegistry, type McpRegistryItem } from "../api"
-import { Badge, Button, Spinner, cls } from "./ui"
+import { Badge, Button, IconButton, Spinner, cls } from "./ui"
 import { IconGlobe, IconSearch, IconX } from "./icons"
+import { t } from "../i18n"
+import { useUiStore } from "../store/uiStore"
 
 interface Props {
   onClose: () => void
@@ -9,13 +11,15 @@ interface Props {
 }
 
 function ChinaBadge({ verdict }: { verdict: McpRegistryItem["china"]["verdict"] }) {
-  if (verdict === "available") return <Badge tone="ok">国内可用</Badge>
-  if (verdict === "risk") return <Badge tone="warn">需境外凭证</Badge>
-  return <Badge tone="err">国内不可达</Badge>
+  const lang = useUiStore((s) => s.lang)
+  if (verdict === "available") return <Badge tone="ok">{t("mcpRegistry.chinaOk", lang)}</Badge>
+  if (verdict === "risk") return <Badge tone="warn">{t("mcpRegistry.chinaRisk", lang)}</Badge>
+  return <Badge tone="err">{t("mcpRegistry.chinaBlocked", lang)}</Badge>
 }
 
 /** MCP registry 浏览面板：搜索官方 registry + Glama 评分 + 国内可用性标签。 */
 export const McpRegistryModal = memo(function McpRegistryModal({ onClose, onPick }: Props) {
+  const lang = useUiStore((s) => s.lang)
   const [query, setQuery] = useState("")
   const [applied, setApplied] = useState("")
   const [includeUnavailable, setIncludeUnavailable] = useState(false)
@@ -65,11 +69,11 @@ export const McpRegistryModal = memo(function McpRegistryModal({ onClose, onPick
         className="anim-fade flex h-[min(84vh,640px)] w-[min(96vw,760px)] flex-col overflow-hidden rounded-2xl border border-line bg-canvas shadow-[var(--shadow)]"
         onClick={(e) => e.stopPropagation()}
         role="dialog"
-        aria-label="MCP Registry 浏览"
+        aria-label={t("mcpRegistry.title", lang)}
       >
         <div className="flex items-center gap-2 border-b border-line px-4 py-3">
           <IconGlobe size={15} className="text-accent" />
-          <span className="text-sm font-semibold text-ink">浏览 MCP Registry</span>
+          <span className="text-sm font-semibold text-ink">{t("mcpRegistry.title", lang)}</span>
           <span className="text-[11px] text-ink3">registry.modelcontextprotocol.io + Glama</span>
           <button
             className="ml-auto flex items-center gap-1 text-[11px] text-ink3 hover:text-ink"
@@ -82,9 +86,11 @@ export const McpRegistryModal = memo(function McpRegistryModal({ onClose, onPick
             }}
           >
             <input type="checkbox" checked={includeUnavailable} readOnly className="accent-[var(--accent)]" />
-            显示国内不可达条目
+            {t("mcpRegistry.showBlocked", lang)}
           </button>
-          <IconX size={15} className="text-ink3" onClick={onClose} />
+          <IconButton title={t("common.close", lang)} onClick={onClose}>
+            <IconX size={15} />
+          </IconButton>
         </div>
 
         <div className="flex items-center gap-2 border-b border-line px-4 py-2.5">
@@ -96,30 +102,30 @@ export const McpRegistryModal = memo(function McpRegistryModal({ onClose, onPick
               onKeyDown={(e) => {
                 if (e.key === "Enter") submit()
               }}
-              placeholder="搜索 MCP server，如 filesystem / fetch / git…"
+              placeholder={t("mcpRegistry.searchPh", lang)}
               spellCheck={false}
               className="h-full min-w-0 flex-1 bg-transparent text-[12.5px] text-ink outline-none placeholder:text-ink3"
             />
           </div>
           <Button size="sm" variant="primary" onClick={submit} disabled={busy}>
-            {busy ? <Spinner size={11} /> : "搜索"}
+            {busy ? <Spinner size={11} /> : t("common.search", lang)}
           </Button>
         </div>
 
         {(error || source === "offline") && (
           <div className="border-b border-line bg-warn/10 px-4 py-2 text-[11.5px] leading-relaxed text-warn">
-            {error ?? "当前为离线样本（网络不可达时的兜底数据）"}
+            {error ?? t("mcpRegistry.offline", lang)}
           </div>
         )}
 
         <div className="min-h-0 flex-1 overflow-y-auto p-4">
           {busy && items === null ? (
             <div className="flex h-full items-center justify-center gap-2 text-ink3">
-              <Spinner size={16} className="text-accent" /> 正在检索 registry…
+              <Spinner size={16} className="text-accent" /> {t("mcpRegistry.searching", lang)}
             </div>
           ) : items && items.length === 0 ? (
             <p className="py-16 text-center text-xs text-ink3">
-              没有匹配的 MCP server{filteredOut > 0 ? `（已过滤 ${filteredOut} 条国内不可达）` : ""}。
+              {t("mcpRegistry.noMatch", lang)}{filteredOut > 0 ? t("mcpRegistry.filteredOut", lang, { n: filteredOut }) : ""}。
             </p>
           ) : (
             <div className="flex flex-col gap-2">
@@ -146,10 +152,10 @@ export const McpRegistryModal = memo(function McpRegistryModal({ onClose, onPick
                       variant="soft"
                       className={cls("ml-auto", !it.suggested_command && "opacity-40")}
                       disabled={!it.suggested_command}
-                      title={it.suggested_command ? "" : "该条目仅 remote http，暂不支持一键添加"}
+                      title={it.suggested_command ? "" : t("mcpRegistry.remoteOnly", lang)}
                       onClick={() => onPick(it)}
                     >
-                      一键添加
+                      {t("mcpRegistry.addOneClick", lang)}
                     </Button>
                   </div>
                 </div>

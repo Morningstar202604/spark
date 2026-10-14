@@ -296,7 +296,8 @@ class SessionStore:
                     (message.content.strip()[:24], session_id),
                 )
             self._fts_sync_message(last_id, message.content)
-            self._fts_sync_title(session_id, message.content.strip()[:24] if (message.role == "user" and message.content) else None)
+            if message.role == "user" and message.content:
+                self._fts_sync_title(session_id, message.content.strip()[:24])
             # The message and its session timestamp must land together, otherwise a
             # crash between the two commits leaves a message with stale ordering.
             self._conn.execute(

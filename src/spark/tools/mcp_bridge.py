@@ -190,8 +190,15 @@ class McpBridge:
                     registry.readonly_mcp.add(ns)
 
     async def start(self, configs: list[McpServerConfig], registry: ToolRegistry) -> None:
-        """Connect to all MCP servers in *configs* and register their tools."""
+        """Connect to all MCP servers in *configs* and register their tools.
+
+        同时兜底把 ``bridge.call`` 绑定到 ``registry.ctx.mcp_call``：CLI/Web 由
+        编排层显式绑定，但直接调用本 API（脚本/测试）也应 start 后即可执行，
+        否则已注册的工具会以 "Unknown tool" 静默失败。
+        """
         await self._on_owner(self._start_on_owner(configs, registry))
+        if registry.ctx.mcp_call is None:
+            registry.ctx.mcp_call = self.call
 
     async def _start_on_owner(self, configs: list[McpServerConfig], registry: ToolRegistry) -> None:
         for cfg in configs:

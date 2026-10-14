@@ -1,10 +1,11 @@
-import { memo, useEffect, useRef } from "react"
+import { memo } from "react"
 import type { ChatMsg } from "../store/chatStore"
 import MessageItem from "./MessageItem"
 import { EmptyState } from "./EmptyState"
 import { VirtualMessageList } from "./VirtualMessageList"
 import { useChatStore } from "../store/chatStore"
 import { useUiStore } from "../store/uiStore"
+import { t } from "../i18n"
 
 /* ------------------------------------------------------------------ */
 /* 虚拟化高度估算（P1-5 起由 @tanstack/react-virtual 驱动）             */
@@ -55,17 +56,10 @@ export const ChatView = memo(function ChatView() {
   const streaming = useChatStore((s) => s.streaming)
   const setInput = useChatStore((s) => s.setInput)
   const lang = useUiStore((s) => s.lang)
-  const scrollRef = useRef<HTMLDivElement>(null)
-
-  // 首屏直接到底（仅空列表/首屏场景）
-  useEffect(() => {
-    if (!loading && items.length > 0) return
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
 
   if (loading) {
     return (
-      <div ref={scrollRef} className="flex-1 overflow-y-auto">
+      <div className="flex-1 overflow-y-auto">
         <SkeletonList />
       </div>
     )
@@ -90,7 +84,7 @@ export const ChatView = memo(function ChatView() {
       )}
       footer={
         streaming ? (
-          <div className="pb-2 pt-1 text-center text-[11px] text-ink3">正在生成…</div>
+          <div className="pb-2 pt-1 text-center text-[11px] text-ink3">{t("chat.generating", lang)}</div>
         ) : undefined
       }
     />

@@ -90,3 +90,41 @@ def test_old_manifests_without_the_unarchived_key_still_load(
     assert cp._load_manifest(snapshot_id)["unarchived"] == []
     assert cp.restore_workdir(workdir, snapshot_id)["restored_files"] == 1
     assert path.is_file()
+
+
+def test_restore_skips_wal_shm_files(isolated_snapshots) -> None:
+    """SQLite 的 -wal/-shm 是运行时文件：不进快照，恢复时也不会被误判为"新文件"。"""
+    workdir = isolated_snapshots
+    (workdir / "sess.db").write_text("db-bytes", encoding="utf-8")
+    (workdir / "sess.db-wal").write_text("wal", encoding="utf-8")
+    (workdir / "sess.db-shm").write_text("shm", encoding="utf-8")
+    snapshot_id = cp.snapshot_workdir(workdir)
+    manifest = cp._load_manifest(snapshot_id)
+    assert "sess.db" in manifest["files"]
+    assert "sess.db-wal" not in manifest["files"]
+    assert "sess.db-shm" not in manifest["files"]
+    result = cp.restore_workdir(workdir, snapshot_id)
+    assert result["errors"] == []
+    assert (workdir / "sess.db").read_text(encoding="utf-8") == "db-bytes"
+
+
+def test_restore_collects_per_file_errors_without_aborting(
+    isolated_snapshots, monkeypatch
+) -> None:
+    """单文件写回失败（被占用）必须收集进 errors 并继续恢复其余文件。"""
+    workdir = isolated_snapshots
+    (workdir / "second.md").write_text("second\n", encoding="utf-8")
+    snapshot_id = cp.snapshot_workdir(workdir)
+
+    real_extract = tarfile.TarFile.extract
+
+    def flaky_extract(self, member, path="", set_attrs=True, *args, **kwargs):
+        if member.name == "notes.md":
+            raise OSError(22, "Invalid argument")
+        return real_extract(self, member, path, set_attrs, *args, **kwargs)
+
+    monkeypatch.setattr(tarfile.TarFile, "extract", flaky_extract)
+    result = cp.restore_workdir(workdir, snapshot_id)
+
+    assert result["restored_files"] == 1  # second.md 仍被恢复
+    assert any("notes.md" in e for e in result["errors"])

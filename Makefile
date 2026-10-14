@@ -31,8 +31,8 @@ lint:               ## ruff 静态检查（未安装时自动安装）
 build:              ## 构建 wheel（输出到 dist/）
 	$(PIP) install -q build && $(PY) -m build
 
-run:                ## 无头模式运行（输入任务描述）
-	$(PY) -m spark run
+run:                ## 无头模式运行：make run PROMPT="你的任务"
+	$(PY) -m spark exec "$(PROMPT)"
 
 doctor:             ## 环境自检（依赖/配置/工作目录）
 	$(PY) -m spark doctor

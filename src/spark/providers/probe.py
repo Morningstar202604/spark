@@ -186,23 +186,3 @@ async def probe_provider(
     finally:
         if own_client:
             await client.aclose()
-
-
-async def list_models(base_url: str, api_key: str, client: httpx.AsyncClient | None = None) -> list[str]:
-    url = f"{base_url.rstrip('/')}/models"
-    timeout = httpx.Timeout(connect=10.0, read=20.0, write=10.0, pool=10.0)
-    own = client is None
-    client = client or httpx.AsyncClient(timeout=timeout)
-    try:
-        resp = await client.get(url, headers=_headers(api_key))
-        if resp.status_code >= 400:
-            return []
-        payload = resp.json()
-        data = payload.get("data") or []
-        return [str(item.get("id")) for item in data if item.get("id")]
-    except Exception as exc:
-        logger.debug("list_models failed: %s", exc)
-        return []
-    finally:
-        if own:
-            await client.aclose()

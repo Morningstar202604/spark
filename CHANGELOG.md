@@ -2,6 +2,87 @@
 
 本项目遵循语义化版本。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)。
 
+## [0.9.1] - 2026-10-14
+
+开源整理 + 真实模型端到端验证批次。全部改动经真实模型（OpenAI 兼容端点）验证，
+全量测试 626 passed / 5 skipped / 0 failed，ruff/mypy 零错误。
+
+### 修复（真实模型测试暴露，mock 永远测不到）
+
+- **环境变量覆盖被配置文件压制**：`ConfigSources` 顺序错误，导致 `.env.example` 宣传的
+  `SPARK_PROVIDER__*` / `SPARK_AGENT__*` 写法在有 `config.toml` 时静默失效，与文档承诺
+  （环境变量 > TOML）相反。已修正源优先级，并补单元测试锁定。
+- **任意自定义模型名无法使用**：`openai_compat` provider 把裸模型名直接交给 LiteLLM，
+  后者只能按内置规则推断 provider——`glm-5.3-flash`、`Qwen-*`、以及 README 宣传的
+  "任意 OpenAI 兼容 API" 全部报 `LLM Provider NOT provided`。已改为显式按 OpenAI 兼容处理
+  （带 `/` 前缀的 LiteLLM 语法仍原样尊重）。
+- **检查点回滚遇文件占用直接崩溃**：快照把活跃 SQLite 的 `-wal/-shm` 运行时文件打包，
+  恢复时写回撞锁（Windows `OSError: [Errno 22]`）导致整个回滚失败。双层修复：快照侧排除
+  这两个后缀（运行时文件、可重建），恢复侧单文件失败收集进 `errors` 且不中断其余文件。
+- **MCP `bridge.start` 注册了工具却无法调用**：`ctx.mcp_call` 依赖调用方另行绑定，
+  直接调用该 API（脚本/测试）时已注册工具全部以 "Unknown tool" 静默失败。已加兜底绑定。
+- **`HookConfig.on_deny` 默认值与 TOML 路径不一致**：pydantic 默认 `warn` 而
+  `HookRegistry.from_config` 默认 `block`，通过配置注册的拦截型 hook 实际只警告不拦截。
+  已统一为 `block`。
+- **`/api/status` 的 `has_api_key` 不识别环境变量**：部署为环境变量供 key 时误显示"未配置"。
+- **进程内首次 system prompt 构建多付约 12 秒**：`detect_env` 串行 spawn 6 个版本探测
+  子进程，Windows 上每个 2-3 秒。已改为并行探测。
+- **`_similarity_clusters` 的 O(M²) 残留**：倒排索引优化后仍保留一段全配对循环，
+  把优化完全抵消。已删除。
+
+### 修复（此前批次，本版一并发布）
+
+- **P1-2 旗舰工具 `apply_edit` 未纳入 WRITE_TOOLS**：full-auto / auto-edit 下被策略层
+  一律拒绝、权限规则无法按路径约束它。
+- **Web 保存设置损坏 MCP 配置**：往返链路丢失 `transport` / `http` / `allowed_tools`，
+  在网页里保存一次即把 SSE/HTTP server 降级为 stdio 并清空 P1-9 最小权限白名单。
+- **`save_config` 丢字段**：`PermissionRule.tool`（受限规则保存后静默扩大为任意工具）、
+  `agent.system_prompt`（用户自定义系统提示词保存即丢失）、`streamable_http` transport。
+- **项目级 `.spark.toml` 可注入 `agent.system_prompt`**：未纳入不可信配置剥离清单。
+- **`web_search` 缺 `import json`**：成功路径必崩。
+- **system_prompt / effort 经 Web UI 全链路不可用**：前端不发送、后端不接收、状态不回传、
+  不落盘——HEAD 宣称的功能实际是死的。四层补齐。
+- **审批档位三份定义不一致**：`onboard.py` 只认 3 档，`spark init --approval plan-only`
+  等被错误拒绝。已统一以 config 为单一事实来源。
+- **graph.py 的 interrupt resume 值被丢弃、`deny` 判决被忽略**：LangGraph 参考实现里
+  用户点"拒绝"工具照样执行。已修，并配真实 graph 驱动测试。
+- **`core/loop.py` checkpoint 失败路径 UnboundLocalError**、**FTS 标题被每条非 user
+  消息清除**、**`/api/agents_md` GET 缺路径守卫**、**pty rows/cols 非数字 500**。
+- **前端**：Terminal 退出后"按键重启"因 stale closure 永久失效；BrowserModal Enter
+  双请求；流断线自动重发导致重复执行同一 prompt（改为不重发 + 提示）；FileViewer 跨行
+  语法高亮 token 掉色；`fetchWithTimeout` 监听器泄漏。
+
+### 新增
+
+- **真实模型验证矩阵**：18 项配置面端到端验证（system_prompt 注入 / effort / 六档审批 /
+  四档沙箱 / 护栏 / hooks 拦截 / 检查点回滚 / 记忆检索注入 / MCP 自环 / 上下文压缩）。
+- **测试补强**：`test_web_port.py`（端口自适应）、`test_prompt_cache.py`（提示词缓存与
+  失效）、checkpoint WAL/SHM 排除与恢复容错用例、provider 模型名处理用例、
+  重写的 `test_langgraph_path.py`（真实 graph 驱动，替代此前 4 个伪覆盖用例）。
+- **`spark/asyncutil.py`**：统一"同步上下文安全运行协程"实现（此前 4 处各自内联）。
+- **`spark/tools/_common.py`**：统一文本裁剪实现（此前 3 处）。
+- **`docs/competitive-comparison.md`**：与 Qoder / ZCode / opencode / Codex CLI 的
+  全功能对比（13 个功能域）。
+- **四语 README 真实截图展示区**（中文/English/日本語/Español）。
+
+### 变更
+
+- **端口自适应**：`spark web` / `spark desktop` 省略 `--port` 时从 8000 起自动选择可用端口；
+  显式指定被占用时给出明确提示。启动时打印访问地址（此前 logger 无 handler，用户看不到）。
+- **缺 API Key 降级**：不再拒绝启动，自动进入演示模式（mock）并提示；在 Web 设置中
+  填入密钥后立即切换真实模型，无需重启。`spark doctor` 相应从 `[bad]` 改 `[warn]`。
+- **i18n 全量接入**：26 个前端组件接入中英词典（约 290 个替换点、词典 370 键），
+  语言切换对全界面生效（含日期/时间 locale 跟随）。
+- **系统提示词缓存**：按配置键 + 30s TTL 缓存，写工具执行后主动失效，避免每个工具
+  回环重扫全仓（repo_map tree-sitter）。
+- **清理退役物**：删除 `requirements.lock`（引用已移除的 fastapi/uvicorn 依赖与不存在的
+  `office` extra）、`tests/legacy_root/`（已退役根树的归档测试，从未被收集）、
+  `examples/plugins/`（目标契约已不存在、无法加载的死示例）、过期的历史审计文档；
+  相应更新全部引用。
+- **版本统一**：`pyproject.toml` 与 `spark.__version__` 统一为 `0.9.1`（此前分别停留
+  在 0.1.0，与 CHANGELOG 的 0.8.0 及发布 tag 脱节）。
+- **Windows EXE 重建**并冒烟通过（真实模型对话 + shell 工具调用）。
+
 ## [Unreleased]
 
 ### 变更（双树收敛收尾，2026-10-10）

@@ -130,15 +130,12 @@ def test_two_tabs_concurrent_writes_isolated():
         s2.write("exit\n")
         deadline = time.monotonic() + 5.0
         while time.monotonic() < deadline:
-            got = False
             try:
                 out1.append(await asyncio.wait_for(q1.get(), timeout=0.3))
-                got = True
             except TimeoutError:
                 pass
             try:
                 out2.append(await asyncio.wait_for(q2.get(), timeout=0.3))
-                got = True
             except TimeoutError:
                 pass
             text1, text2 = "".join(out1), "".join(out2)

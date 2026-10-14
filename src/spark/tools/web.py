@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import html as html_mod
+import json
 import re
 import socket
 from html.parser import HTMLParser

@@ -3,6 +3,8 @@ import type { ToolCallState } from "../store/chatStore"
 import { cls, Spinner } from "./ui"
 import { IconCheck, IconChevronRight, IconCommand, IconFile, IconFolder, IconGlobe, IconSearch, IconTerminal, IconX } from "./icons"
 import { DiffView } from "./DiffView"
+import { useUiStore } from "../store/uiStore"
+import { t } from "../i18n"
 
 /** 工具 → 卡片类型分发（IDE 工件语义） */
 type CardKind = "diff" | "terminal" | "subagent" | "web" | "default"
@@ -71,6 +73,7 @@ function SubagentCard({ resultText }: { resultText: string }) {
 
 export const ToolBlock = memo(function ToolBlock({ tool }: { tool: ToolCallState }) {
   const [open, setOpen] = useState(false)
+  const lang = useUiStore((s) => s.lang)
   const { name, status, arguments: args, durationMs } = tool
   const running = status === "running"
   const resultText = resultTextOf(tool)
@@ -102,17 +105,17 @@ export const ToolBlock = memo(function ToolBlock({ tool }: { tool: ToolCallState
           {running ? (
             <>
               <Spinner size={11} className="text-accent" />
-              <span className="text-[11px] text-ink2">运行中</span>
+              <span className="text-[11px] text-ink2">{t("common.running", lang)}</span>
             </>
           ) : status === "ok" ? (
             <>
               <IconCheck size={12} className="text-ok" />
-              <span className="text-[11px] text-ok">完成</span>
+              <span className="text-[11px] text-ok">{t("common.completed", lang)}</span>
             </>
           ) : (
             <>
               <IconX size={12} className="text-err" />
-              <span className="text-[11px] text-err">失败</span>
+              <span className="text-[11px] text-err">{t("common.failed", lang)}</span>
             </>
           )}
           {!running && durationMs !== undefined && <span className="font-mono text-[10px] text-ink3">{(durationMs / 1000).toFixed(1)}s</span>}
@@ -121,7 +124,7 @@ export const ToolBlock = memo(function ToolBlock({ tool }: { tool: ToolCallState
 
       {open && (
         <div className="anim-fade border-t border-line px-3 py-2.5">
-          <div className="mb-1 text-[10px] font-semibold tracking-wider text-ink3 uppercase">参数</div>
+          <div className="mb-1 text-[10px] font-semibold tracking-wider text-ink3 uppercase">{t("common.args", lang)}</div>
           <pre className="max-h-56 overflow-auto rounded-md bg-code p-2.5 font-mono text-[11px] leading-relaxed whitespace-pre-wrap break-all text-ink2">
             {JSON.stringify(args, null, 2)}
           </pre>
@@ -129,7 +132,7 @@ export const ToolBlock = memo(function ToolBlock({ tool }: { tool: ToolCallState
           {resultText && (
             <>
               <div className="mt-2 mb-1 text-[10px] font-semibold tracking-wider text-ink3 uppercase">
-                结果{resultText.length > 6000 ? `（截断 ${resultText.length} 字符）` : ""}
+                {t("tool.result", lang)}{resultText.length > 6000 ? t("tool.truncated", lang, { n: resultText.length }) : ""}
               </div>
 
               {kind === "diff" ? (

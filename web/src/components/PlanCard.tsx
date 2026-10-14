@@ -3,16 +3,19 @@ import type { ReactNode } from "react"
 import type { PlanStep } from "../types"
 import { cls } from "./ui"
 import { IconCheck, IconChevronDown } from "./icons"
+import { t, type TranslationKey } from "../i18n"
+import { useUiStore } from "../store/uiStore"
 
-const statusMeta: Record<PlanStep["status"], { label: string; icon: ReactNode; cls: string }> = {
-  pending: { label: "待办", icon: <span className="h-3 w-3 rounded-full border-2 border-ink3" />, cls: "text-ink3" },
-  in_progress: { label: "进行中", icon: <span className="spin h-3 w-3 rounded-full border-2 border-accent border-t-transparent" />, cls: "text-accent" },
-  completed: { label: "已完成", icon: <IconCheck size={13} className="text-ok" />, cls: "text-ok" },
+const statusMeta: Record<PlanStep["status"], { label: TranslationKey; icon: ReactNode; cls: string }> = {
+  pending: { label: "plan.status.pending", icon: <span className="h-3 w-3 rounded-full border-2 border-ink3" />, cls: "text-ink3" },
+  in_progress: { label: "plan.status.inProgress", icon: <span className="spin h-3 w-3 rounded-full border-2 border-accent border-t-transparent" />, cls: "text-accent" },
+  completed: { label: "plan.status.completed", icon: <IconCheck size={13} className="text-ok" />, cls: "text-ok" },
 }
 
 /** 计划卡片：垂直步骤列表 + 进度条 */
 export const PlanCard = memo(function PlanCard({ steps }: { steps: PlanStep[] }) {
   const [open, setOpen] = useState(true)
+  const lang = useUiStore((s) => s.lang)
   if (!steps.length) return null
   const done = steps.filter((s) => s.status === "completed").length
   const pct = Math.round((done / steps.length) * 100)
@@ -28,9 +31,9 @@ export const PlanCard = memo(function PlanCard({ steps }: { steps: PlanStep[] })
         <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-accent-soft text-accent">
           <IconChevronDown size={13} className={cls("transition-transform", !open && "-rotate-90")} />
         </span>
-        <span className="text-sm font-semibold text-ink">任务计划</span>
+        <span className="text-sm font-semibold text-ink">{t("plan.title", lang)}</span>
         <span className="text-[11px] text-ink3">
-          {done}/{steps.length} 完成
+          {t("plan.progress", lang, { done, total: steps.length })}
         </span>
         <span className="ml-auto flex w-28 items-center gap-2">
           <span className="h-1.5 flex-1 overflow-hidden rounded-full bg-hover">
@@ -54,7 +57,7 @@ export const PlanCard = memo(function PlanCard({ steps }: { steps: PlanStep[] })
                 >
                   {s.title}
                 </span>
-                <span className={cls("shrink-0 text-[10px]", m.cls)}>{m.label}</span>
+                <span className={cls("shrink-0 text-[10px]", m.cls)}>{t(m.label, lang)}</span>
               </li>
             )
           })}

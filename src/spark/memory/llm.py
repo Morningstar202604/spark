@@ -7,8 +7,6 @@ from typing import Any
 
 import httpx
 
-from spark.models import ChatMessage
-
 logger = logging.getLogger(__name__)
 
 
@@ -108,22 +106,3 @@ def parse_json_object(text: str) -> dict | None:
         return json.loads(text[start : end + 1])
     except json.JSONDecodeError:
         return None
-
-
-def messages_to_transcript(messages: list[ChatMessage], max_chars: int = 6000) -> str:
-    lines: list[str] = []
-    used = 0
-    for msg in messages:
-        if msg.role not in {"user", "assistant", "tool"}:
-            continue
-        body = (msg.content or "").strip()
-        if msg.role == "tool" and msg.name:
-            body = f"[tool:{msg.name}] {body[:300]}"
-        if not body:
-            continue
-        line = f"{msg.role}: {body[:1200]}"
-        if used + len(line) > max_chars:
-            break
-        lines.append(line)
-        used += len(line)
-    return "\n".join(lines)

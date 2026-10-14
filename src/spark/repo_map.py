@@ -44,20 +44,17 @@ def _try_language(name: str):
     try:
         if name == "python":
             import tree_sitter_python
-
             from tree_sitter import Language
 
             return Language(tree_sitter_python.language())
         if name in {"typescript", "tsx"}:
             import tree_sitter_typescript
-
             from tree_sitter import Language
 
             lang = tree_sitter_typescript.language_typescript() if name == "typescript" else tree_sitter_typescript.language_tsx()
             return Language(lang)
         if name == "javascript":
             import tree_sitter_javascript
-
             from tree_sitter import Language
 
             return Language(tree_sitter_javascript.language())

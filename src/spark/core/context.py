@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import logging
 import sys
+import time
 from importlib.resources import files
 from pathlib import Path
 
 from spark.config import SparkConfig
 from spark.core.tokens import estimate_message_tokens
 from spark.models import ChatMessage
+from spark.sandbox import safe_bare_filename
 from spark.skills import discover_skills, inject_skills
 
 logger = logging.getLogger(__name__)
@@ -96,7 +98,7 @@ def load_agents_md(workdir: Path, cfg: SparkConfig) -> str | None:
     # 2) 根层
     root_names = set(_INSTRUCTION_NAMES)
     cfg_name = (cfg.context.agents_md or "").strip()
-    if cfg_name and not any(sep in cfg_name for sep in ("/", "\\", ":")) and ".." not in cfg_name:
+    if cfg_name and safe_bare_filename(cfg_name):
         root_names.add(cfg_name)
     for name in root_names:
         add(base / name, inside=True)
@@ -173,12 +175,48 @@ MODE_HINTS = {
 }
 
 
+_SYSTEM_PROMPT_CACHE: dict[tuple, tuple[float, str]] = {}
+_SYSTEM_PROMPT_TTL_SEC = 30.0
+
+
+def _system_prompt_key(workdir: Path, cfg: SparkConfig) -> tuple:
+    return (
+        str(Path(workdir).resolve()),
+        str(getattr(cfg.agent, "sandbox_mode", "")),
+        getattr(cfg.agent, "system_prompt", "") or "",
+        str(cfg.context.agents_md or ""),
+        bool(getattr(cfg.context, "repo_map_enabled", True)),
+        int(getattr(cfg.context, "repo_map_max_chars", 0) or 0),
+    )
+
+
+def invalidate_system_prompt_cache() -> None:
+    """写操作/配置变更后调用：下次取用重算（含仓库地图、技能与子代理发现）。"""
+    _SYSTEM_PROMPT_CACHE.clear()
+
+
 def system_prompt(workdir: Path, cfg: SparkConfig) -> str:
     """The single system message: base prompt + workdir + environment + mode + skills.
 
     Shared by :func:`build_messages` and :func:`history_token_usage` so the token
     estimate can never be computed against a different prompt than the one sent.
+
+    按 (workdir, 沙盒模式, 自定义提示, agents_md, repo_map 配置) 缓存，30 秒
+    TTL；写工具执行后由 :class:`~spark.core.loop.AgentLoop` 主动调
+    :func:`invalidate_system_prompt_cache`，避免每个工具回环都全仓重扫。
     """
+    key = _system_prompt_key(workdir, cfg)
+    now = time.monotonic()
+    hit = _SYSTEM_PROMPT_CACHE.get(key)
+    if hit is not None and hit[0] > now:
+        return hit[1]
+    text = _build_system_prompt(workdir, cfg)
+    _SYSTEM_PROMPT_CACHE.clear()  # 单条目缓存：workdir/配置切换时不膨胀
+    _SYSTEM_PROMPT_CACHE[key] = (now + _SYSTEM_PROMPT_TTL_SEC, text)
+    return text
+
+
+def _build_system_prompt(workdir: Path, cfg: SparkConfig) -> str:
     # 用户自定义系统提示词：cfg.agent.system_prompt 非空时覆盖默认 prompts/system.md
     custom_prompt = getattr(cfg.agent, "system_prompt", "") or ""
     base = custom_prompt.strip() if custom_prompt.strip() else load_system_prompt()
@@ -219,9 +257,8 @@ def build_messages(
 ) -> list[ChatMessage]:
     """Build the list of messages sent to the provider.
 
-    When ``_compactor`` is provided, budget trimming is delegated to the
-    Compactor's token-aware implementation; otherwise the original
-    char-based budget logic is used (preserved for backward compatibility).
+    Budget trimming 统一走 Compactor 的 token-aware 实现；``_compactor`` 参数
+    仅为向后兼容保留（可传实例或 None）。
     """
     messages: list[ChatMessage] = [ChatMessage(role="system", content=system_prompt(workdir, cfg))]
     agents = load_agents_md(workdir, cfg)
@@ -242,29 +279,14 @@ def build_messages(
     if _compactor is not None:
         kept = _compactor.trim_recent(recent, cfg.context.history_budget_chars)
     else:
-        kept = _trim_recent_chars(recent, cfg.context.history_budget_chars)
+        from spark.core.compact import Compactor
+
+        kept = Compactor.trim_recent(recent, cfg.context.history_budget_chars)
 
     kept = _collapse_old_images(kept)
     messages.extend(summaries)
     messages.extend(kept)
     return messages
-
-
-def _trim_recent_chars(
-    recent: list[ChatMessage],
-    budget: int,
-) -> list[ChatMessage]:
-    """Original char-based budget trimming — kept as the default fallback."""
-    kept: list[ChatMessage] = []
-    used = 0
-    for msg in reversed(recent):
-        size = len(msg.content or "") + sum(len(str(c.arguments)) for c in (msg.tool_calls or []))
-        if used + size > budget and kept:
-            break
-        kept.append(msg)
-        used += size
-    kept.reverse()
-    return kept
 
 
 def _collapse_old_images(kept: list[ChatMessage]) -> list[ChatMessage]:

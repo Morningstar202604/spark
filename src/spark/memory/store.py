@@ -91,68 +91,6 @@ class MemoryRow:
         return out
 
 
-class _SQLiteCompatCursor:
-    """Tiny cursor-like object returned by _SQLiteCompatConnection.execute
-    supporting the one call pattern used in tests:
-        cursor = conn.execute(sql, params)   # UPDATE
-        cursor.rowcount                        # read
-    """
-
-    def __init__(self, store: "MemoryStore", rowcount: int = 0) -> None:
-        self._store = store
-        self.rowcount = rowcount
-
-
-class _SQLiteCompatConnection:
-    """Minimal shim exposing a narrow slice of the historic sqlite3.Connection
-    API.  Currently every existing test reaches the backend only through the
-    MemoryStore public methods, *except* test_p1_fixes.py which writes
-    ``store._conn.execute(\"UPDATE memories SET ... WHERE id = ?\", params)``
-    followed by ``store._conn.commit()`` to rewind the ``last_accessed``
-    timestamp so it can exercise stale eviction.
-
-    This shim translates that specific UPDATE-by-id into an update of the
-    corresponding ChromaDB metadata dict so the test stays green without
-    needing a real SQLite database.
-    """
-
-    def __init__(self, store: "MemoryStore") -> None:
-        self._store = store
-
-    # The UPDATE grammar we accept — case-insensitive:
-    #   UPDATE memories SET col1 = ? [, col2 = ? ...] WHERE id = ?
-    _UPDATE_RE = re.compile(
-        r"^\s*UPDATE\s+memories\s+SET\s+(.+?)\s+WHERE\s+id\s*=\s*\?\s*$",
-        re.IGNORECASE,
-    )
-
-    @staticmethod
-    def _parse_set_clause(set_clause: str) -> list[str]:
-        """Extract column names from 'col1 = ? [, col2 = ? ...]'."""
-        columns: list[str] = []
-        for raw in set_clause.split(","):
-            col = raw.split("=", 1)[0].strip().lower()
-            if col:
-                columns.append(col)
-        return columns
-
-    def execute(self, sql: str, params: tuple = ()) -> "_SQLiteCompatCursor":
-        m = self._UPDATE_RE.match(sql)
-        if not m:
-            return _SQLiteCompatCursor(self._store, 0)
-        columns = self._parse_set_clause(m.group(1))
-        if len(columns) != len(params) - 1:
-            return _SQLiteCompatCursor(self._store, 0)
-        set_pairs = list(zip(columns, params[:-1]))
-        memory_id = int(params[-1])
-        rowcount = self._store._apply_metadata_update(memory_id, set_pairs)
-        return _SQLiteCompatCursor(self._store, rowcount)
-
-    def commit(self) -> None:
-        # ChromaDB has no explicit commit; every write is durable immediately.
-        pass
-
-
 class MemoryStore:
     def __init__(self, db_path: Path, cfg: MemoryConfig | None = None) -> None:
         db_path = Path(db_path) if not isinstance(db_path, Path) else db_path
@@ -519,7 +457,9 @@ class MemoryStore:
             # reset 失败不影响进程退出
             logger.debug("ChromaDB client reset 失败", exc_info=True)
 
-    def _apply_metadata_update(self, memory_id: int, set_pairs: list[tuple[str, str]]) -> int:
+    def _apply_metadata_update(
+        self, memory_id: int, set_pairs: list[tuple[str, object]]
+    ) -> int:
         """Apply a sequence of (column, value) assignments to the metadata of
         the given memory_id.  Returns 1 if the memory exists, 0 otherwise."""
         raw = self._get_raw(memory_id)
@@ -536,14 +476,6 @@ class MemoryStore:
             embeddings=[emb] if emb is not None else None,
         )
         return 1
-
-    @property
-    def _conn(self) -> _SQLiteCompatConnection:
-        """Backward-compat handle used by one pre-existing test that pokes at
-        raw SQL.  New code should never rely on this."""
-        if not hasattr(self, "_compat_conn"):
-            self._compat_conn = _SQLiteCompatConnection(self)
-        return self._compat_conn
 
     def add(
         self,
@@ -877,9 +809,9 @@ class MemoryStore:
                 reverse=True,
             )
             merged = self._rrf_merge(vec_rank, kw_rank)
-            results = sorted(rows, key=lambda r: merged.get(r.id, 0.0), reverse=True)
-            results = [r for r in results if merged.get(r.id, 0.0) > 0.0]
-            return [(r, merged[r.id]) for r in results[:top_k]]
+            ranked = sorted(rows, key=lambda r: merged.get(r.id, 0.0), reverse=True)
+            ranked = [r for r in ranked if merged.get(r.id, 0.0) > 0.0]
+            return [(r, merged[r.id]) for r in ranked[:top_k]]
 
         # 旧线性加权路径（hybrid=False / 无向量）
         results: list[tuple[MemoryRow, float]] = []

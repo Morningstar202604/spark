@@ -8,7 +8,7 @@
 - `src/spark/core/loop.py` — 经典 ReAct 循环（LangGraph 路径在 graph.py）
 - `src/spark/tools/registry.py` — 内建工具 + MCP 动态工具，dispatch table 模式
 - `src/spark/tools/mcp_bridge.py` — 官方 MCP SDK (`mcp` 包)，支持 stdio/sse/streamable_http
-- `src/spark/memory/store.py` — SQLite + FTS5 + 向量 hybrid 检索
+- `src/spark/memory/store.py` — ChromaDB 向量记忆（会话 FTS5 索引在 `src/spark/store.py`）
 - `src/spark/providers/openai_compat.py` — LiteLLM 统一 LLM 调用层，含指数退避重试
 - `src/spark/pty/` — 真 PTY 终端后端（P1-5）
 - `src/spark/providers/routing.py` — 国产模型三档路由矩阵（P1-10）
@@ -18,7 +18,7 @@
 
 1. **日志**：所有模块使用 `logging.getLogger(__name__)`，禁止 `print()`
 2. **异常**：禁止 bare `except:` 或 `except Exception: pass`；关键路径至少 `logger.warning`
-3. **类型**：使用 Pydantic v2 模型，消除 `type: ignore`（目前仅剩 4 处 Unix-only API）
+3. **类型**：使用 Pydantic v2 模型，控制 `type: ignore`（目前 12 处，多为平台差异）
 4. **TOML**：配置序列化使用 `tomlkit`，不手搓字符串
 5. **MCP**：使用官方 `mcp` SDK，不手写 JSON-RPC
 
@@ -27,7 +27,7 @@
 ```bash
 # Python
 ruff check src/spark/                  # 零警告
-python3 -m pytest tests/               # 全量回归（629 passed / 2 skipped 基线）
+python3 -m pytest tests/               # 全量回归（Windows 基线 623 passed / 5 skipped；PTY 用例仅 POSIX 执行）
 
 # 前端
 cd web && npx tsc --noEmit             # exit code 0
@@ -63,6 +63,5 @@ curl -s -X POST http://127.0.0.1:8399/api/chat \
 ## 安全
 
 - 沙箱：`sandbox.py` 命令过滤 + `policy.py` 权限规则
-- 速率限制：per-IP token bucket (`web/routes.py`)
-- 审计日志：`core/loop.py` 中每个 tool call 记录 name+args+duration+ok
+- 审计日志：`core/loop.py` 中 tool call 记录 name+args+elapsed+ok（写进程日志；hook_block/plan_only/deny 等早退分支除外）
 - 脱敏：`sanitize.py` 正则 + 密钥 tuple 双重过滤

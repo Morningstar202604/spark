@@ -43,7 +43,7 @@ bash scripts/build.sh            # 产物：dist/spark/spark
 ## 首次使用
 
 1. 打开打印的 `http://127.0.0.1:端口`（默认仅本机可访问；外部预览需显式 `--host 0.0.0.0`）
-2. 设置 → 选模型预设（DeepSeek / 通义 / 智谱 / Kimi / 豆包 / 云知声 / Ollama / 自定义），粘贴 API Key
+2. 设置 → 选模型预设（DeepSeek / 通义 / 智谱 / Kimi / 豆包 / Agnes AI / Ollama / 自定义），粘贴 API Key
 3. 把「工作目录」指向你的项目
 4. 新建会话开干 —— 每次写入与命令都在审批门管控下
 

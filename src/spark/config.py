@@ -185,7 +185,7 @@ class HookConfig(BaseModel):
     args: list[str] = Field(default_factory=list)
     name: str = ""
     timeout_sec: int = 15
-    on_deny: Literal["warn", "block"] = "warn"
+    on_deny: Literal["warn", "block"] = "block"
 
 
 class SparkConfig(BaseSettings):
@@ -221,15 +221,20 @@ class SparkConfig(BaseSettings):
         / ``SPARK_HOOKS`` and hand itself code execution plus a free pass on every
         tool call — the project-level TOML sanitizer would never see it, because
         this channel is not TOML.
+
+        优先级：环境变量（os.environ 的 SPARK_* 与 $SPARK_HOME/.env）**高于**作为
+        init 参数传入的 config.toml 值——与文档承诺一致（CLI > 环境变量 > 项目
+        TOML > 全局 TOML）。此前顺序把 init 放在最前，导致 TOML 已有的键会静默
+        压制 ``SPARK_PROVIDER__*`` / ``SPARK_AGENT__*`` 环境覆盖（.env.example
+        宣传的写法在有 config.toml 时失效）。
         """
         from pydantic_settings import DotEnvSettingsSource
 
         user_env = default_home() / ".env"
         if not user_env.is_file():
-            return (init_settings, env_settings, file_secret_settings)
+            return (env_settings, init_settings, file_secret_settings)
         cfg = settings_cls.model_config or {}
         return (
-            init_settings,
             env_settings,
             DotEnvSettingsSource(
                 settings_cls,
@@ -418,6 +423,7 @@ def _sanitize_project_config(raw: dict[str, Any]) -> dict[str, Any]:
         agent = dict(agent)
         agent.pop("approval", None)
         agent.pop("sandbox_mode", None)
+        agent.pop("system_prompt", None)
         # ``workdir_only`` and ``protected_paths`` decide whether the agent may
         # leave the repository at all — a repo must not be able to widen them.
         agent.pop("workdir_only", None)
@@ -527,19 +533,23 @@ def load_config(
     return cfg
 
 
+def env_api_key(cfg: SparkConfig) -> str:
+    """从环境变量读取 API Key（不存在时返回空串，不抛错）。"""
+    env_name = cfg.provider.api_key_env
+    return os.environ.get(env_name) or os.environ.get("SPARK_API_KEY") or ""
+
+
 def require_api_key(cfg: SparkConfig) -> str | None:
     if cfg.provider.api_key:
         return cfg.provider.api_key
     if cfg.provider.name in {"mock", "ollama"}:
-        env_name = cfg.provider.api_key_env
-        return os.environ.get(env_name) or os.environ.get("SPARK_API_KEY") or "ollama"
-    env_name = cfg.provider.api_key_env
-    key = os.environ.get(env_name) or os.environ.get("SPARK_API_KEY")
+        return env_api_key(cfg) or "ollama"
+    key = env_api_key(cfg)
     if not key:
         raise ConfigError(
             f"Missing API key: neither config's provider.api_key nor "
-            f"environment variable '{env_name}' is set. "
-            f"Fix: run 'spark init' or set {env_name}=<your-key>."
+            f"environment variable '{cfg.provider.api_key_env}' is set. "
+            f"Fix: run 'spark init' or set {cfg.provider.api_key_env}=<your-key>."
         )
     return key
 
@@ -602,6 +612,7 @@ def save_config(cfg: SparkConfig, path: Path | None = None) -> Path:
     agent.add("show_keywords", cfg.agent.show_keywords)
     agent.add("show_notices", cfg.agent.show_notices)
     agent.add("effort", cfg.agent.effort)
+    agent.add("system_prompt", cfg.agent.system_prompt or "")
     doc.add("agent", agent)
 
     # [context]
@@ -629,8 +640,8 @@ def save_config(cfg: SparkConfig, path: Path | None = None) -> Path:
         for server in cfg.mcp_servers:
             srv_table = tomlkit.table(is_super_table=True)
             srv_table.add("name", server.name)
-            if server.transport == "sse":
-                srv_table.add("transport", "sse")
+            if server.transport in {"sse", "streamable_http"}:
+                srv_table.add("transport", server.transport)
                 srv_table.add("readonly_tools", list(server.readonly_tools))
                 if server.allowed_tools:
                     srv_table.add("allowed_tools", list(server.allowed_tools))
@@ -685,6 +696,8 @@ def save_config(cfg: SparkConfig, path: Path | None = None) -> Path:
             rt = tomlkit.table()
             rt.add("action", rule.action)
             rt.add("resource", rule.resource)
+            if rule.tool:
+                rt.add("tool", rule.tool)
             pr_aot.append(rt)
         doc.add("permission_rules", pr_aot)
 

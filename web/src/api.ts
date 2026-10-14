@@ -22,13 +22,16 @@ export async function fetchWithTimeout(
     () => controller.abort(new DOMException("Request timeout", "TimeoutError")),
     timeout,
   )
+  const onCallerAbort = () => controller.abort()
   if (options?.signal) {
-    options.signal.addEventListener("abort", () => controller.abort(), { once: true })
+    options.signal.addEventListener("abort", onCallerAbort, { once: true })
   }
   try {
     return await fetch(url, { ...options, signal: controller.signal })
   } finally {
     clearTimeout(timeoutId)
+    // 关键：请求结束后移除监听，避免长生命周期 signal 上堆积回调（泄漏）
+    options?.signal?.removeEventListener("abort", onCallerAbort)
   }
 }
 
@@ -458,12 +461,11 @@ export async function streamChat(
     throw new DOMException("Aborted", "AbortError")
   }
 
-  const MAX_RETRIES = 3
-  const BASE_DELAY = 1000
+  // 不自动重发：POST /api/chat/stream 一到达服务器就开跑一回合，
+  // 断线重发会重复执行同一 prompt（重复工具调用与计费）；失败由用户重发。
   let lastEventId: string | undefined
-  let attempt = 0
 
-  for (;;) {
+  {
     try {
       const headers: Record<string, string> = { "Content-Type": "application/json" }
       if (lastEventId) headers["Last-Event-ID"] = lastEventId
@@ -519,17 +521,8 @@ export async function streamChat(
       if (signal?.aborted || (e instanceof DOMException && e.name === "AbortError")) {
         throw e
       }
-      attempt++
-      if (attempt > MAX_RETRIES) {
-        useUiStore.getState().pushToast("toast.sendFailed", "error")
-        throw e
-      }
-      useUiStore.getState().pushToast("toast.reconnecting", "info")
-      const delay = Math.min(BASE_DELAY * Math.pow(2, attempt - 1), 32000)
-      await new Promise((r) => setTimeout(r, delay))
-      if (signal?.aborted) {
-        throw new DOMException("Aborted", "AbortError")
-      }
+      useUiStore.getState().pushToast("toast.sendFailed", "error")
+      throw e
     }
   }
 }

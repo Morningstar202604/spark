@@ -14,6 +14,7 @@ from spark.config import (
     SparkConfig,
     default_home,
     ensure_home,
+    env_api_key,
     load_config,
     require_api_key,
     write_config_template,
@@ -99,7 +100,7 @@ def _common_cfg(
         try:
             require_api_key(cfg)
         except ConfigError:
-            raise ConfigError(friendly_config_error(cfg)) from None
+            typer.echo("◆ " + friendly_config_error(cfg), err=True)
     return cfg
 
 
@@ -278,7 +279,9 @@ def web_cmd(
         "--host",
         help="默认仅本机可访问；改为 0.0.0.0 会把控制面暴露到局域网/公网，风险自负",
     ),
-    port: int = typer.Option(8000, "--port", help="Web 服务监听端口"),
+    port: int | None = typer.Option(
+        None, "--port", help="监听端口；省略时从 8000 起自动选择可用端口"
+    ),
 ) -> None:
     try:
         workdir = workdir.resolve()
@@ -286,9 +289,28 @@ def web_cmd(
             workdir, config, approval, model, provider, sandbox_mode=sandbox_mode
         )
         store = _store()
-        from spark.web.server import serve_web
+        from spark.web.server import build_web_server
+        from spark.web.utils import _port_in_use, pick_free_port
 
-        serve_web(workdir=workdir, cfg=cfg, store=store, host=host, port=port)
+        if port is None:
+            port = pick_free_port(host, 8000)
+        elif _port_in_use(host, port):
+            typer.echo(
+                f"端口 {port} 已被占用；省略 --port 可自动选择可用端口。", err=True
+            )
+            raise typer.Exit(1)
+        server, state = build_web_server(
+            workdir=workdir, cfg=cfg, store=store, host=host, port=port
+        )
+        typer.echo(f"◆ Spark Web  →  http://{host}:{port}")
+        if host not in {"127.0.0.1", "localhost", "::1"}:
+            typer.echo(
+                f"◆ 远程访问令牌（请求头 X-Spark-Token）: {state.control_token}"
+            )
+        try:
+            server.serve_forever()
+        finally:
+            store.close()
     except SparkError as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(exc.exit_code) from exc
@@ -353,7 +375,9 @@ def desktop_cmd(
         "--sandbox-mode",
         help="sandbox-only | workspace | full-access | unrestricted",
     ),
-    port: int = typer.Option(8000, "--port", help="本机服务监听端口"),
+    port: int | None = typer.Option(
+        None, "--port", help="本机服务监听端口；省略时自动选择可用端口"
+    ),
     width: int = typer.Option(1280, "--width", help="窗口宽度"),
     height: int = typer.Option(832, "--height", help="窗口高度"),
 ) -> None:
@@ -548,7 +572,7 @@ def init_cmd(
         if not probe:
             return
         typer.echo("正在测试连通性…")
-        key = cfg.provider.api_key or _env_key(cfg) or ""
+        key = cfg.provider.api_key or env_api_key(cfg) or ""
         result = asyncio.run(
             probe_provider(
                 base_url=cfg.provider.base_url,
@@ -566,16 +590,6 @@ def init_cmd(
     except SetupError as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(2) from exc
-
-
-def _env_key(cfg: SparkConfig) -> str:
-    import os
-
-    return (
-        os.environ.get(cfg.provider.api_key_env)
-        or os.environ.get("SPARK_API_KEY")
-        or ""
-    )
 
 
 def _prompt_setup(cfg: SparkConfig) -> None:
@@ -630,9 +644,9 @@ def doctor_cmd(
     if (
         probe
         and cfg.provider.name != "mock"
-        and (cfg.provider.api_key or _env_key(cfg))
+        and (cfg.provider.api_key or env_api_key(cfg))
     ):
-        key = cfg.provider.api_key or _env_key(cfg)
+        key = cfg.provider.api_key or env_api_key(cfg)
         result = asyncio.run(
             probe_provider(
                 base_url=cfg.provider.base_url,

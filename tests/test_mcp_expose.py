@@ -6,8 +6,7 @@ from pathlib import Path
 
 from spark.config import SparkConfig
 from spark.mcp_expose import _format_result, build_mcp_server
-
-from spark.models import ToolCall, ToolResult
+from spark.models import ToolResult
 
 
 def _cfg(workdir: Path) -> SparkConfig:

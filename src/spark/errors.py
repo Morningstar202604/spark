@@ -8,7 +8,3 @@ class ConfigError(SparkError):
 
 class PathEscapeError(SparkError):
     """Raised when a tool path resolves outside the workdir."""
-
-
-class UserAbortError(SparkError):
-    exit_code = 3

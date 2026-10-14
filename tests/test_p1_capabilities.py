@@ -2,6 +2,8 @@ import asyncio
 import time
 from pathlib import Path
 
+import pytest
+
 from spark.config import AgentConfig, SparkConfig
 from spark.core.checkpoints import restore_workdir, snapshot_workdir
 from spark.models import ChatMessage
@@ -9,6 +11,17 @@ from spark.sandbox import WorkdirSandbox
 from spark.store import SessionStore
 from spark.tools import bg
 from spark.tools.registry import ToolContext, ToolRegistry
+
+
+@pytest.fixture(autouse=True)
+def _isolate_bg_store():
+    """bg 的进程级 _STORE 可能被其它测试 attach 后 close；本文件从无绑定状态开始。"""
+    with bg._STORE_LOCK:
+        saved = bg._STORE
+        bg._STORE = None
+    yield
+    with bg._STORE_LOCK:
+        bg._STORE = saved
 
 
 def _cfg(mode: str = "workspace") -> SparkConfig:
@@ -33,10 +46,11 @@ def test_snapshot_and_restore_roundtrip(tmp_path: Path) -> None:
 def test_restore_rejects_traversal(tmp_path: Path) -> None:
     import tarfile
 
-    from spark.core.checkpoints import SNAPSHOT_DIR
+    from spark.core import checkpoints
 
-    SNAPSHOT_DIR.mkdir(parents=True, exist_ok=True)
-    evil = SNAPSHOT_DIR / "evil-test.tar.gz"
+    snap_dir = checkpoints._snapshot_dir()
+    snap_dir.mkdir(parents=True, exist_ok=True)
+    evil = snap_dir / "evil-test.tar.gz"
     payload = tmp_path / "payload.txt"
     payload.write_text("pwn")
     with tarfile.open(evil, "w:gz") as tar:

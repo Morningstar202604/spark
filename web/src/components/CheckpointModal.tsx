@@ -6,10 +6,12 @@ import { listCheckpoints, rollbackCheckpoint } from "../api"
 import { Button, cls, IconButton, Spinner } from "./ui"
 import { IconClock, IconHistory, IconX } from "./icons"
 import { historyToItems } from "../store/chatStore"
+import { t, type Lang } from "../i18n"
 
 export const CheckpointModal = memo(function CheckpointModal() {
   const open = useUiStore((s) => s.checkpointsOpen)
   const close = useUiStore((s) => s.closeCheckpoints)
+  const lang = useUiStore((s) => s.lang)
   const busy = useUiStore((s) => s.cpsBusy)
   const setBusy = useUiStore((s) => s.setCpsBusy)
   const rows = useUiStore((s) => s.checkpoints)
@@ -62,8 +64,8 @@ export const CheckpointModal = memo(function CheckpointModal() {
     }
   }
 
-  function fmt(ts: number): string {
-    return new Date(ts * 1000).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })
+  function fmt(ts: number, lang: Lang): string {
+    return new Date(ts * 1000).toLocaleString(lang === "zh" ? "zh-CN" : "en-US", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })
   }
 
   if (!open) return null
@@ -73,12 +75,12 @@ export const CheckpointModal = memo(function CheckpointModal() {
         className="anim-fade flex h-[min(80vh,560px)] w-[min(94vw,560px)] flex-col overflow-hidden rounded-2xl border border-line bg-canvas shadow-[var(--shadow)]"
         onClick={(e) => e.stopPropagation()}
         role="dialog"
-        aria-label="检查点回滚"
+        aria-label={t("sidebar.checkpoint", lang)}
       >
         <div className="flex items-center gap-2 border-b border-line px-4 py-3">
           <IconHistory size={16} className="text-ink2" />
-          <span className="text-sm font-semibold text-ink">检查点回滚</span>
-          <IconButton title="关闭" onClick={close} className="ml-auto">
+          <span className="text-sm font-semibold text-ink">{t("sidebar.checkpoint", lang)}</span>
+          <IconButton title={t("common.close", lang)} onClick={close} className="ml-auto">
             <IconX size={15} />
           </IconButton>
         </div>
@@ -91,7 +93,7 @@ export const CheckpointModal = memo(function CheckpointModal() {
           ) : rows.length === 0 ? (
             <div className="flex flex-col items-center gap-2 py-12 text-center">
               <IconClock size={22} className="text-ink3" />
-              <p className="px-6 text-xs leading-relaxed text-ink3">暂无检查点。每轮涉及文件修改或命令执行后，Spark 会自动创建快照。</p>
+              <p className="px-6 text-xs leading-relaxed text-ink3">{t("checkpoint.empty", lang)}</p>
             </div>
           ) : (
             <ul className="flex flex-col gap-1.5">
@@ -102,22 +104,22 @@ export const CheckpointModal = memo(function CheckpointModal() {
                       <IconClock size={13} />
                     </span>
                     <div className="min-w-0 flex-1">
-                      <p className="truncate text-[13px] font-medium text-ink">{r.label || "检查点"}</p>
-                      <p className="font-mono text-[10.5px] text-ink3">{fmt(r.created_at)}</p>
+                      <p className="truncate text-[13px] font-medium text-ink">{r.label || t("checkpoint.label", lang)}</p>
+                      <p className="font-mono text-[10.5px] text-ink3">{fmt(r.created_at, lang)}</p>
                     </div>
                   </div>
                   {confirmId === r.id ? (
                     <div className="mt-2.5 flex gap-2">
                       <Button size="sm" variant="danger" full disabled={rolling !== null} onClick={() => doRollback(r.id)}>
-                        {rolling === r.id ? <Spinner size={11} /> : "确认回滚"}
+                        {rolling === r.id ? <Spinner size={11} /> : t("checkpoint.confirmRollback", lang)}
                       </Button>
                       <Button size="sm" variant="ghost" onClick={() => setConfirmId(null)}>
-                        取消
+                        {t("common.cancel", lang)}
                       </Button>
                     </div>
                   ) : (
                     <Button size="sm" variant="soft" full className="mt-2.5" onClick={() => setConfirmId(r.id)}>
-                      回滚到此检查点
+                       {t("checkpoint.rollbackTo", lang)}
                     </Button>
                   )}
                 </li>

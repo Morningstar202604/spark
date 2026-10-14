@@ -4,6 +4,7 @@ import { useSessionStore } from "../store/sessionStore"
 import { useUiStore } from "../store/uiStore"
 import { IconImage, IconPaperclip, IconSend, IconStop, IconX } from "./icons"
 import { cls } from "./ui"
+import { t } from "../i18n"
 
 const MAX_H = 200
 
@@ -15,6 +16,7 @@ export const Composer = memo(function Composer() {
   const cancel = useChatStore((s) => s.cancel)
   const status = useSessionStore((s) => s.status)
   const openSettings = useUiStore((s) => s.openSettings)
+  const lang = useUiStore((s) => s.lang)
 
   const taRef = useRef<HTMLTextAreaElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
@@ -86,7 +88,7 @@ export const Composer = memo(function Composer() {
     >
       {dragging && (
         <div className="anim-fade pointer-events-none absolute inset-0 z-40 flex items-center justify-center border-2 border-dashed border-accent bg-accent/5">
-          <span className="rounded-lg bg-panel px-4 py-2 text-sm font-medium text-accent shadow-lg">拖放图片以附加</span>
+          <span className="rounded-lg bg-panel px-4 py-2 text-sm font-medium text-accent shadow-lg">{t("composer.dropImage", lang)}</span>
         </div>
       )}
       <div className="mx-auto max-w-[780px]">
@@ -99,7 +101,7 @@ export const Composer = memo(function Composer() {
                   type="button"
                   onClick={() => setImages((prev) => prev.filter((u) => u !== dataUrl))}
                   className="absolute -top-1.5 -right-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-err text-white shadow transition-transform hover:scale-110"
-                  title="移除图片"
+                  title={t("common.removeImage", lang)}
                 >
                   <IconX size={10} />
                 </button>
@@ -121,14 +123,14 @@ export const Composer = memo(function Composer() {
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={onKey}
             onPaste={onPaste}
-            placeholder={streaming ? "模型正在回复…（Esc 停止）" : "给 Spark 发送任务，Enter 发送 / Shift+Enter 换行（/test 跑测试）"}
+            placeholder={streaming ? t("composer.placeholderStreaming", lang) : t("composer.placeholder", lang)}
             className="block max-h-[200px] w-full resize-none overflow-y-auto bg-transparent px-4 pt-3.5 pb-1 text-[14px] leading-relaxed outline-none placeholder:text-ink3"
           />
           <div className="flex items-center justify-between gap-2 px-2.5 pb-2.5">
             <div className="flex min-w-0 items-center gap-1">
               <button
                 type="button"
-                title="附加图片（可粘贴 / 拖拽）"
+                title={t("composer.attachImageHint", lang)}
                 disabled={streaming}
                 onClick={() => fileRef.current?.click()}
                 className="flex h-8 w-8 items-center justify-center rounded-lg text-ink3 transition-colors hover:bg-hover hover:text-ink disabled:opacity-45"
@@ -137,7 +139,7 @@ export const Composer = memo(function Composer() {
               </button>
               <button
                 type="button"
-                title="附加图片"
+                title={t("common.attachImage", lang)}
                 disabled={streaming}
                 onClick={() => fileRef.current?.click()}
                 className="hidden h-8 w-8 items-center justify-center rounded-lg text-ink3 transition-colors hover:bg-hover hover:text-ink disabled:opacity-45 sm:flex"
@@ -148,7 +150,7 @@ export const Composer = memo(function Composer() {
                 <button
                   type="button"
                   onClick={openSettings}
-                  title="当前模型，点击管理"
+                  title={t("common.currentModel", lang)}
                   className="ml-1 max-w-[10rem] truncate rounded-md bg-hover px-2 py-1 text-[11px] font-medium text-ink2 transition-colors hover:bg-selected"
                 >
                   {model}
@@ -156,11 +158,11 @@ export const Composer = memo(function Composer() {
               )}
             </div>
             <div className="flex items-center gap-2">
-              <span className="hidden text-[11px] text-ink3 md:block">Enter 发送 · Shift+Enter 换行</span>
+              <span className="hidden text-[11px] text-ink3 md:block">{t("common.enterSend", lang)}</span>
               {streaming ? (
                 <button
                   type="button"
-                  title="停止生成"
+                  title={t("common.stopGenerate", lang)}
                   onClick={cancel}
                   className="flex h-8.5 w-8.5 shrink-0 items-center justify-center rounded-full bg-hover text-ink transition-colors hover:bg-selected active:scale-95"
                 >
@@ -169,7 +171,7 @@ export const Composer = memo(function Composer() {
               ) : (
                 <button
                   type="button"
-                  title="发送"
+                  title={t("common.send", lang)}
                   disabled={!canSend}
                   onClick={submit}
                   className={cls(

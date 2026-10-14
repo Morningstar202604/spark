@@ -4,6 +4,7 @@ import "@xyflow/react/dist/style.css"
 import { IconButton } from "./ui"
 import { IconX, IconSpark } from "./icons"
 import { useUiStore } from "../store/uiStore"
+import { t, type Lang, type TranslationKey } from "../i18n"
 
 /* ------------------------------------------------------------------ */
 /* 执行图（P1-5）：agent 执行图 / 子代理树可视化。                     */
@@ -34,11 +35,11 @@ const STATUS_COLOR: Record<ExecutionNode["status"], string> = {
   pending: "#8b949e",
 }
 
-const KIND_LABEL: Record<ExecutionNode["kind"], string> = {
-  root: "主代理",
-  agent: "子代理",
-  tool: "工具",
-  result: "产出",
+const KIND_LABEL: Record<ExecutionNode["kind"], TranslationKey> = {
+  root: "graph.kind.root",
+  agent: "graph.kind.agent",
+  tool: "graph.kind.tool",
+  result: "graph.kind.result",
 }
 
 function nodeColor(kind: ExecutionNode["kind"]): string {
@@ -53,18 +54,18 @@ function nodeColor(kind: ExecutionNode["kind"]): string {
  * 形态：主代理 -> 两个并行子代理 -> 各自工具 -> 汇总产出。
  */
 const SAMPLE_NODES: ExecutionNode[] = [
-  { id: "root", label: "plan 模式主代理", kind: "root", status: "running" },
-  { id: "agent.research", label: "research 子代理", kind: "agent", status: "done" },
-  { id: "agent.coder", label: "coder 子代理", kind: "agent", status: "running" },
-  { id: "tool.search", label: "repo_map 搜索", kind: "tool", status: "done" },
+  { id: "root", label: "graph.sample.root", kind: "root", status: "running" },
+  { id: "agent.research", label: "graph.sample.research", kind: "agent", status: "done" },
+  { id: "agent.coder", label: "graph.sample.coder", kind: "agent", status: "running" },
+  { id: "tool.search", label: "graph.sample.search", kind: "tool", status: "done" },
   { id: "tool.read", label: "read_file", kind: "tool", status: "done" },
   { id: "tool.edit", label: "edit_file", kind: "tool", status: "running" },
-  { id: "result", label: "diff 产出", kind: "result", status: "pending" },
+  { id: "result", label: "graph.sample.result", kind: "result", status: "pending" },
 ]
 
 const SAMPLE_EDGES: ExecutionEdge[] = [
-  { from: "root", to: "agent.research", label: "委派" },
-  { from: "root", to: "agent.coder", label: "委派" },
+  { from: "root", to: "agent.research", label: "graph.edge.delegate" },
+  { from: "root", to: "agent.coder", label: "graph.edge.delegate" },
   { from: "agent.research", to: "tool.search" },
   { from: "agent.research", to: "tool.read" },
   { from: "agent.coder", to: "tool.edit" },
@@ -73,7 +74,7 @@ const SAMPLE_EDGES: ExecutionEdge[] = [
   { from: "tool.edit", to: "result" },
 ]
 
-export function buildGraph(nodes: ExecutionNode[], edges: ExecutionEdge[]): {
+export function buildGraph(nodes: ExecutionNode[], edges: ExecutionEdge[], lang: Lang): {
   nodes: Node[]
   edges: Edge[]
 } {
@@ -93,9 +94,9 @@ export function buildGraph(nodes: ExecutionNode[], edges: ExecutionEdge[]): {
     data: {
       label: (
         <div style={{ borderLeft: `3px solid ${nodeColor(n.kind)}`, paddingLeft: 8 }}>
-          <div style={{ fontSize: 12, fontWeight: 600 }}>{n.label}</div>
+          <div style={{ fontSize: 12, fontWeight: 600 }}>{t(n.label as TranslationKey, lang)}</div>
           <div style={{ fontSize: 10, opacity: 0.75 }}>
-            {KIND_LABEL[n.kind]} · <span style={{ color: STATUS_COLOR[n.status] }}>{n.status}</span>
+            {t(KIND_LABEL[n.kind], lang)} · <span style={{ color: STATUS_COLOR[n.status] }}>{n.status}</span>
           </div>
         </div>
       ),
@@ -113,7 +114,7 @@ export function buildGraph(nodes: ExecutionNode[], edges: ExecutionEdge[]): {
     id: `e${i}`,
     source: e.from,
     target: e.to,
-    label: e.label,
+    label: e.label ? t(e.label as TranslationKey, lang) : undefined,
     animated: true,
     style: { stroke: "var(--ink3)" },
     markerEnd: { type: "arrowclosed" },
@@ -124,8 +125,9 @@ export function buildGraph(nodes: ExecutionNode[], edges: ExecutionEdge[]): {
 export const ExecutionGraph = memo(function ExecutionGraph() {
   const open = useUiStore((s) => s.graphOpen)
   const close = useUiStore((s) => s.closeGraph)
+  const lang = useUiStore((s) => s.lang)
 
-  const { nodes, edges } = useMemo(() => buildGraph(SAMPLE_NODES, SAMPLE_EDGES), [])
+  const { nodes, edges } = useMemo(() => buildGraph(SAMPLE_NODES, SAMPLE_EDGES, lang), [lang])
 
   if (!open) return null
 
@@ -135,13 +137,13 @@ export const ExecutionGraph = memo(function ExecutionGraph() {
         className="anim-fade flex h-[min(82vh,640px)] w-[min(94vw,960px)] flex-col overflow-hidden rounded-2xl border border-line bg-canvas shadow-[var(--shadow)]"
         onClick={(e) => e.stopPropagation()}
         role="dialog"
-        aria-label="执行图"
+        aria-label={t("graph.title", lang)}
       >
         <div className="flex items-center gap-2 border-b border-line px-4 py-3">
           <IconSpark size={15} className="text-accent" />
-          <span className="text-sm font-semibold text-ink">Agent 执行图</span>
-          <span className="ml-1 text-[10.5px] text-ink3">静态样例（待接 loop 事件流）</span>
-          <IconButton title="关闭" onClick={close} className="ml-auto">
+          <span className="text-sm font-semibold text-ink">{t("graph.title", lang)}</span>
+          <span className="ml-1 text-[10.5px] text-ink3">{t("graph.sampleNote", lang)}</span>
+          <IconButton title={t("common.close", lang)} onClick={close} className="ml-auto">
             <IconX size={15} />
           </IconButton>
         </div>

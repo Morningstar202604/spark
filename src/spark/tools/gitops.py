@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import os
 import re
 import shlex
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -9,6 +11,7 @@ from pydantic import BaseModel
 
 from spark.models import ToolResult
 from spark.sandbox import WorkdirSandbox
+from spark.tools._common import clip_text
 
 MAX_OUTPUT = 12_000
 
@@ -118,12 +121,6 @@ def detect_test_command(root: Path) -> str | None:
     return None
 
 
-def _clip(text: str) -> str:
-    if len(text) <= MAX_OUTPUT:
-        return text
-    return text[:MAX_OUTPUT] + "\n...truncated..."
-
-
 def _run_git(
     sandbox: WorkdirSandbox, cwd_arg: str, args: list[str], timeout: int = 30
 ) -> ToolResult:
@@ -159,9 +156,9 @@ def _run_git(
         "exit_code": completed.returncode,
     }
     if completed.stdout:
-        payload["output"] = _clip(completed.stdout.strip())
+        payload["output"] = clip_text(completed.stdout.strip(), MAX_OUTPUT)
     if completed.stderr:
-        payload["stderr"] = _clip(completed.stderr.strip())
+        payload["stderr"] = clip_text(completed.stderr.strip(), MAX_OUTPUT)
     return ToolResult(ok=ok, payload=payload)
 
 
@@ -331,6 +328,10 @@ def run_tests(sandbox: WorkdirSandbox, args: RunTestsArgs) -> ToolResult:
     argv = shlex.split(command, posix=False)
     if not argv:
         return ToolResult(ok=False, payload={"error": "detected test command is empty"})
+    if os.name == "nt" and argv[0] in {"python", "python3"}:
+        resolved_python = shutil.which(argv[0])
+        if resolved_python:
+            argv[0] = resolved_python
     try:
         completed = subprocess.run(
             argv,
@@ -358,7 +359,7 @@ def run_tests(sandbox: WorkdirSandbox, args: RunTestsArgs) -> ToolResult:
             "command": command,
             "exit_code": completed.returncode,
             "passed": completed.returncode == 0,
-            "output": _clip(output.strip()),
+            "output": clip_text(output.strip(), MAX_OUTPUT),
         },
     )
 

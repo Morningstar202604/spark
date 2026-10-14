@@ -33,11 +33,25 @@ READONLY_TOOLS = {
 # inherit the caller's grants, and ``web_fetch`` can be aimed at internal
 # endpoints. They prompt unless the user opted into ``full-auto``.
 EXECUTE_TOOLS = {"run_tests", "task", "web_fetch"}
-WRITE_TOOLS = {"write_file", "apply_patch", "notebook_edit", "git_add", "git_commit"}
+WRITE_TOOLS = {
+    "write_file",
+    "apply_patch",
+    "apply_edit",
+    "notebook_edit",
+    "git_add",
+    "git_commit",
+    "task_step_commit",
+    "task_finish",
+}
 SHELL_TOOLS = {"run_shell", "bg_start", "bg_kill"}
 # Shell and worktree-mutating tools can have unbounded blast radius, so they may
 # never be granted a permanent "always allow".
-NEVER_PERSIST_ALLOW = SHELL_TOOLS | {"worktree_create", "worktree_remove"}
+NEVER_PERSIST_ALLOW = SHELL_TOOLS | {
+    "worktree_create",
+    "worktree_remove",
+    "task_begin",
+    "task_finish",
+}
 
 
 # ---------------------------------------------------------------------------
@@ -182,7 +196,7 @@ def _extract_resource(tool: ToolCall) -> str:
     Used by :func:`decide` when evaluating wildcard permission rules.
     """
     args = tool.arguments
-    if tool.name in {"write_file", "apply_patch", "notebook_edit"}:
+    if tool.name in {"write_file", "apply_patch", "apply_edit", "notebook_edit"}:
         return args.get("path", "")
     if tool.name in {"run_shell", "bg_start"}:
         return args.get("command", "")

@@ -17,10 +17,10 @@ from pydantic import BaseModel, Field
 
 from spark.structured import (
     StructuredOutputError,
+    _reset_client_cache,
     complete,
     get_async_client,
 )
-from spark.structured import _reset_client_cache
 
 
 class _MergeNote(BaseModel):

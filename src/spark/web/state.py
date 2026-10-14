@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import contextvars
 import importlib
 import logging
 import secrets
@@ -11,9 +10,11 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+from spark.asyncutil import run_coroutine_sync
 from spark.config import (
     ModelProfile,
     SparkConfig,
+    env_api_key,
     mask_secret,
     save_config,
 )
@@ -74,40 +75,6 @@ class WebApprover:
     def cancel(self) -> None:
         self._cancel_event.set()
         self._event.set()
-
-
-def _run_coroutine_safe(coro) -> Any:
-    """Run an async coroutine safely regardless of event loop state.
-
-    Handles the case where an event loop is already running (``asyncio.run``
-    would raise ``RuntimeError``) by delegating to a thread-owned loop.
-    """
-    try:
-        asyncio.get_running_loop()
-    except RuntimeError:
-        return asyncio.run(coro)
-
-    # Already inside a running loop — delegate to a thread-owned loop and wait.
-    result: list = []
-    error: list = []
-
-    def _runner() -> None:
-        loop = asyncio.new_event_loop()
-        try:
-            ctx = contextvars.copy_context()
-            result.append(ctx.run(loop.run_until_complete, coro))
-        except Exception as exc:  # noqa: BLE001
-            error.append(exc)
-        finally:
-            loop.run_until_complete(loop.shutdown_asyncgens())
-            loop.close()
-
-    th = threading.Thread(target=_runner, daemon=False, name="run-coroutine-safe")
-    th.start()
-    th.join(timeout=120)
-    if error:
-        raise error[0]
-    return result[0] if result else None
 
 
 def _generate_session_meta_async(
@@ -215,13 +182,13 @@ class SparkWebState:
 
     def boot_mcp(self) -> list[str]:
         if self.mcp_bridge is not None:
-            _run_coroutine_safe(self.mcp_bridge.close())
+            run_coroutine_sync(self.mcp_bridge.close())
             self.mcp_bridge = None
         if not self.cfg.mcp_servers:
             return []
         bridge = McpBridge()
         dummy = ToolRegistry(ToolContext(sandbox=self.sandbox, config=self.cfg))
-        _run_coroutine_safe(bridge.start(self.cfg.mcp_servers, dummy))
+        run_coroutine_sync(bridge.start(self.cfg.mcp_servers, dummy))
         self.mcp_bridge = bridge
         return list(bridge.errors)
 
@@ -263,7 +230,9 @@ class SparkWebState:
         )
 
     def status(self) -> dict:
-        key = self.cfg.provider.api_key or ""
+        # 凭据可来自配置或环境变量（SPARK_* / DEEPSEEK_API_KEY 等）：只读配置字段
+        # 会把"环境变量供 key"的部署误显示成未配置。
+        key = env_api_key(self.cfg) or self.cfg.provider.api_key or ""
         usage = {
             "used": 0,
             "limit": self.cfg.context.max_context_tokens,
@@ -279,6 +248,7 @@ class SparkWebState:
             plan = list(self.loop.registry.plan)
         return {
             "session_id": self.session_id,
+            "session_tokens": self.store.session_token_usage(self.session_id),
             "workdir": str(self.workdir),
             "sandbox_mode": self.cfg.agent.sandbox_mode,
             "display": {
@@ -342,6 +312,7 @@ class SparkWebState:
                 "max_turn_tokens": self.cfg.agent.max_turn_tokens,
                 "max_output_chars": self.cfg.agent.max_output_chars,
                 "effort": self.cfg.agent.effort,
+                "system_prompt": self.cfg.agent.system_prompt,
                 "show_thinking": self.cfg.agent.show_thinking,
                 "show_tools": self.cfg.agent.show_tools,
                 "show_plan": self.cfg.agent.show_plan,
@@ -363,6 +334,17 @@ class SparkWebState:
                     "command": s.command,
                     "args": s.args,
                     "readonly_tools": s.readonly_tools,
+                    "transport": s.transport,
+                    "allowed_tools": list(s.allowed_tools),
+                    "http": (
+                        {
+                            "url": s.http.url,
+                            "headers": dict(s.http.headers),
+                            "timeout_sec": s.http.timeout_sec,
+                        }
+                        if s.http
+                        else None
+                    ),
                 }
                 for s in self.cfg.mcp_servers
             ],

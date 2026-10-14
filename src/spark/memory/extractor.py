@@ -9,7 +9,8 @@ from pydantic import BaseModel, Field
 
 from spark.memory.llm import chat_complete, parse_json_object
 from spark.memory.store import MemoryRow
-from spark.structured import StructuredOutputError, complete as structured_complete
+from spark.structured import StructuredOutputError
+from spark.structured import complete as structured_complete
 
 logger = logging.getLogger(__name__)
 

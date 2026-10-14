@@ -201,6 +201,18 @@ def _make_node_tools(
         results: list[ToolResult] = []
         history: list[ChatMessage] = list(state.get("history", []))
 
+        def _append_result(call: ToolCall, result: ToolResult) -> None:
+            """Mirror how the classic loop builds history: assistant(tool_calls) + tool."""
+            results.append(result)
+            history.append(ChatMessage(role="assistant", tool_calls=[call]))
+            history.append(
+                ChatMessage(
+                    role="tool",
+                    content=json.dumps(result.payload, default=str, ensure_ascii=False),
+                    tool_call_id=call.id,
+                )
+            )
+
         for call in calls:
             from spark.policy import decide
 
@@ -215,28 +227,36 @@ def _make_node_tools(
                 ),
                 rules=cfg.permission_rules or None,
             )
+            if verdict == "deny":
+                _append_result(
+                    call, ToolResult(ok=False, payload={"error": "denied by policy"})
+                )
+                continue
             if verdict == "prompt":
-                # Approval required — interrupt via LangGraph's HIL protocol.
+                # Approval required — interrupt via LangGraph's HIL protocol and
+                # honour the resumed decision (deny must NOT execute the tool).
                 req = ApprovalRequest(
                     tool_call=call,
                     summary=f"{call.name}({call.arguments})",
                 )
-                interrupt(req.model_dump())
+                decision = interrupt(req.model_dump())
+                action = (
+                    decision.get("action")
+                    if isinstance(decision, dict)
+                    else str(decision or "")
+                )
+                if action not in {"allow", "allow_always"}:
+                    _append_result(
+                        call,
+                        ToolResult(ok=False, payload={"error": "approval denied"}),
+                    )
+                    continue
 
             try:
                 result = await registry.execute(call)
             except Exception as exc:  # noqa: BLE001
                 result = ToolResult(ok=False, payload={"error": str(exc)})
-            results.append(result)
-            # Mirror how the classic loop builds history: assistant(tool_calls) + tool
-            history.append(ChatMessage(role="assistant", tool_calls=[call]))
-            history.append(
-                ChatMessage(
-                    role="tool",
-                    content=json.dumps(result.payload, default=str, ensure_ascii=False),
-                    tool_call_id=call.id,
-                )
-            )
+            _append_result(call, result)
 
         return {
             "tool_results": results,
@@ -343,8 +363,9 @@ def build_react_graph_with_sqlite_saver(
     与 ``AgentLoop`` 的会话级检查点互补（前者恢复执行状态，后者恢复工作区
     快照 + 消息索引）。
     """
-    from langgraph.checkpoint.sqlite import SqliteSaver
     import sqlite3
+
+    from langgraph.checkpoint.sqlite import SqliteSaver
 
     if str(db_path) == ":memory:":
         conn = sqlite3.connect(":memory:", check_same_thread=False)

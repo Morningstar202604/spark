@@ -5,11 +5,14 @@ from pathlib import Path
 from typing import Any, cast
 
 from spark.config import (
+    APPROVAL_MODES,
+    SANDBOX_MODES,
     ApprovalMode,
     ProviderName,
     SandboxMode,
     SparkConfig,
     default_home,
+    env_api_key,
     load_config,
     mask_secret,
     save_config,
@@ -40,9 +43,6 @@ SETTABLE: dict[str, tuple[str, type]] = {
     "memory.top_k": ("memory.top_k", int),
     "memory.capacity": ("memory.capacity", int),
 }
-
-APPROVAL_MODES = {"suggest", "auto-edit", "full-auto"}
-SANDBOX_MODES = {"sandbox-only", "workspace", "full-access", "unrestricted"}
 
 BOOL_WORDS = {
     "true": True,
@@ -255,12 +255,13 @@ def check_health(
                 "运行 spark init 配置真实模型",
             )
         )
-    elif not cfg.provider.api_key and not _env_key(cfg):
+    elif not cfg.provider.api_key and not env_api_key(cfg):
         rows.append(
             (
-                "bad",
-                "缺少 API Key，模型无法调用",
-                "运行 spark init 填写密钥，或设置环境变量 " + cfg.provider.api_key_env,
+                "warn",
+                "未配置模型凭据 —— 将以演示模式(mock)运行",
+                "运行 spark init 或在 Web 设置中填入密钥，或设置环境变量 "
+                + cfg.provider.api_key_env,
             )
         )
     else:
@@ -279,16 +280,6 @@ def check_health(
     return rows
 
 
-def _env_key(cfg: SparkConfig) -> str:
-    import os
-
-    return (
-        os.environ.get(cfg.provider.api_key_env)
-        or os.environ.get("SPARK_API_KEY")
-        or ""
-    )
-
-
 def friendly_config_error(cfg: SparkConfig) -> str:
     """Turn a missing-credential failure into actionable guidance."""
     if cfg.provider.name == "mock":
@@ -296,11 +287,11 @@ def friendly_config_error(cfg: SparkConfig) -> str:
             "当前配置是 mock 模型（不会真实调用）。\n"
             "下一步：运行 spark init 填写真实模型地址、模型名和 API Key。"
         )
-    if not cfg.provider.api_key and not _env_key(cfg):
+    if not cfg.provider.api_key and not env_api_key(cfg):
         return (
-            "缺少 API Key，无法连接模型。\n"
+            "未配置 API Key —— 将以演示模式(mock)运行，填入密钥后自动切换真实模型。\n"
             "下一步（二选一）：\n"
-            "  1) 运行 spark init 交互式填写，密钥会保存到本机配置文件\n"
+            "  1) 运行 spark init 或在 Web 设置中填入密钥（保存到本机配置文件）\n"
             f"  2) 设置环境变量 {cfg.provider.api_key_env} 后重试"
         )
     return "配置看起来完整，但模型调用仍失败；请运行 spark doctor 查看详细诊断。"

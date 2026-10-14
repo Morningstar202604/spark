@@ -78,31 +78,6 @@ def sanitize(text: str | None, secrets: tuple[str, ...] = ()) -> str:
     return _strip_traceback(s)
 
 
-def sanitize_event(ev: dict, secrets: tuple[str, ...] = ()) -> dict:
-    """对 SSE 事件中"展示给用户"的字段脱敏（只读，返回脱敏后的副本）。"""
-    t = ev.get("type")
-    if t == "text" or t == "reasoning":
-        d = ev.get("delta")
-        if d:
-            return {**ev, "delta": sanitize(d, secrets)}
-        return ev
-    if t == "error":
-        m = ev.get("message")
-        if m:
-            return {**ev, "message": sanitize(m, secrets)}
-        return ev
-    if t == "tool_result":
-        o = ev.get("output", "")
-        so = sanitize(o, secrets)
-        return {**ev, "output": so} if so != o else ev
-    if t == "tool_start":
-        a = ev.get("args_summary")
-        if a:
-            return {**ev, "args_summary": sanitize(a, secrets)}
-        return ev
-    return ev
-
-
 _MAX_SANITIZE_DEPTH = 3
 
 

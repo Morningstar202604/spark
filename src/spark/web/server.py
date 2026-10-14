@@ -18,6 +18,7 @@ from spark.web.utils import (
     _probe_target_allowed,
     _safe_agents_md_name,
     parse_mcp_servers,
+    pick_free_port,
     ui_dir_for,
 )
 
@@ -65,7 +66,7 @@ def _build_server_and_state(
     cfg: SparkConfig,
     store: SessionStore,
     host: str = "127.0.0.1",
-    port: int = 8000,
+    port: int | None = None,
 ) -> tuple[SparkHTTPServer, SparkWebState]:
     state = SparkWebState(workdir, cfg, store)
     ui_dir = ui_dir_for()
@@ -76,9 +77,13 @@ def _build_server_and_state(
     )
     HandlerClass = build_handler_class(html)
 
-    if _port_in_use(host, port):
+    if port is None:
+        port = pick_free_port(host, 8000)
+    elif _port_in_use(host, port):
         logger.error(
-            "Port %d is already in use. Use --port <N> to specify another port.", port
+            "Port %d is already in use. Omit --port to auto-pick a free one, "
+            "or pass --port <N> with a different port.",
+            port,
         )
         raise SystemExit(1)
 
@@ -91,9 +96,9 @@ def _build_server_and_state(
     if not local_only:
         logger.warning(
             "Listening beyond loopback. Remote callers must send the "
-            "X-Spark-Token header. The token is available on the console object "
-            "(state.control_token); it is not logged because log collection would "
-            "turn it into a leaked credential."
+            "X-Spark-Token header. The CLI prints the token to the console when "
+            "binding beyond loopback; it is not written to the log because log "
+            "collection would turn it into a leaked credential."
         )
     return server, state
 
@@ -104,7 +109,7 @@ def build_web_server(
     cfg: SparkConfig,
     store: SessionStore,
     host: str = "127.0.0.1",
-    port: int = 8000,
+    port: int | None = None,
 ) -> tuple[SparkHTTPServer, SparkWebState]:
     """构建但不启动 Web 服务；返回 (server, state) 供 serve_web 与桌面壳复用。"""
     return _build_server_and_state(
@@ -118,7 +123,7 @@ def serve_web(
     cfg: SparkConfig,
     store: SessionStore,
     host: str = "127.0.0.1",
-    port: int = 8000,
+    port: int | None = None,
 ) -> None:
     server, _state = build_web_server(
         workdir=workdir, cfg=cfg, store=store, host=host, port=port

@@ -2,17 +2,17 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from typing import Literal, cast
 from urllib.parse import urlparse
 
 from spark.hooks import HookRegistry
+from spark.sandbox import safe_bare_filename
 
 logger = logging.getLogger(__name__)
 
 INDEX_HTML = Path(__file__).with_name("index.html")
 
 HOOK_EVENTS = tuple(HookRegistry.EVENTS)
-
-_WINDOWS_RESERVED = {"con", "prn", "aux", "nul"}
 
 MAX_REQUEST_BYTES = 32 * 1024 * 1024
 
@@ -39,7 +39,7 @@ def ui_dir_for() -> Path | None:
 
 
 def parse_mcp_servers(items: list) -> list:
-    from spark.config import McpServerConfig
+    from spark.config import McpServerConfig, McpTransportConfig
 
     out: list[McpServerConfig] = []
     for item in items:
@@ -48,11 +48,36 @@ def parse_mcp_servers(items: list) -> list:
         name = str(item.get("name") or "").strip()
         if not name:
             continue
+        transport = cast(
+            Literal["stdio", "sse", "streamable_http"],
+            str(item.get("transport") or "stdio").strip() or "stdio",
+        )
+        if transport not in {"stdio", "sse", "streamable_http"}:
+            transport = "stdio"
         command = str(item.get("command") or "").strip()
-        if not command:
-            raise ValueError("each MCP server needs name and command")
+        http_raw = item.get("http") if isinstance(item.get("http"), dict) else None
+        http: McpTransportConfig | None = None
+        if transport == "stdio":
+            if not command:
+                raise ValueError("each MCP server needs name and command")
+        else:
+            url = str((http_raw or {}).get("url") or "").strip()
+            if not url:
+                raise ValueError(f"MCP server '{name}' needs http.url for {transport}")
+            headers_raw = (http_raw or {}).get("headers")
+            headers = (
+                {str(k): str(v) for k, v in headers_raw.items()}
+                if isinstance(headers_raw, dict)
+                else {}
+            )
+            try:
+                timeout_sec = int((http_raw or {}).get("timeout_sec") or 30)
+            except (TypeError, ValueError):
+                timeout_sec = 30
+            http = McpTransportConfig(url=url, headers=headers, timeout_sec=timeout_sec)
         args_raw = item.get("args")
         ro_raw = item.get("readonly_tools")
+        allowed_raw = item.get("allowed_tools")
         out.append(
             McpServerConfig(
                 name=name,
@@ -60,6 +85,11 @@ def parse_mcp_servers(items: list) -> list:
                 args=[str(a) for a in args_raw] if isinstance(args_raw, list) else [],
                 readonly_tools=[str(a) for a in ro_raw]
                 if isinstance(ro_raw, list)
+                else [],
+                transport=transport,
+                http=http,
+                allowed_tools=[str(a) for a in allowed_raw]
+                if isinstance(allowed_raw, list)
                 else [],
             )
         )
@@ -75,20 +105,8 @@ def _cache_control(path: str) -> str | None:
 
 
 def _safe_agents_md_name(filename: str) -> str | None:
-    """Accept only a bare filename inside the workdir. Rejects any path that could
-    escape it (absolute, drive letter, UNC, separators, traversal, device names)."""
-    if not filename or filename != filename.strip():
-        return None
-    if filename in {".", ".."} or len(filename) > 255:
-        return None
-    if any(sep in filename for sep in ("/", "\\", ":", "\x00")):
-        return None
-    if ".." in filename:
-        return None
-    stem = filename.split(".")[0].lower()
-    if stem in _WINDOWS_RESERVED:
-        return None
-    return filename
+    """兼容入口：实现收敛到 :func:`spark.sandbox.safe_bare_filename`。"""
+    return safe_bare_filename(filename)
 
 
 def _probe_target_allowed(base_url: str, trusted_base_url: str) -> bool:
@@ -114,6 +132,16 @@ def _port_in_use(host: str, port: int) -> bool:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.settimeout(0.3)
         return s.connect_ex((host, port)) == 0
+
+
+def pick_free_port(host: str, preferred: int, attempts: int = 64) -> int:
+    """从 *preferred* 起返回第一个未被监听的端口；范围内全被占用时抛 OSError。"""
+    for port in range(preferred, min(preferred + attempts, 65536)):
+        if not _port_in_use(host, port):
+            return port
+    raise OSError(
+        f"no free port on {host} in range {preferred}-{preferred + attempts - 1}"
+    )
 
 
 def _extract_text(payload: dict) -> str:

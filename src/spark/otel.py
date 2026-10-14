@@ -13,18 +13,20 @@ Langfuse 自托管原生接受 OTLP，所以这里不做 Langfuse 专属 client�
 
 from __future__ import annotations
 
+import atexit
 import logging
 import os
 import threading
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
 _tracer: object | None = None
+_processor: Any = None
 _lock = threading.Lock()
 _INITIALIZED = False
 # 模块级导出通道：测试/调试可读取（in-memory 时）
 _exporter: object | None = None
-_processor: object | None = None
 
 
 def init_telemetry(service_name: str | None = None) -> object | None:
@@ -73,12 +75,15 @@ def init_telemetry(service_name: str | None = None) -> object | None:
 
 
 def flush() -> None:
-    """冲刷待导出 span（测试/关闭前调用）。"""
+    """冲刷待导出 span（进程退出前自动调用；未初始化时为 no-op）。"""
     if _processor is not None:
         try:
             _processor.force_flush()
         except Exception:  # pragma: no cover
             pass
+
+
+atexit.register(flush)
 
 
 def get_tracer():

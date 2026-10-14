@@ -3,12 +3,15 @@ import { useSessionStore } from "../store/sessionStore"
 import { Button, Spinner } from "./ui"
 import { DiffView } from "./DiffView"
 import { IconFileDiff } from "./icons"
+import { useUiStore } from "../store/uiStore"
+import { t } from "../i18n"
 
 /** 工具审批卡片：Claude Code 风格的底部操作审批 */
 export const ApprovalModal = memo(function ApprovalModal() {
   const approval = useSessionStore((s) => s.approval)
   const busy = useSessionStore((s) => s.approvalBusy)
   const handleApproval = useSessionStore((s) => s.handleApproval)
+  const lang = useUiStore((s) => s.lang)
 
   if (!approval) return null
   const { info, tool } = approval
@@ -27,7 +30,7 @@ export const ApprovalModal = memo(function ApprovalModal() {
               </svg>
             )}
           </span>
-          <span className="text-sm font-semibold text-ink">需要审批</span>
+          <span className="text-sm font-semibold text-ink">{t("approval.title", lang)}</span>
           <span className="ml-auto rounded-md bg-hover px-2 py-0.5 font-mono text-[11px] text-ink2">{tool.name}</span>
         </div>
 
@@ -42,18 +45,18 @@ export const ApprovalModal = memo(function ApprovalModal() {
 
         <div className="flex flex-col gap-2 border-t border-line bg-panel2 px-4 py-3 sm:flex-row sm:items-center">
           <Button variant="ghost" full className="sm:flex-none" onClick={() => handleApproval("deny")} disabled={busy}>
-            拒绝
+            {t("approval.deny", lang)}
           </Button>
           <Button variant="outline" full className="sm:flex-none" onClick={() => handleApproval("allow")} disabled={busy}>
-            允许本次
+            {t("approval.allowOnce", lang)}
           </Button>
           <Button variant="primary" full onClick={() => handleApproval("allow_always")} disabled={busy}>
             {busy ? (
               <span className="flex items-center gap-1.5">
-                <Spinner size={12} /> 处理中…
+                <Spinner size={12} /> {t("approval.busy", lang)}
               </span>
             ) : (
-              "始终允许（相同操作）"
+              t("approval.allowAlways", lang)
             )}
           </Button>
         </div>

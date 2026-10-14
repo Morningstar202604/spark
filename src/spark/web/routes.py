@@ -324,7 +324,13 @@ def build_handler_class(html: str):
                 self._json(200, {"profiles": profiles})
                 return
             if path == "/api/agents_md":
-                path_md = state.workdir / state.cfg.context.agents_md
+                from spark.web.utils import _safe_agents_md_name
+
+                safe_name = _safe_agents_md_name(state.cfg.context.agents_md)
+                if safe_name is None:
+                    self._json(400, {"error": "invalid agents_md filename"})
+                    return
+                path_md = state.workdir / safe_name
                 content = path_md.read_text(encoding="utf-8") if path_md.exists() else ""
                 self._json(
                     200,
@@ -338,8 +344,8 @@ def build_handler_class(html: str):
                 )
                 return
             if path == "/api/memory":
-                query = urlparse(self.path).query
-                params = dict(p.split("=", 1) for p in query.split("&") if "=" in p)
+                raw_query = urlparse(self.path).query
+                params = dict(p.split("=", 1) for p in raw_query.split("&") if "=" in p)
                 q = params.get("q", "")
                 items = state.memory.list_memories()
                 search_hits: list[dict] = []
@@ -435,12 +441,7 @@ def build_handler_class(html: str):
                     return
                 self._json(200, _browse(url))
                 return
-            # P1-5：内置终端（PTY）——tabs 列表 + SSE 读流（写/开/关走 POST）
-            if path == "/api/pty/tabs":
-                from spark.web.pty_api import handle_pty_tabs
-
-                handle_pty_tabs(self)
-                return
+            # P1-5：内置终端（PTY）——SSE 读流（写/开/关走 POST）
             if path == "/api/pty/stream":
                 from spark.web.pty_api import handle_pty_stream
 
@@ -519,7 +520,7 @@ _POST_HANDLERS: dict[str, Any] = {
 }
 
 # P1-5：内置终端（PTY）写路径（读流是 GET /api/pty/stream，见 _handle_get）
-from spark.web.pty_api import (  # noqa: E402
+from spark.web.pty_api import (
     handle_pty_close as _pty_close,
     handle_pty_open as _pty_open,
     handle_pty_resize as _pty_resize,

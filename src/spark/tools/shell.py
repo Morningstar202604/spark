@@ -6,6 +6,7 @@ import shutil
 import signal
 import subprocess
 import threading
+from concurrent.futures import ThreadPoolExecutor
 
 logger = logging.getLogger(__name__)
 
@@ -14,6 +15,7 @@ from pydantic import BaseModel
 from spark.errors import PathEscapeError
 from spark.models import ToolResult
 from spark.sandbox import SandboxPolicyError, WorkdirSandbox
+from spark.tools._common import clip_text
 
 MAX_SHELL_OUTPUT_BYTES = 4 * 1024 * 1024
 _READ_CHUNK_BYTES = 8192
@@ -24,12 +26,13 @@ _READ_CHUNK_BYTES = 8192
 # 系统路径只读、仅 workdir 可写。bwrap 未安装时静默降级到策略检查
 # （check_shell 仍是第一道防线，bwrap 是第二道纵深）。
 # ---------------------------------------------------------------------------
-_BWRAP_CACHE: dict[str, str | None] = {"path": None, "probed": False}
+_BWRAP_CACHE: dict[str, str | bool | None] = {"path": None, "probed": False}
 
 
 def _bwrap_path() -> str | None:
     if _BWRAP_CACHE["probed"]:
-        return _BWRAP_CACHE["path"]
+        cached = _BWRAP_CACHE["path"]
+        return cached if isinstance(cached, str) else None
     path = shutil.which("bwrap")
     _BWRAP_CACHE["path"] = path
     _BWRAP_CACHE["probed"] = True
@@ -172,8 +175,8 @@ def run_shell(
     stderr_text = stderr_bytes.decode("utf-8", errors="replace")
     stdout_was_clipped = len(stdout_text) > output_limit
     stderr_was_clipped = len(stderr_text) > output_limit
-    stdout = _clip(stdout_text, output_limit)
-    stderr = _clip(stderr_text, output_limit)
+    stdout = clip_text(stdout_text, output_limit)
+    stderr = clip_text(stderr_text, output_limit)
     stdout_truncated = stdout_was_truncated or stdout_was_clipped
     stderr_truncated = stderr_was_truncated or stderr_was_clipped
     return ToolResult(
@@ -247,7 +250,11 @@ def _kill_process_tree(process: subprocess.Popen) -> None:
 
 
 def detect_env(workdir) -> dict:
-    """Probe the default runtime environment so it can be stated in the system prompt."""
+    """Probe the default runtime environment so it can be stated in the system prompt.
+
+    各运行时探测并行执行：Windows 上每个子进程启动约 2-3 秒，串行 6 个会让
+    每个进程的首次 system prompt 构建多付 ~12 秒。
+    """
     probes = {
         "python3": ["python3", "--version"],
         "python": ["python", "--version"],
@@ -256,26 +263,32 @@ def detect_env(workdir) -> dict:
         "npm": ["npm", "--version"],
         "git": ["git", "--version"],
     }
-    result: dict[str, str] = {}
-    for name, cmd in probes.items():
+
+    def _probe(item: tuple[str, list[str]]) -> tuple[str, str] | None:
+        name, cmd = item
         exe = shutil.which(cmd[0])
         if exe is None:
-            continue
+            return None
         try:
             completed = subprocess.run(
                 cmd, capture_output=True, text=True, timeout=5, cwd=workdir
             )
             version = (completed.stdout or completed.stderr).strip().splitlines()
-            result[name] = version[0][:60] if version else "installed"
+            return name, (version[0][:60] if version else "installed")
         except Exception:
             # 版本命令执行失败时降级为 "installed"（仅展示用）
             logger.debug("检测 %s 版本失败", name, exc_info=True)
-            result[name] = "installed"
+            return name, "installed"
+
+    result: dict[str, str] = {}
+    with ThreadPoolExecutor(max_workers=len(probes)) as pool:
+        for outcome in pool.map(_probe, probes.items()):
+            if outcome is not None:
+                result[outcome[0]] = outcome[1]
     result["path"] = str(workdir)
     return result
 
 
 def _clip(text: str, limit: int) -> str:
-    if len(text) <= limit:
-        return text
-    return text[:limit] + "\n...truncated..."
+    # 保留旧名以免外部引用断裂；实现收敛到 tools._common.clip_text
+    return clip_text(text, limit)

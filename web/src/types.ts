@@ -35,6 +35,9 @@ export interface McpServer {
   command: string
   args: string[]
   readonly_tools: string[]
+  transport?: "stdio" | "sse" | "streamable_http"
+  allowed_tools?: string[]
+  http?: { url: string; headers: Record<string, string>; timeout_sec: number } | null
 }
 
 export interface FullConfig {
@@ -110,6 +113,7 @@ export interface SettingsPayload {
     show_context?: boolean
     show_keywords?: boolean
     show_notices?: boolean
+    effort?: "low" | "medium" | "high"
     system_prompt?: string
   }
   mcp_servers: McpServer[]

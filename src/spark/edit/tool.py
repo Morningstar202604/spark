@@ -17,21 +17,19 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from spark.errors import PathEscapeError
-from spark.models import ToolResult
-from spark.sandbox import SandboxPolicyError, WorkdirSandbox
-
 from spark.edit.ast_check import ast_sanity_check
 from spark.edit.core import (
     EditConflictError,
     EditFormatError,
     EditNoMatchError,
-    apply_blocks,
     compute_new_text,
     has_edit_blocks,
     parse_blocks,
     unified_diff,
 )
+from spark.errors import PathEscapeError
+from spark.models import ToolResult
+from spark.sandbox import SandboxPolicyError, WorkdirSandbox
 
 
 def _fs_helpers():

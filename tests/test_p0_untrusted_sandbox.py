@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 import pytest
@@ -38,6 +39,7 @@ def test_web_fetch_content_wrapped():
     assert "<untrusted>" in result.payload["content"]
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="bubblewrap 仅 Linux/macOS")
 def test_bwrap_command_construction():
     from spark.tools import shell as sh
 

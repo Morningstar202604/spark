@@ -1,7 +1,7 @@
 """P0 安全特性：出口脱敏（sanitize）的行为锁。
 
-覆盖三层脱敏（密钥/主目录/堆栈）+ SSE 出口两个入口（sanitize_event /
-sanitize_sse_payload）。根树参考实现见 git 历史 spark/sanitize.py。
+覆盖三层脱敏（密钥/主目录/堆栈）+ SSE 出口（sanitize_sse_payload）。
+根树参考实现见 git 历史 spark/sanitize.py。
 """
 
 from __future__ import annotations
@@ -71,41 +71,6 @@ def test_sanitize_collapses_traceback() -> None:
     assert "/x/y.py" not in out
     assert "[REDACTED] ValueError: bad input" in out
     assert "before" in out and "after" in out
-
-
-# ---------- sanitize_event(): 按事件类型脱敏 ----------
-
-
-def test_sanitize_event_covers_user_visible_fields() -> None:
-    secret = "sk-abcdef1234567890"
-    secrets = (secret,)
-    assert san.sanitize_event({"type": "text", "delta": secret}, secrets)["delta"] == (
-        "[REDACTED]"
-    )
-    assert san.sanitize_event({"type": "reasoning", "delta": secret}, secrets)[
-        "delta"
-    ] == "[REDACTED]"
-    assert san.sanitize_event({"type": "error", "message": secret}, secrets)[
-        "message"
-    ] == "[REDACTED]"
-    assert san.sanitize_event(
-        {"type": "tool_result", "output": secret}, secrets
-    )["output"] == "[REDACTED]"
-    assert san.sanitize_event(
-        {"type": "tool_start", "args_summary": secret}, secrets
-    )["args_summary"] == "[REDACTED]"
-
-
-def test_sanitize_event_leaves_other_types_untouched() -> None:
-    ev = {"type": "turn_end", "text": "done"}
-    assert san.sanitize_event(ev, ("sk-abcdef1234567890",)) == ev
-
-
-def test_sanitize_event_does_not_mutate_input() -> None:
-    secret = "sk-abcdef1234567890"
-    ev = {"type": "text", "delta": secret}
-    san.sanitize_event(ev, (secret,))
-    assert ev["delta"] == secret
 
 
 # ---------- sanitize_sse_payload(): 浅递归脱敏 ----------

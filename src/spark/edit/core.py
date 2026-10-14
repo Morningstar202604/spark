@@ -156,8 +156,8 @@ def _fuzzy_spans(
     m = len(search_lines)
     if m == 0 or m > len(file_lines):
         return []
-    fkeys = [key(l) for l in file_lines]
-    skeys = [key(l) for l in search_lines]
+    fkeys = [key(line) for line in file_lines]
+    skeys = [key(line) for line in search_lines]
     bounds = _line_char_bounds(text)
     spans: list[tuple[int, int]] = []
     for i in range(0, len(file_lines) - m + 1):

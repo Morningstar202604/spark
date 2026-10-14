@@ -45,8 +45,12 @@ def handle_pty_open(handler: HandlerBase, body: dict[str, Any]) -> None:
     cwd_raw = body.get("cwd")
     state = _route_state(handler)
     cwd = Path(str(cwd_raw)) if cwd_raw else state.workdir
-    rows = int(body.get("rows") or 24)
-    cols = int(body.get("cols") or 80)
+    try:
+        rows = int(body.get("rows") or 24)
+        cols = int(body.get("cols") or 80)
+    except (TypeError, ValueError):
+        handler._json(400, {"error": "rows/cols must be integers"})
+        return
     try:
         sess = get_manager().get_or_create(_sid(handler), tab_id, cwd, rows=rows, cols=cols)
     except ImportError as exc:
@@ -87,10 +91,6 @@ def handle_pty_close(handler: HandlerBase, body: dict[str, Any]) -> None:
     tab_id = str(body.get("tab_id") or "main")
     ok = get_manager().close_tab(_sid(handler), tab_id)
     handler._json(200, {"ok": ok})
-
-
-def handle_pty_tabs(handler: HandlerBase) -> None:
-    handler._json(200, {"tabs": get_manager().list_tabs(_sid(handler))})
 
 
 def handle_pty_stream(handler: HandlerBase) -> None:
@@ -158,6 +158,5 @@ __all__ = [
     "handle_pty_open",
     "handle_pty_resize",
     "handle_pty_stream",
-    "handle_pty_tabs",
     "handle_pty_write",
 ]

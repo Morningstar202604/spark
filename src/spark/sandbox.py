@@ -8,6 +8,29 @@ from pathlib import Path
 from spark.config import SparkConfig, default_home
 from spark.errors import PathEscapeError
 
+_WINDOWS_RESERVED = {"con", "prn", "aux", "nul"}
+
+
+def safe_bare_filename(filename: str) -> str | None:
+    """接受"工作目录内的裸文件名"，拒绝任何可能逃逸的路径形态。
+
+    拒绝：空/带首尾空白/``.``/``..``/超长、含分隔符或盘符或 NUL、任何含
+    ``..`` 的名字、Windows 设备名（con/prn/aux/nul）。合法时原样返回。
+    """
+    if not filename or filename != filename.strip():
+        return None
+    if filename in {".", ".."} or len(filename) > 255:
+        return None
+    if any(sep in filename for sep in ("/", "\\", ":", "\x00")):
+        return None
+    if ".." in filename:
+        return None
+    stem = filename.split(".")[0].lower()
+    if stem in _WINDOWS_RESERVED:
+        return None
+    return filename
+
+
 # ``_logical()`` strips the drive letter, so these POSIX-shaped entries also
 # match C:/Windows, D:/Program Files and friends on Windows.
 DEFAULT_PROTECTED = [
@@ -169,9 +192,14 @@ class WorkdirSandbox:
             tokens = cleaned.split()
         return [tok for tok in tokens if tok]
 
-    def _command_hits_protected(self, command: str) -> str | None:
-        """Return the protected path entry hit by a path token in the command, if any."""
-        for raw in self._protected_effective():
+    def _command_hits_protected(
+        self, command: str, paths: list[str] | None = None
+    ) -> str | None:
+        """Return the protected path entry hit by a path token in the command, if any.
+
+        ``paths`` 缺省为生效清单（含内置凭据保护）；unrestricted 档传入用户清单。
+        """
+        for raw in (paths if paths is not None else self._protected_effective()):
             p = (Path(raw) if Path(raw).is_absolute() else (self.root / raw)).resolve()
             for token in self._command_tokens(command):
                 try:
@@ -192,23 +220,7 @@ class WorkdirSandbox:
     def check_shell(self, command: str) -> str | None:
         """Return a rejection reason, or None when the command may run."""
         if self.unrestricted:
-            hit_user = None
-            for raw in self.protected_paths:
-                p = (Path(raw) if Path(raw).is_absolute() else (self.root / raw)).resolve()
-                for token in self._command_tokens(command):
-                    try:
-                        cand = Path(token)
-                        if cand.is_absolute():
-                            cand = cand.resolve()
-                        else:
-                            cand = (self.root / cand).resolve()
-                        cand.relative_to(p)
-                        hit_user = raw
-                        break
-                    except (OSError, ValueError, PermissionError):
-                        continue
-                if hit_user:
-                    break
+            hit_user = self._command_hits_protected(command, self.protected_paths)
             if hit_user:
                 return f"command blocked: references protected path {hit_user}"
             return None

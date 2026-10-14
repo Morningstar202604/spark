@@ -89,7 +89,7 @@ def run_desktop(
     workdir: Path,
     cfg,
     store,
-    port: int = 8000,
+    port: int | None = None,
     width: int = DEFAULT_WIDTH,
     height: int = DEFAULT_HEIGHT,
     title: str = DEFAULT_TITLE,

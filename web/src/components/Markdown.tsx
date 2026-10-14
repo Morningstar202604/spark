@@ -6,11 +6,13 @@ import { IconCheck, IconCopy } from "./icons"
 import { useUiStore } from "../store/uiStore"
 import { resolveTheme } from "../theme"
 import { cls } from "./ui"
+import { t } from "../i18n"
 
 // 语言缺失时由 CodeBlock 内的 highlightAuto 兜底，无需手动注册
 
 function CodeBlock({ code, lang }: { code: string; lang: string }) {
   const [copied, setCopied] = useState(false)
+  const uiLang = useUiStore((s) => s.lang)
   const language = lang.toLowerCase()
   let highlighted = ""
   let ok = false
@@ -37,7 +39,7 @@ function CodeBlock({ code, lang }: { code: string; lang: string }) {
       <div className="codeblock-header">
         <span className="flex items-center gap-2">
           <span className="font-semibold text-ink2">{lang || "text"}</span>
-          {ok && <span className="text-[10px] text-ink3">{code.split("\n").length} 行</span>}
+          {ok && <span className="text-[10px] text-ink3">{t("common.lines", uiLang, { n: code.split("\n").length })}</span>}
         </span>
         <button
           type="button"
@@ -45,10 +47,10 @@ function CodeBlock({ code, lang }: { code: string; lang: string }) {
           className="flex items-center gap-1 rounded-md px-1.5 py-0.5 text-ink3 transition-colors hover:bg-hover hover:text-ink"
         >
           {copied ? <IconCheck size={12} className="text-ok" /> : <IconCopy size={12} />}
-          <span>{copied ? "已复制" : "复制"}</span>
+          <span>{copied ? t("common.copied", uiLang) : t("common.copy", uiLang)}</span>
         </button>
       </div>
-      <pre tabIndex={0} aria-label="代码块，可滚动">
+      <pre tabIndex={0} aria-label={t("markdown.codeBlock", uiLang)}>
         {ok ? <code className={cls("hljs")} dangerouslySetInnerHTML={{ __html: highlighted }} /> : <code>{code}</code>}
       </pre>
     </div>
@@ -57,10 +59,11 @@ function CodeBlock({ code, lang }: { code: string; lang: string }) {
 
 function DiffBlock({ code }: { code: string }) {
   const theme = useUiStore((s) => s.theme)
+  const lang = useUiStore((s) => s.lang)
   const dark = resolveTheme(theme) === "dark"
   const lines = code.split("\n")
   return (
-    <pre className="codeblock max-h-[520px] overflow-auto p-0" tabIndex={0} aria-label="代码差异，可滚动">
+    <pre className="codeblock max-h-[520px] overflow-auto p-0" tabIndex={0} aria-label={t("markdown.diffBlock", lang)}>
       <div className="codeblock-header">
         <span className="font-semibold text-ink2">diff</span>
         <span className="text-[10px] text-ink3">+{lines.filter((l) => l.startsWith("+") && !l.startsWith("+++")).length} / -{lines.filter((l) => l.startsWith("-") && !l.startsWith("---")).length}</span>

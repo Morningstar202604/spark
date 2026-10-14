@@ -5,6 +5,7 @@ import { cls, IconButton } from "./ui"
 import { BrandMark } from "./BrandMark"
 import { useUiStore } from "../store/uiStore"
 import { useSessionStore } from "../store/sessionStore"
+import { t, type Lang, type TranslationKey } from "../i18n"
 
 function ThemeGlyph({ theme }: { theme: "light" | "dark" | "system" }) {
   if (theme === "light") return <IconSun size={14} />
@@ -12,28 +13,29 @@ function ThemeGlyph({ theme }: { theme: "light" | "dark" | "system" }) {
   return <IconMonitor size={14} />
 }
 
-function timeLabel(ts: number): string {
+function timeLabel(ts: number, lang: Lang): string {
   const d = new Date(ts * 1000)
   const now = new Date()
+  const locale = lang === "zh" ? "zh-CN" : "en-US"
   const sameDay = d.toDateString() === now.toDateString()
   if (sameDay) {
-    return d.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })
+    return d.toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit" })
   }
-  return d.toLocaleDateString("zh-CN", { month: "2-digit", day: "2-digit" })
+  return d.toLocaleDateString(locale, { month: "2-digit", day: "2-digit" })
 }
 
-function groupKey(ts: number): string {
+function groupKey(ts: number): TranslationKey {
   const d = new Date(ts * 1000)
   const now = new Date()
   const startOfDay = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime()
   const diffDays = Math.floor((startOfDay(now) - startOfDay(d)) / 86400000)
-  if (diffDays <= 0) return "今天"
-  if (diffDays === 1) return "昨天"
-  if (diffDays < 7) return "近 7 天"
-  return "更早"
+  if (diffDays <= 0) return "sidebar.today"
+  if (diffDays === 1) return "sidebar.yesterday"
+  if (diffDays < 7) return "sidebar.last7"
+  return "sidebar.earlier"
 }
 
-const GROUP_ORDER = ["今天", "昨天", "近 7 天", "更早"]
+const GROUP_ORDER: TranslationKey[] = ["sidebar.today", "sidebar.yesterday", "sidebar.last7", "sidebar.earlier"]
 
 export const Sidebar = memo(function Sidebar() {
   const sessions = useSessionStore((s) => s.sessions)
@@ -47,6 +49,7 @@ export const Sidebar = memo(function Sidebar() {
   const openCheckpoints = useUiStore((s) => s.openCheckpoints)
   const cycleTheme = useUiStore((s) => s.cycleTheme)
   const theme = useUiStore((s) => s.theme)
+  const lang = useUiStore((s) => s.lang)
   const showKeywords = useSessionStore((s) => s.status?.display?.show_keywords ?? true)
 
   const [query, setQuery] = useState("")
@@ -66,6 +69,7 @@ export const Sidebar = memo(function Sidebar() {
   }, [sessions, query])
 
   const currentId = status?.session_id
+  const themeLabel = t(theme === "light" ? "display.light" : theme === "dark" ? "display.dark" : "display.system", lang)
 
   return (
     <>
@@ -86,7 +90,7 @@ export const Sidebar = memo(function Sidebar() {
           <BrandMark size={28} />
           <span className="text-[15px] font-bold tracking-tight text-ink">Spark</span>
           <div className="ml-auto flex items-center gap-0.5">
-            <IconButton title="收起侧边栏" onClick={() => setSidebarOpen(false)} className="lg:hidden">
+            <IconButton title={t("sidebar.collapse", lang)} onClick={() => setSidebarOpen(false)} className="lg:hidden">
               <IconX size={16} />
             </IconButton>
           </div>
@@ -100,14 +104,14 @@ export const Sidebar = memo(function Sidebar() {
             className="flex h-9 w-full items-center justify-center gap-1.5 rounded-lg bg-hover text-sm font-medium text-ink transition-colors hover:bg-selected active:scale-[0.99]"
           >
             <IconPlus size={14} />
-            新建会话
+            {t("common.newSession", lang)}
           </button>
           <div className="relative">
             <IconSearch size={14} className="pointer-events-none absolute top-2.5 left-2.5 text-ink3" />
             <input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="搜索会话…"
+              placeholder={t("sidebar.searchPh", lang)}
               className="h-9 w-full rounded-lg border border-line bg-panel pr-7 pl-8 text-[13px] text-ink outline-none placeholder:text-ink3 focus:border-accent"
             />
             {query && (
@@ -127,12 +131,12 @@ export const Sidebar = memo(function Sidebar() {
           {groups.length === 0 && (
             <div className="flex flex-col items-center gap-2 py-10 text-center">
               <IconHistory size={22} className="text-ink3" />
-              <p className="text-xs text-ink3">{query ? "未找到匹配会话" : "暂无会话，开始第一次对话吧"}</p>
+              <p className="text-xs text-ink3">{query ? t("sidebar.noMatch", lang) : t("sidebar.empty", lang)}</p>
             </div>
           )}
           {groups.map((g) => (
             <div key={g.key} className="mt-3">
-              <div className="mb-1 px-1 text-[10.5px] font-semibold tracking-wider text-ink3 uppercase">{g.key}</div>
+              <div className="mb-1 px-1 text-[10.5px] font-semibold tracking-wider text-ink3 uppercase">{t(g.key, lang)}</div>
               <ul className="flex flex-col gap-0.5">
                 {g.items.map((s) => {
                   const active = s.id === currentId
@@ -150,7 +154,7 @@ export const Sidebar = memo(function Sidebar() {
                         )}
                       >
                         <span className="block truncate text-[13px] font-medium">
-                          {s.title && s.title !== "untitled" ? s.title : "新对话"}
+                          {s.title && s.title !== "untitled" ? s.title : t("common.newChat", lang)}
                         </span>
                         {showKeywords && s.keywords && (
                           <span className="mt-1 flex flex-wrap gap-1">
@@ -166,7 +170,7 @@ export const Sidebar = memo(function Sidebar() {
                           </span>
                         )}
                         <span className="mt-0.5 block text-[10px] text-ink3">
-                          {timeLabel(s.updated_at)} · {s.model}
+                          {timeLabel(s.updated_at, lang)} · {s.model}
                         </span>
                       </button>
                       <div className="absolute top-1.5 right-1.5">
@@ -181,7 +185,7 @@ export const Sidebar = memo(function Sidebar() {
                               }}
                               className="rounded px-1.5 py-0.5 text-[10px] font-bold text-err hover:bg-err/10"
                             >
-                              删除
+                              {t("common.delete", lang)}
                             </button>
                             <button
                               type="button"
@@ -191,13 +195,13 @@ export const Sidebar = memo(function Sidebar() {
                               }}
                               className="rounded px-1.5 py-0.5 text-[10px] text-ink2 hover:bg-hover"
                             >
-                              取消
+                              {t("common.cancel", lang)}
                             </button>
                           </span>
                         ) : (
                           <button
                             type="button"
-                            title="删除会话"
+                            title={t("sidebar.deleteSession", lang)}
                             onClick={(e) => {
                               e.stopPropagation()
                               setConfirmId(s.id)
@@ -227,7 +231,7 @@ export const Sidebar = memo(function Sidebar() {
               {status?.model?.slice(0, 2).toUpperCase() ?? "AI"}
             </span>
             <div className="min-w-0">
-              <p className="truncate text-[12px] font-semibold text-ink">{status?.model ?? "未配置模型"}</p>
+              <p className="truncate text-[12px] font-semibold text-ink">{status?.model ?? t("sidebar.noModel", lang)}</p>
               <p className="truncate text-[10.5px] text-ink3" title={status?.workdir}>
                 {status?.workdir ?? ""}
               </p>
@@ -240,11 +244,11 @@ export const Sidebar = memo(function Sidebar() {
               className="flex h-8 items-center justify-center gap-1.5 rounded-lg bg-hover text-[12px] font-medium text-ink transition-colors hover:bg-selected active:scale-[0.99]"
             >
               <IconSettings size={13} />
-              设置
+              {t("settings.title", lang)}
             </button>
             <button
               type="button"
-              title="检查点回滚"
+              title={t("sidebar.checkpoint", lang)}
               onClick={openCheckpoints}
               className="flex h-8 items-center justify-center rounded-lg bg-hover text-ink2 transition-colors hover:bg-selected active:scale-[0.99]"
             >
@@ -252,7 +256,7 @@ export const Sidebar = memo(function Sidebar() {
             </button>
             <button
               type="button"
-              title={`主题：${theme === "light" ? "亮色" : theme === "dark" ? "暗色" : "跟随系统"}（点击切换）`}
+              title={t("sidebar.themeTitle", lang, { theme: themeLabel })}
               onClick={cycleTheme}
               className="flex h-8 items-center justify-center rounded-lg bg-hover text-ink2 transition-colors hover:bg-selected active:scale-[0.99]"
             >

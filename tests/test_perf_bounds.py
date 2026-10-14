@@ -204,6 +204,9 @@ def test_usage_repeated_calls_stay_bounded_for_large_history(tmp_path: Path) -> 
 
     loop = _usage_loop(tmp_path)
     loop.history = [ChatMessage(role="user", content="x" * 1_000_000)]
+    # 预热一次：首次 _usage 含一次性初始化（环境探测子进程、system prompt 构建、
+    # 历史 token 首次全量编码）。本用例校验的是"重复调用保持有界"，初始化不计入。
+    loop._usage()
     started = time.perf_counter()
     usages = [loop._usage() for _ in range(10)]
     elapsed = time.perf_counter() - started

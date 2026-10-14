@@ -1,10 +1,13 @@
 import { memo, useState } from "react"
 import { Spinner, cls } from "./ui"
 import { IconChevronRight } from "./icons"
+import { useUiStore } from "../store/uiStore"
+import { t } from "../i18n"
 
 /** 思维链折叠块（reasoning） */
 export const ThinkingBlock = memo(function ThinkingBlock({ text, streaming }: { text: string; streaming?: boolean }) {
   const [open, setOpen] = useState(false)
+  const lang = useUiStore((s) => s.lang)
   return (
     <div className="my-1 overflow-hidden rounded-lg border border-line bg-panel">
       <button
@@ -17,8 +20,8 @@ export const ThinkingBlock = memo(function ThinkingBlock({ text, streaming }: { 
           <IconChevronRight size={12} />
         </span>
         {streaming ? <Spinner size={11} className="text-accent" /> : <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-warn" />}
-        <span className="text-xs font-medium text-ink2">思考过程</span>
-        <span className="ml-auto text-[10px] text-ink3">{streaming ? "思考中…" : `${text.length} 字`}</span>
+        <span className="text-xs font-medium text-ink2">{t("common.thinkingProcess", lang)}</span>
+        <span className="ml-auto text-[10px] text-ink3">{streaming ? t("common.thinking", lang) : t("common.charCount", lang, { n: text.length })}</span>
       </button>
       {open && (
         <div className="anim-fade border-t border-line px-3 py-2">

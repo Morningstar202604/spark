@@ -156,6 +156,18 @@ class OpenAICompatProvider:
         self.api_key = api_key
         self.max_retries = max_retries
 
+    def _litellm_model(self) -> tuple[str, str | None]:
+        """Return ``(model, custom_llm_provider)`` for the LiteLLM call.
+
+        裸模型名一律按 OpenAI 兼容处理（''api_base'' 已显式给出）：LiteLLM 只能
+        按内置规则推断 provider，任何自定义模型名（glm-5.3-flash、Qwen-… 等）
+        都会直接报 "LLM Provider NOT provided"。带 "/" 的名字视为用户显式使用
+        LiteLLM 前缀语法（openai/xxx、deepseek/xxx），原样尊重。
+        """
+        if "/" in self.model:
+            return self.model, None
+        return self.model, "openai"
+
     # -- public interface (Provider protocol) ----------------------------------
 
     @staticmethod
@@ -237,8 +249,9 @@ class OpenAICompatProvider:
         last_exc: Exception | None = None
         for attempt in range(self.max_retries + 1):
             try:
+                model_arg, provider_hint = self._litellm_model()
                 completion_kwargs: dict[str, Any] = dict(
-                    model=self.model,
+                    model=model_arg,
                     messages=_to_openai(messages),
                     tools=tools or None,
                     stream=True,
@@ -248,6 +261,8 @@ class OpenAICompatProvider:
                     drop_params=True,  # pass through non-standard fields (e.g. reasoning_content)
                     timeout=120.0,  # httpx.Timeout(120.0) equivalent for LiteLLM
                 )
+                if provider_hint:
+                    completion_kwargs["custom_llm_provider"] = provider_hint
                 if effort:
                     completion_kwargs["reasoning_effort"] = effort
                     if "deepseek" in self.model.lower():

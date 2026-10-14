@@ -279,8 +279,6 @@ spark/
 │   ├── API.md               # HTTP API 参考
 │   ├── CONFIG.md            # 配置参考
 │   ├── INSTALL.md           # 安装与打包
-│   ├── AUDIT-2026-10-10.md  # 历史审计记录
-│   ├── CONSOLIDATION-PLAN.md# 双树收敛路线图（历史记录）
 │   └── assets/
 │       ├── architecture.svg # 整体架构图
 │       └── turn-flow.svg    # 回合流程图

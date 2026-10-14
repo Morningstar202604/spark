@@ -1,11 +1,14 @@
 import { memo } from "react"
 import { cls } from "./ui"
 import { useSessionStore } from "../store/sessionStore"
+import { useUiStore } from "../store/uiStore"
+import { t } from "../i18n"
 
 /** 上下文用量环（顶部） */
 export const ContextMeter = memo(function ContextMeter() {
   const context = useSessionStore((s) => s.status?.context)
   const show = useSessionStore((s) => s.status?.display?.show_context ?? true)
+  const lang = useUiStore((s) => s.lang)
   if (!show || !context) return null
 
   const { used, limit, percent } = context
@@ -19,7 +22,7 @@ export const ContextMeter = memo(function ContextMeter() {
   return (
     <button
       type="button"
-      title={`上下文 ${Math.round(used / 1000)}k / ${Math.round(limit / 1000)}k tokens（${pct}%），超过阈值自动压缩`}
+      title={t("context.meterTitle", lang, { used: Math.round(used / 1000), limit: Math.round(limit / 1000), percent: pct })}
       className="group flex items-center gap-1.5 rounded-full px-1.5 py-1 transition-colors hover:bg-hover"
     >
       <span className="relative flex h-5.5 w-5.5 items-center justify-center">

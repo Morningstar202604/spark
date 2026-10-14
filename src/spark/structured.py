@@ -24,7 +24,7 @@ LiteLLM completion path into a schema-validated output channel:
 from __future__ import annotations
 
 import logging
-from typing import Any, Generic, TypeVar
+from typing import Any, TypeVar, cast
 
 import instructor
 import litellm
@@ -70,7 +70,10 @@ def get_async_client(
     key = mode or instructor.Mode.JSON
     client = _CLIENT_CACHE.get(key)
     if client is None:
-        client = instructor.from_litellm(litellm.acompletion, mode=key)
+        client = cast(
+            instructor.AsyncInstructor,
+            instructor.from_litellm(litellm.acompletion, mode=key),
+        )
         _CLIENT_CACHE[key] = client
     return client
 

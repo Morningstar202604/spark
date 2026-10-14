@@ -6,6 +6,7 @@ import { ptyClose, ptyOpen, ptyResize, ptyWrite, streamPty } from "../api"
 import { Button, IconButton, Spinner } from "./ui"
 import { IconTerminal, IconX } from "./icons"
 import { useUiStore } from "../store/uiStore"
+import { t } from "../i18n"
 
 const TAB_ID = "main"
 
@@ -19,18 +20,19 @@ const TAB_ID = "main"
 export const Terminal = memo(function Terminal() {
   const open = useUiStore((s) => s.terminalOpen)
   const close = useUiStore((s) => s.closeTerminal)
+  const lang = useUiStore((s) => s.lang)
   const containerRef = useRef<HTMLDivElement>(null)
   const xtermRef = useRef<XTerm | null>(null)
   const fitRef = useRef<FitAddon | null>(null)
   const abortRef = useRef<AbortController | null>(null)
   const [ready, setReady] = useState(false)
-  const [exited, setExited] = useState(false)
+  const exitedRef = useRef(false)
   const [cwd, setCwd] = useState("")
 
   useEffect(() => {
     if (!open) return
     setReady(false)
-    setExited(false)
+    exitedRef.current = false
     const el = containerRef.current
     if (!el) return
 
@@ -60,7 +62,7 @@ export const Terminal = memo(function Terminal() {
         const info = await ptyOpen(TAB_ID)
         setCwd(info.cwd)
       } catch {
-        term.writeln("\x1b[31m[无法连接后端 PTY——Windows 不支持，或 pty extras 未安装]\x1b[0m")
+        term.writeln(`\x1b[31m${t("terminal.connectFailed", useUiStore.getState().lang)}\x1b[0m`)
         setReady(true)
         return
       }
@@ -84,8 +86,8 @@ export const Terminal = memo(function Terminal() {
             if (ev.type === "pty_data") {
               term.write(ev.data)
             } else if (ev.type === "pty_exit") {
-              setExited(true)
-              term.writeln("\r\n\x1b[90m[进程已退出 —— 按任意键在同一标签页重启]\x1b[0m")
+              exitedRef.current = true
+              term.writeln(`\r\n\x1b[90m${t("terminal.exited", useUiStore.getState().lang)}\x1b[0m`)
             }
           },
           ac.signal,
@@ -96,9 +98,9 @@ export const Terminal = memo(function Terminal() {
     }
 
     const onDataSub = term.onData((d) => {
-      if (exited) {
+      if (exitedRef.current) {
         // 退出后按键重启 shell
-        setExited(false)
+        exitedRef.current = false
         void ptyOpen(TAB_ID).catch(() => undefined)
         return
       }
@@ -135,11 +137,11 @@ export const Terminal = memo(function Terminal() {
         className="anim-fade flex h-[82vh] w-full sm:w-[min(94vw,980px)] flex-col overflow-hidden border-t border-line bg-[#0d1117] sm:rounded-2xl sm:border shadow-[var(--shadow)]"
         onClick={(e) => e.stopPropagation()}
         role="dialog"
-        aria-label="内置终端"
+        aria-label={t("terminal.title", lang)}
       >
         <div className="flex items-center gap-2 border-b border-white/10 px-4 py-2.5">
           <IconTerminal size={15} className="text-accent" />
-          <span className="text-sm font-semibold text-ink">内置终端</span>
+          <span className="text-sm font-semibold text-ink">{t("terminal.title", lang)}</span>
           {cwd && <span className="ml-1 hidden font-mono text-[11px] text-ink3 sm:inline">{cwd}</span>}
           {!ready && <Spinner size={12} className="ml-2 text-ink3" />}
           <div className="ml-auto flex items-center gap-1.5">
@@ -148,14 +150,14 @@ export const Terminal = memo(function Terminal() {
               variant="ghost"
               onClick={() => {
                 void ptyClose(TAB_ID).then(() => {
-                  setExited(true)
-                  xtermRef.current?.writeln("\r\n\x1b[90m[会话已结束 —— 按任意键重启]\x1b[0m")
+                  exitedRef.current = true
+                  xtermRef.current?.writeln(`\r\n\x1b[90m${t("terminal.sessionEnded", lang)}\x1b[0m`)
                 })
               }}
             >
-              结束会话
+              {t("terminal.closeSession", lang)}
             </Button>
-            <IconButton title="关闭" onClick={close}>
+            <IconButton title={t("common.close", lang)} onClick={close}>
               <IconX size={15} />
             </IconButton>
           </div>

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import tarfile
 import tempfile
@@ -14,7 +15,11 @@ from stat import S_ISREG
 
 from spark.config import default_home
 
-SNAPSHOT_DIR = default_home() / "checkpoints"
+logger = logging.getLogger(__name__)
+
+# ``None`` 表示按 default_home() 动态解析（SPARK_HOME 在进程内变化时须生效）；
+# 测试可 monkeypatch 为本 Path 覆盖。
+SNAPSHOT_DIR: Path | None = None
 MAX_SNAPSHOT_BYTES = 50 * 1024 * 1024
 MANIFEST_VERSION = 1
 MANIFEST_SUFFIX = ".manifest.json"
@@ -29,9 +34,15 @@ SKIP_DIRS = {
     "target",
 }
 
+# SQLite 的 WAL/SHM 是运行时临时文件：活跃时快照内容不一致，且恢复写回会与
+# 正在使用的 db 抢锁（Windows 上表现为 Errno 22）——按后缀排除（可重建）。
+_SKIP_FILE_SUFFIXES = ("-shm", "-wal")
+
 
 def _snapshot_dir() -> Path:
-    return SNAPSHOT_DIR
+    if SNAPSHOT_DIR is not None:
+        return SNAPSHOT_DIR
+    return default_home() / "checkpoints"
 
 
 def _root_key(root: Path) -> str:
@@ -138,6 +149,8 @@ def _iter_workdir_files(root: Path, excluded_root: Path | None = None):
             kept_dirs.append(name)
         dirnames[:] = sorted(kept_dirs)
         for name in sorted(filenames):
+            if name.endswith(_SKIP_FILE_SUFFIXES):
+                continue
             path = current / name
             try:
                 stat_result = path.lstat()
@@ -329,6 +342,7 @@ def restore_workdir(workdir: Path, snapshot_id: str) -> dict:
             _manifest_archived_paths(workdir, baseline)
             archive_ids.insert(0, baseline_id)
     restored = 0
+    restore_errors: list[str] = []
     with ExitStack() as stack:
         opened: list[tuple[str, tarfile.TarFile, list[tarfile.TarInfo]]] = []
         for archive_id in archive_ids:
@@ -351,7 +365,16 @@ def restore_workdir(workdir: Path, snapshot_id: str) -> dict:
         for _archive_id, archive, members in opened:
             for member in members:
                 if member.isfile():
-                    archive.extract(member, workdir, filter="data")
+                    try:
+                        archive.extract(member, workdir, filter="data")
+                    except (OSError, tarfile.TarError) as exc:
+                        # 单文件恢复失败（被占用/权限）不应让整次回滚崩溃；
+                        # 收集进 errors 由调用方呈现（其余文件继续恢复）。
+                        logger.warning(
+                            "checkpoint restore skipped %s: %s", member.name, exc
+                        )
+                        restore_errors.append(f"{member.name}: {exc}")
+                        continue
                     restored += 1
         if manifest is None:
             archived = {
@@ -377,6 +400,7 @@ def restore_workdir(workdir: Path, snapshot_id: str) -> dict:
         "snapshot_id": snapshot_id,
         "restored_files": restored,
         "removed_new_files": removed,
+        "errors": restore_errors,
     }
 
 

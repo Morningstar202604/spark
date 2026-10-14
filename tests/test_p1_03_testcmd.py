@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from spark.models import ChatDelta, ToolCall, ToolResult
+from spark.models import ChatDelta, ToolResult
 from spark.providers.mock import MockProvider
 from spark.sandbox import WorkdirSandbox
 from spark.slash import handle_test, parse_slash

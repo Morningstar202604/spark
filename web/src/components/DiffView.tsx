@@ -1,5 +1,7 @@
 import { memo, useMemo } from "react"
 import { cls } from "./ui"
+import { useUiStore } from "../store/uiStore"
+import { t } from "../i18n"
 
 interface DiffLine {
   type: "header" | "hunk" | "context" | "add" | "remove"
@@ -50,6 +52,7 @@ function parseDiff(raw: string): DiffLine[] {
 
 /** 自绘 unified diff 视图（行号 + 增删高亮），用于工具结果与审批卡片。 */
 export const DiffView = memo(function DiffView({ diff, maxLines = 400 }: { diff: string; maxLines?: number }) {
+  const lang = useUiStore((s) => s.lang)
   const rows = useMemo(() => parseDiff(diff), [diff])
   const clipped = rows.length > maxLines
   const shown = clipped ? rows.slice(0, maxLines) : rows
@@ -71,7 +74,7 @@ export const DiffView = memo(function DiffView({ diff, maxLines = 400 }: { diff:
           {stats.add > 0 && <span className="mr-2 text-ok">+{stats.add}</span>}
           {stats.del > 0 && <span className="text-err">-{stats.del}</span>}
         </span>
-        <span className="ml-auto text-[10px] text-ink3">{clipped ? `已截断（共 ${rows.length} 行）` : `${rows.length} 行`}</span>
+        <span className="ml-auto text-[10px] text-ink3">{clipped ? t("diff.truncated", lang, { n: rows.length }) : t("common.lines", lang, { n: rows.length })}</span>
       </div>
       <div className="max-h-[320px] overflow-auto font-mono text-[11px] leading-[1.5]">
         <table className="w-full border-collapse">
@@ -118,7 +121,7 @@ export const DiffView = memo(function DiffView({ diff, maxLines = 400 }: { diff:
             })}
           </tbody>
         </table>
-        {clipped && <p className="px-3 py-2 text-[10px] text-ink3">…diff 过长已截断，完整内容见对话</p>}
+        {clipped && <p className="px-3 py-2 text-[10px] text-ink3">{t("diff.truncatedNote", lang)}</p>}
       </div>
     </div>
   )

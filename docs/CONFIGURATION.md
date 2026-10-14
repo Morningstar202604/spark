@@ -61,7 +61,7 @@ embedding_model = "text-embedding-3-small"
 auto_extract = true            # 每轮结束后自动抽取记忆
 
 # ─── MCP 服务器 ───────────────────────────────────────────────
-# [[mcp.servers]]
+# [[mcp_servers]]
 # name = "filesystem"
 # command = "npx"
 # args = ["-y", "@modelcontextprotocol/server-filesystem", "/home/user"]
@@ -85,14 +85,15 @@ auto_extract = true            # 每轮结束后自动抽取记忆
 # api_key = ""
 ```
 
-## 环境石量
+## 环境变量
 
 | 变量 | 说明 |
 |------|------|
+| `SPARK_HOME` | 数据目录（默认 `~/.spark`）；config.toml/.env/会话库均在此 |
 | `SPARK_API_KEY` | API 密钥（通用备选，优先级低于 config） |
 | `SPARK_BASE_URL` | 覆盖 provider.base_url |
 | `SPARK_MODEL` | 覆盖 provider.model |
-| `SPARK_CONFIG_PATH` | 自定义配置文件路径 |
+| `SPARK_AGENT__*` / `SPARK_CONTEXT__*` 等 | 嵌套覆盖，双下划线分层（如 `SPARK_AGENT__MAX_TOOL_ROUNDS=50`） |
 
 ## 沙箱模式详解
 
@@ -110,6 +111,9 @@ auto_extract = true            # 每轮结束后自动抽取记忆
 | `suggest` | 敏感操作（写文件、shell）弹出确认对话框 |
 | `auto-edit` | 只读操作自动放行，写操作需确认 |
 | `full-auto` | 全部自动放行，适合 CI/CD 或可信环境 |
+| `plan-only` | 只读允许；写/执行一律不执行，仅输出计划（plan mode） |
+| `approve-plan` | 先出计划等待批准，批准后按 auto-edit 语义自动执行 |
+| `manual` | 写/执行逐条人工确认 |
 
 ## API 端点
 
@@ -121,21 +125,25 @@ auto_extract = true            # 每轮结束后自动抽取记忆
 | POST | `/api/cancel` | 停止当前生成 |
 | POST | `/api/approval` | 回复审批决策 |
 | GET | `/api/sessions` | 列出会话 |
+| GET | `/api/history` | 当前会话消息历史 |
 | POST | `/api/sessions/new` | 创建新会话 |
 | POST | `/api/sessions/switch` | 切换会话 |
-| DELETE | `/api/sessions/:id` | 删除会话 |
+| POST | `/api/sessions/delete` | 删除会话 |
 | GET | `/api/checkpoints` | 列出检查点 |
 | POST | `/api/checkpoints/rollback` | 回滚到检查点 |
 | GET | `/api/config` | 获取当前配置 |
-| PUT | `/api/settings` | 保存设置 |
+| POST | `/api/settings` | 保存设置 |
 | GET | `/api/models` | 列出模型档案 |
 | POST | `/api/models/save` | 保存模型档案 |
-| DELETE | `/api/models/:id` | 删除模型档案 |
+| POST | `/api/models/delete` | 删除模型档案 |
 | POST | `/api/models/activate` | 激活模型档案 |
 | GET | `/api/memory` | 查看记忆库 |
-| PUT | `/api/memory` | 保存记忆 |
+| POST | `/api/memory` | 保存/删除/整理记忆 |
 | GET | `/api/agents_md` | 获取 AGENTS.md |
-| PUT | `/api/agents_md` | 更新 AGENTS.md |
+| POST | `/api/agents_md` | 更新 AGENTS.md |
+| GET | `/api/fs/tree` `/api/fs/read` `/api/browse` | 文件查看器 / 网页阅读（只读） |
+| POST | `/api/pty/open` `/write` `/resize` `/close`，GET `/api/pty/stream` | 内置终端（PTY） |
+| POST | `/api/mcp/registry/search` | MCP 注册表搜索 |
 | POST | `/api/test` | 测试模型连通性 |
 
 ## 本地数据文件

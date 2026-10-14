@@ -114,7 +114,7 @@ def test_doctor_passes_with_complete_config(
     assert "配置" in result.stdout or "config" in result.stdout.lower()
 
 
-def test_doctor_reports_missing_key_with_action(
+def test_doctor_warns_missing_key_with_action(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(cli, "default_home", lambda: tmp_path / "home")
@@ -126,8 +126,9 @@ def test_doctor_reports_missing_key_with_action(
     )
     monkeypatch.delenv("SPARK_API_KEY", raising=False)
     result = runner.invoke(cli.app, ["doctor", "--config", str(cfg_path), "--no-probe"])
-    assert result.exit_code == 1
+    assert result.exit_code == 0
     assert "spark init" in result.stdout
+    assert "演示模式" in result.stdout
 
 
 def test_doctor_warns_when_workdir_missing(

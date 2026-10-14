@@ -12,7 +12,6 @@ while preserving:
 from __future__ import annotations
 
 import logging
-from concurrent.futures import ThreadPoolExecutor
 from typing import Any, cast
 
 import litellm
@@ -30,6 +29,7 @@ from llama_index.core.base.llms.types import (
 from llama_index.core.llms import LLM
 from llama_index.core.memory import ChatSummaryMemoryBuffer
 
+from spark.asyncutil import run_coroutine_sync
 from spark.models import ChatMessage as SparkChatMessage
 from spark.models import MessageRole
 
@@ -148,22 +148,9 @@ class LlmAdapter(LLM):
         tools: list[dict],
     ) -> str:
         """Run the async collect safely whether or not a loop is already running."""
-        import asyncio
-
-        coro = self._acollect_text(spark_messages, tools)
-
-        try:
-            asyncio.get_running_loop()
-            loop_running = True
-        except RuntimeError:
-            loop_running = False
-
-        if loop_running:
-            # Already inside an async context — run in a dedicated thread so
-            # ``asyncio.run`` does not raise "loop already running".
-            with ThreadPoolExecutor(max_workers=1) as pool:
-                return pool.submit(lambda: asyncio.run(coro)).result(timeout=120)
-        return asyncio.run(coro)
+        return run_coroutine_sync(
+            self._acollect_text(spark_messages, tools), timeout=120
+        )
 
     @staticmethod
     def _to_spark_messages(llama_messages: list[LlamaChatMessage]) -> list[SparkChatMessage]:

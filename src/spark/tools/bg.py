@@ -12,6 +12,7 @@ from typing import Any
 
 from spark.models import ToolResult
 from spark.sandbox import WorkdirSandbox
+from spark.tools._common import clip_text
 
 logger = logging.getLogger(__name__)
 
@@ -71,12 +72,6 @@ def _persist_state(job: dict) -> None:
             del _PERSIST_ERRORS[:len(_PERSIST_ERRORS) - _PERSIST_MAX_ERRORS]
 
 
-def _clip(text: str) -> str:
-    if len(text) <= MAX_BUFFER:
-        return text
-    return text[-MAX_BUFFER:]
-
-
 def _kill_all_running() -> None:
     with JOBS_LOCK:
         running = [j for j in JOBS.values() if j["finished_at"] is None]
@@ -126,7 +121,7 @@ def _start_background(sandbox: WorkdirSandbox, command: str, cwd: str | None) ->
             assert stdout is not None
             for line in stdout:
                 with JOBS_LOCK:
-                    job["output"] = _clip(job["output"] + line)
+                    job["output"] = clip_text(job["output"] + line, MAX_BUFFER, keep_tail=True)
         except Exception:
             # 进程输出流异常时强制标记失败，避免任务卡在 running 状态
             logger.warning("后台作业 %s 输出流读取失败，标记为失败", job.get("id"), exc_info=True)

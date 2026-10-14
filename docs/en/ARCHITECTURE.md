@@ -2,8 +2,7 @@
 
 > 中文：[docs/ARCHITECTURE.md](../ARCHITECTURE.md)
 > This document mirrors the **`src/spark`** tree — the single source of truth
-> since the legacy root-level `spark/` package was retired (see
-> `docs/CONSOLIDATION-PLAN.md`).
+> since the legacy root-level `spark/` package was retired (2026-10-09).
 
 ## Overview
 

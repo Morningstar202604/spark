@@ -15,6 +15,7 @@ from spark.config import SparkConfig
 from spark.core.compact import Compactor
 from spark.core.context import (
     build_messages,
+    invalidate_system_prompt_cache,
     load_agents_md,
     system_prompt,
 )
@@ -31,10 +32,13 @@ from spark.models import (
 from spark.policy import (
     NEVER_PERSIST_ALLOW,
     READONLY_TOOLS,
+    SHELL_TOOLS,
+    WRITE_TOOLS,
     call_signature,
     decide,
 )
 from spark.providers.base import Provider
+from spark.sandbox import safe_bare_filename
 from spark.store import SessionStore
 from spark.tools.registry import ToolContext, ToolRegistry
 
@@ -276,11 +280,7 @@ class AgentLoop:
         name = self.cfg.context.agents_md
         base = self.workdir.resolve()
         prefix = (name, self.cfg.context.max_fragment_chars, str(base))
-        if (
-            not name
-            or any(separator in name for separator in ("/", "\\", ":"))
-            or ".." in name
-        ):
+        if not name or not safe_bare_filename(name):
             return prefix + ("invalid",)
         try:
             resolved = (base / name).resolve()
@@ -588,12 +588,14 @@ class AgentLoop:
                     data=self._budget_state(),
                 )
                 return
+            self._notify_safe("turn_end", {"content": assistant.content or ""})
             yield TurnEvent(type="turn_end", text=assistant.content)
             logger.info("turn_end session=%s", sid_prefix)
             return
 
     def _maybe_auto_checkpoint(self, assistant_id: int) -> None:
         """Snapshot the workdir + conversation after turns that touched files or ran shell."""
+        snapshot_id: str | None = None
         try:
             from spark.core.checkpoints import make_checkpoint_record
 
@@ -761,14 +763,15 @@ class AgentLoop:
             # 其 body 作为子代理的 system prompt，tools 字段收敛子代理工具集。
             from spark.agents import (
                 AgentFileError,
+                DeclaredAgent,
                 get_declared_agent,
                 subagent_system_prompt,
             )
 
-            items: list[tuple[str, object]] = []  # (prompt, DeclaredAgent|None)
+            items: list[tuple[str, DeclaredAgent | None]] = []
             task_error = ""
 
-            def _resolve_agent(agent_name: str) -> tuple[object, str]:
+            def _resolve_agent(agent_name: str) -> tuple[DeclaredAgent | None, str]:
                 try:
                     resolved = get_declared_agent(self.workdir, agent_name)
                 except AgentFileError as exc:
@@ -868,6 +871,21 @@ class AgentLoop:
                 },
             )
         _elapsed = time.monotonic() - _tool_call_start
+        self._notify_safe(
+            "post_tool",
+            {
+                "tool": call.name,
+                "ok": result.ok,
+                "elapsed_ms": int(_elapsed * 1000),
+            },
+        )
+        if result.ok and (
+            call.name in WRITE_TOOLS
+            or call.name in SHELL_TOOLS
+            or call.name.startswith(("worktree_", "task_", "bg_"))
+        ):
+            # 工作区可能已变化：失效系统提示缓存（含 repo_map / skills / subagents）
+            invalidate_system_prompt_cache()
         logger.info(
             "tool_call name=%s args=%s elapsed=%.3fs ok=%s",
             call.name,

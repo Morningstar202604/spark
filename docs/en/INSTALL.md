@@ -44,7 +44,7 @@ bash scripts/build.sh            # output: dist/spark/spark
 ## First run
 
 1. Open the printed `http://127.0.0.1:PORT` (loopback-only by default; external preview needs an explicit `--host 0.0.0.0`)
-2. Settings → pick a model preset (DeepSeek / Qwen / GLM / Kimi / Doubao / Unisound / Ollama / custom), paste the API key
+2. Settings → pick a model preset (DeepSeek / Qwen / GLM / Kimi / Doubao / Agnes AI / Ollama / custom), paste the API key
 3. Point the working directory at your project
 4. Create a session and start — every write and command is gated by approval
 

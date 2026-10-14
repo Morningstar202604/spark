@@ -5,6 +5,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
 
+from spark import git_memory
 from spark.config import SparkConfig
 from spark.edit.tool import ApplyEditArgs, apply_edit, apply_edit_diff
 from spark.models import ToolCall, ToolResult
@@ -237,10 +238,10 @@ class ToolRegistry:
                 ["message"]),
             _schema("run_tests",
                 "Run the repository's test suite and return pass/fail plus captured output. "
-                "Detects pytest / npm test / make test automatically; pass 'command' to override. "
+                "Detects pytest / npm test / make test automatically; the command always comes "
+                "from repository signals and cannot be overridden. "
                 "Use this to close the loop after a code change instead of guessing whether the change works.",
                 {"path": {"type": "string", "description": "subdirectory, default '.'"},
-                 "command": {"type": "string", "description": "optional explicit command override"},
                  "timeout_sec": {"type": "integer", "description": "default 600"}},
                 []),
             _schema("worktree_list", "List git worktrees attached to this repository.",
@@ -257,6 +258,28 @@ class ToolRegistry:
                 {"worktree": {"type": "string", "description": "worktree path returned by worktree_create"},
                  "force": {"type": "boolean", "description": "remove even when dirty"}},
                 ["worktree"]),
+            _schema("task_begin",
+                "Open a per-task branch + isolated worktree (git-backed task memory). "
+                "Use for multi-step work that should land as one reviewable branch.",
+                {"task": {"type": "string", "description": "free-form task id, slugged to a branch"},
+                 "path": {"type": "string", "description": "repo subdirectory, default '.'"},
+                 "base": {"type": "string", "description": "base ref, default current HEAD"}},
+                ["task"]),
+            _schema("task_step_commit",
+                "Auto-commit one step inside the task worktree, gated by the repo's tests.",
+                {"worktree": {"type": "string", "description": "worktree path returned by task_begin"},
+                 "step": {"type": "string", "description": "what this step did"},
+                 "run_tests": {"type": "boolean", "description": "run the test gate first, default true"},
+                 "timeout_sec": {"type": "integer", "description": "default 600"}},
+                ["worktree", "step"]),
+            _schema("task_finish",
+                "Close a task: on success keep the worktree and return merge-back guidance; "
+                "on failure force-remove the worktree and abandon the branch.",
+                {"worktree": {"type": "string"},
+                 "branch": {"type": "string"},
+                 "success": {"type": "boolean", "description": "default true"},
+                 "abandon_branch": {"type": "boolean", "description": "on failure, also delete the branch (default true)"}},
+                ["worktree", "branch"]),
             _schema("load_skill",
                 "Load a skill's full content by name. Use this when the system prompt "
                 "shows <available_skills> and you need the full instructions for a specific skill. "
@@ -348,6 +371,9 @@ class ToolRegistry:
             "worktree_list": lambda a: gitops.worktree_list(ctx.sandbox, gitops.WorktreeListArgs.model_validate(a)),
             "worktree_create": lambda a: gitops.worktree_create(ctx.sandbox, gitops.WorktreeCreateArgs.model_validate(a)),
             "worktree_remove": lambda a: gitops.worktree_remove(ctx.sandbox, gitops.WorktreeRemoveArgs.model_validate(a)),
+            "task_begin": lambda a: git_memory.task_begin(ctx.sandbox, git_memory.TaskBeginArgs.model_validate(a)),
+            "task_step_commit": lambda a: git_memory.task_step_commit(ctx.sandbox, git_memory.TaskStepCommitArgs.model_validate(a)),
+            "task_finish": lambda a: git_memory.task_finish(ctx.sandbox, git_memory.TaskFinishArgs.model_validate(a)),
             # --- search ---
             "grep": lambda a: search.grep_tool(ctx.sandbox, search.GrepArgs.model_validate(a)),
             "glob": lambda a: search.glob_tool(ctx.sandbox, search.GlobArgs.model_validate(a)),

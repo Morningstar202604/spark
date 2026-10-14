@@ -10,7 +10,6 @@ from pathlib import Path
 
 import pytest
 
-from spark.sandbox import WorkdirSandbox
 from spark.edit import (
     ApplyEditArgs,
     EditConflictError,
@@ -26,6 +25,7 @@ from spark.edit import (
     parse_blocks,
     unified_diff,
 )
+from spark.sandbox import WorkdirSandbox
 
 
 def _block(search: str, replace: str) -> str:
@@ -126,7 +126,7 @@ def test_apply_blocks_atomic_on_failure() -> None:
 
 def test_compute_whole_file_when_no_blocks() -> None:
     old = "old\n"
-    res = compute_new_text(old, brand_new := "brand\nnew\n")
+    res = compute_new_text(old, "brand\nnew\n")
     assert res.mode == "whole_file"
     assert res.new_text == "brand\nnew\n"
 

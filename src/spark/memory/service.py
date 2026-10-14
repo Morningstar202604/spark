@@ -1,14 +1,15 @@
 """Memory service: auto-extraction, retrieval, consolidation, and manual CRUD."""
 from __future__ import annotations
 
-import asyncio
 import logging
 import re
 import threading
 import time
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
+from spark.asyncutil import run_coroutine_sync
 from spark.config import SparkConfig
 from spark.memory.extractor import (
     consolidate_group,
@@ -40,22 +41,6 @@ class MemoryService:
         self.embedding_checked_at = 0.0
         self._lock = threading.RLock()
 
-    @staticmethod
-    def _safe_async_run(coro):
-        """Run *coroutine* safely from a sync context.
-
-        If called from a running event loop (e.g. nested in async code),
-        fall back to a new thread + asyncio.run to avoid
-        ``asyncio.run() cannot be called from a running event loop``.
-        """
-        try:
-            asyncio.get_running_loop()
-        except RuntimeError:
-            return asyncio.run(coro)
-        import concurrent.futures
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-            return pool.submit(lambda: asyncio.run(coro)).result(timeout=120)
-
     # ---------- embeddings ----------
 
     def _llm_ready(self) -> bool:
@@ -78,39 +63,17 @@ class MemoryService:
         p = self.cfg.provider
 
         def _run_embed():
-            return asyncio.run(
-                embed_texts(
-                    base_url=p.base_url,
-                    api_key=p.api_key or "ollama",
-                    model=self.cfg.memory.embedding_model,
-                    texts=texts,
-                )
+            return embed_texts(
+                base_url=p.base_url,
+                api_key=p.api_key or "ollama",
+                model=self.cfg.memory.embedding_model,
+                texts=texts,
             )
 
         try:
-            try:
-                asyncio.get_running_loop()
-            except RuntimeError:
-                vecs = _run_embed()
-            else:
-                result: list = [None]
-                exc_box: list = []
-
-                def _worker() -> None:
-                    try:
-                        result[0] = _run_embed()
-                    except Exception as exc:
-                        exc_box.append(exc)
-
-                th = threading.Thread(target=_worker, daemon=True)
-                th.start()
-                th.join(timeout=60)
-                if exc_box:
-                    vecs = None
-                else:
-                    vecs = result[0]
+            vecs = run_coroutine_sync(_run_embed(), timeout=60)
         except Exception:
-            # 线程超时或异常时降级为不可用
+            # 超时或异常时降级为不可用
             logger.warning("embedding 可用性检查失败", exc_info=True)
             vecs = None
         self.embedding_checked_at = now
@@ -148,7 +111,7 @@ class MemoryService:
             reranker = self._get_reranker(FlagReranker)
             if reranker is None:
                 return hits
-            top = min(len(hits), (top_k or self.cfg.top_k) * 2)
+            top = min(len(hits), (top_k or self.cfg.memory.top_k) * 2)
             pairs = [[query, row.content] for row, _ in hits[:top]]
             scores = reranker.compute_score(pairs, normalize=True)
             if not isinstance(scores, (list, tuple)):
@@ -156,7 +119,9 @@ class MemoryService:
             ranked = sorted(
                 zip(hits[:top], scores), key=lambda x: x[1], reverse=True
             )
-            return [(row, float(s)) for (row, _), s in ranked][: (top_k or self.cfg.top_k)]
+            return [(row, float(s)) for (row, _), s in ranked][
+                : (top_k or self.cfg.memory.top_k)
+            ]
         except ImportError:
             return hits
         except Exception:
@@ -165,7 +130,7 @@ class MemoryService:
 
     _reranker_cache: tuple = (None, None)
 
-    def _get_reranker(self, cls) -> object | None:
+    def _get_reranker(self, cls) -> Any | None:
         """缓存已加载的 reranker（模型一次性加载，进程内复用）。"""
         cached = self._reranker_cache[0]
         if cached is not None:
@@ -219,7 +184,7 @@ class MemoryService:
         explicit = bool(EXPLICIT_RE.search(user_text))
         p = self.cfg.provider
         try:
-            candidates = self._safe_async_run(
+            candidates = run_coroutine_sync(
                 extract_facts(
                     transcript="\n".join(pieces),
                     base_url=p.base_url,
@@ -247,7 +212,7 @@ class MemoryService:
                 for row, _score in hits:
                     target_versions[row.id] = row
             try:
-                ops = self._safe_async_run(
+                ops = run_coroutine_sync(
                     resolve_operations(
                         candidates=candidates,
                         similar=similar,
@@ -372,11 +337,6 @@ class MemoryService:
                 for b_pos in range(a_pos + 1, len(members)):
                     a, b = members[a_pos], members[b_pos]
                     candidates.add((a, b) if a < b else (b, a))
-        if emb_map:
-            for i in emb_map:
-                for j in emb_map:
-                    if i < j:
-                        candidates.add((i, j))
 
         for i, j in candidates:
             if find(i) == find(j):
@@ -405,7 +365,7 @@ class MemoryService:
                 for cluster in clusters:
                     contents = [r.content for r in cluster]
                     try:
-                        merged = self._safe_async_run(
+                        merged = run_coroutine_sync(
                             consolidate_group(
                                 contents=contents,
                                 base_url=p.base_url,
@@ -467,9 +427,6 @@ class MemoryService:
         stats["embedding_available"] = self.embedding_available
         stats["embedding_model"] = self.cfg.memory.embedding_model
         return stats
-
-    def status_probe(self) -> None:
-        self._embed(["memory embedding probe"])
 
 
 __all__ = [

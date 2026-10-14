@@ -631,21 +631,17 @@ def _handle_settings(handler: HandlerBase, body: dict) -> None:
                 handler._json(400, {"error": "api_key is required"})
                 return
 
-    state.cfg.provider.name = cast(ProviderName, provider_name)
-    state.cfg.provider.base_url = base_url
-    state.cfg.provider.model = model
-    state.cfg.provider.api_key = api_key or None
-
     approval = str(
         agent_in.get("approval") or state.cfg.agent.approval
     ).strip()
     if approval not in {"suggest", "auto-edit", "full-auto", "plan-only", "approve-plan", "manual"}:
         handler._json(
             400,
-            {"error": "approval must be suggest, auto-edit or full-auto"},
+            {
+                "error": "approval must be suggest, auto-edit, full-auto, plan-only, approve-plan or manual"
+            },
         )
         return
-    state.cfg.agent.approval = cast(ApprovalMode, approval)
 
     sandbox_mode = str(
         agent_in.get("sandbox_mode") or state.cfg.agent.sandbox_mode
@@ -663,7 +659,6 @@ def _handle_settings(handler: HandlerBase, body: dict) -> None:
             },
         )
         return
-    state.cfg.agent.sandbox_mode = cast(SandboxMode, sandbox_mode)
 
     effort = str(
         agent_in.get("effort") or state.cfg.agent.effort
@@ -671,7 +666,6 @@ def _handle_settings(handler: HandlerBase, body: dict) -> None:
     if effort not in {"low", "medium", "high"}:
         handler._json(400, {"error": "effort must be low, medium or high"})
         return
-    state.cfg.agent.effort = cast(Literal["low", "medium", "high"], effort)
 
     display_flags = {
         k: bool(agent_in[k])
@@ -695,12 +689,11 @@ def _handle_settings(handler: HandlerBase, body: dict) -> None:
                 str(x).strip() for x in pp if str(x).strip()
             ]
 
-    state.sandbox = WorkdirSandbox(state.workdir, state.cfg)
     try:
-        state.cfg.agent.workdir_only = bool(
+        workdir_only = bool(
             agent_in.get("workdir_only", state.cfg.agent.workdir_only)
         )
-        state.cfg.agent.shell_timeout_sec = max(
+        shell_timeout_sec = max(
             1,
             int(
                 agent_in.get(
@@ -708,7 +701,7 @@ def _handle_settings(handler: HandlerBase, body: dict) -> None:
                 )
             ),
         )
-        state.cfg.agent.max_tool_rounds = max(
+        max_tool_rounds = max(
             1,
             int(
                 agent_in.get(
@@ -716,7 +709,7 @@ def _handle_settings(handler: HandlerBase, body: dict) -> None:
                 )
             ),
         )
-        state.cfg.agent.max_output_chars = max(
+        max_output_chars = max(
             200,
             int(
                 agent_in.get(
@@ -734,11 +727,31 @@ def _handle_settings(handler: HandlerBase, body: dict) -> None:
         )
         if repeat_in < 0 or token_in < 0:
             raise ValueError("negative reliability limit")
-        state.cfg.agent.max_repeat_calls = repeat_in
-        state.cfg.agent.max_turn_tokens = token_in
     except (TypeError, ValueError):
         handler._json(400, {"error": "invalid agent numbers"})
         return
+
+    if "system_prompt" in agent_in:
+        system_prompt = str(agent_in.get("system_prompt") or "")
+    else:
+        system_prompt = state.cfg.agent.system_prompt
+
+    # ── 全部校验通过后统一提交：任何失败都不留下半改的内存状态 ──
+    state.cfg.provider.name = cast(ProviderName, provider_name)
+    state.cfg.provider.base_url = base_url
+    state.cfg.provider.model = model
+    state.cfg.provider.api_key = api_key or None
+    state.cfg.agent.approval = cast(ApprovalMode, approval)
+    state.cfg.agent.sandbox_mode = cast(SandboxMode, sandbox_mode)
+    state.cfg.agent.effort = cast(Literal["low", "medium", "high"], effort)
+    state.cfg.agent.workdir_only = workdir_only
+    state.cfg.agent.shell_timeout_sec = shell_timeout_sec
+    state.cfg.agent.max_tool_rounds = max_tool_rounds
+    state.cfg.agent.max_output_chars = max_output_chars
+    state.cfg.agent.max_repeat_calls = repeat_in
+    state.cfg.agent.max_turn_tokens = token_in
+    state.cfg.agent.system_prompt = system_prompt
+    state.sandbox = WorkdirSandbox(state.workdir, state.cfg)
 
     mcp_in = body.get("mcp_servers")
     mcp_errors: list[str] = []

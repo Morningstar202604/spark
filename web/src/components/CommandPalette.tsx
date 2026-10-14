@@ -1,6 +1,7 @@
 import { memo, useEffect, useMemo, useRef, useState } from "react"
 import { useUiStore } from "../store/uiStore"
 import { useSessionStore } from "../store/sessionStore"
+import { t } from "../i18n"
 import { cls, Kbd } from "./ui"
 import {
   IconCheck,
@@ -70,11 +71,12 @@ export const CommandPalette = memo(function CommandPalette() {
   const commands = useMemo<Cmd[]>(() => {
     const themeOrder: Theme[] = ["light", "dark", "system"]
     const nextTheme = themeOrder[(themeOrder.indexOf(theme) + 1) % themeOrder.length]
+    const themeLabel = (x: Theme) => t(x === "light" ? "display.light" : x === "dark" ? "display.dark" : "display.system", lang)
     const base: Cmd[] = [
       {
         id: "new",
-        group: "会话",
-        title: "新建会话",
+        group: t("palette.groupSessions", lang),
+        title: t("common.newSession", lang),
         hint: "Ctrl+N",
         icon: <IconPlus size={15} />,
         run: () => {
@@ -84,8 +86,8 @@ export const CommandPalette = memo(function CommandPalette() {
       },
       {
         id: "settings",
-        group: "通用",
-        title: "打开设置",
+        group: t("palette.groupGeneral", lang),
+        title: t("palette.openSettings", lang),
         hint: "",
         icon: <IconSettings size={15} />,
         run: () => {
@@ -95,8 +97,8 @@ export const CommandPalette = memo(function CommandPalette() {
       },
       {
         id: "checkpoints",
-        group: "通用",
-        title: "检查点回滚",
+        group: t("palette.groupGeneral", lang),
+        title: t("sidebar.checkpoint", lang),
         hint: "",
         icon: <IconHistory size={15} />,
         run: () => {
@@ -106,8 +108,8 @@ export const CommandPalette = memo(function CommandPalette() {
       },
       {
         id: "files",
-        group: "通用",
-        title: "文件查看器",
+        group: t("palette.groupGeneral", lang),
+        title: t("files.title", lang),
         hint: "",
         icon: <IconFile size={15} />,
         run: () => {
@@ -117,8 +119,8 @@ export const CommandPalette = memo(function CommandPalette() {
       },
       {
         id: "browser",
-        group: "通用",
-        title: "网页阅读",
+        group: t("palette.groupGeneral", lang),
+        title: t("browser.title", lang),
         hint: "",
         icon: <IconGlobe size={15} />,
         run: () => {
@@ -128,16 +130,16 @@ export const CommandPalette = memo(function CommandPalette() {
       },
       {
         id: "theme",
-        group: "通用",
-        title: `主题：切换为${nextTheme === "light" ? "亮色" : nextTheme === "dark" ? "暗色" : "跟随系统"}`,
-        hint: `当前：${theme}`,
+        group: t("palette.groupGeneral", lang),
+        title: t("palette.themeSwitch", lang, { theme: themeLabel(nextTheme) }),
+        hint: t("palette.themeCurrent", lang, { theme: themeLabel(theme) }),
         icon: theme === "light" ? <IconSun size={15} /> : theme === "dark" ? <IconMoon size={15} /> : <IconMonitor size={15} />,
         run: () => setTheme(nextTheme),
       },
       {
         id: "lang",
-        group: "通用",
-        title: lang === "zh" ? "切换界面语言为 English" : "Switch UI language to 中文",
+        group: t("palette.groupGeneral", lang),
+        title: t("palette.switchLang", lang),
         hint: "",
         icon: <IconLayers size={15} />,
         run: () => setLang(lang === "zh" ? "en" : "zh"),
@@ -145,8 +147,8 @@ export const CommandPalette = memo(function CommandPalette() {
     ]
     const sessionCmds: Cmd[] = sessions.slice(0, 8).map((s) => ({
       id: `session-${s.id}`,
-      group: "切换会话",
-      title: s.title && s.title !== "untitled" ? s.title : "新对话",
+      group: t("palette.groupSwitch", lang),
+      title: s.title && s.title !== "untitled" ? s.title : t("common.newChat", lang),
       hint: s.model,
       icon: <IconCommand size={15} />,
       run: () => {
@@ -176,7 +178,7 @@ export const CommandPalette = memo(function CommandPalette() {
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
-        aria-label="命令面板"
+        aria-label={t("palette.title", lang)}
       >
         <div className="flex items-center gap-2 border-b border-line px-4">
           <IconCommand size={15} className="text-ink3" />
@@ -197,13 +199,13 @@ export const CommandPalette = memo(function CommandPalette() {
                 if (c) c.run()
               }
             }}
-            placeholder="输入命令或搜索会话…"
+            placeholder={t("palette.searchPh", lang)}
             className="h-12 w-full bg-transparent text-[14px] text-ink outline-none placeholder:text-ink3"
           />
           <Kbd>esc</Kbd>
         </div>
         <div className="max-h-[52vh] overflow-y-auto py-2">
-          {filtered.length === 0 && <p className="px-4 py-8 text-center text-sm text-ink3">无匹配命令</p>}
+          {filtered.length === 0 && <p className="px-4 py-8 text-center text-sm text-ink3">{t("palette.noMatch", lang)}</p>}
           {filtered.map((c, i) => {
             const showGroup = i === 0 || filtered[i - 1].group !== c.group
             return (

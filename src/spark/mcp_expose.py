@@ -25,6 +25,7 @@ from mcp.server.fastmcp.tools.base import ToolAnnotations
 
 from spark.config import SparkConfig
 from spark.models import ToolCall
+from spark.policy import READONLY_TOOLS
 from spark.sandbox import WorkdirSandbox
 from spark.tools.registry import ToolContext, ToolRegistry
 
@@ -77,13 +78,16 @@ def build_mcp_server(workdir: str, cfg: SparkConfig) -> FastMCP:
     for schema in registry.schemas():
         fn = schema["function"]
         name = fn["name"]
+        if name == "task":
+            # task 由 AgentLoop 特判执行；独立注册后在 MCP 侧恒失败，不暴露。
+            continue
         desc = fn.get("description", "")
         params = fn.get("parameters", {})
         properties = params.get("properties", {})
         required = params.get("required", [])
 
         handler = _make_handler(registry, name, properties, required)
-        annotations = ToolAnnotations(openapi_schema=params)
+        annotations = ToolAnnotations(readOnlyHint=name in READONLY_TOOLS)
         mcp.add_tool(
             handler,
             name=name,

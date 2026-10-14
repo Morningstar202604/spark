@@ -7,6 +7,8 @@ import { PlanCard } from "./PlanCard"
 import { IconCheck, IconCopy, IconSpark } from "./icons"
 import { cls } from "./ui"
 import { useSessionStore } from "../store/sessionStore"
+import { useUiStore } from "../store/uiStore"
+import { t } from "../i18n"
 
 function useCopy(text: string) {
   const [copied, setCopied] = useState(false)
@@ -20,6 +22,7 @@ function useCopy(text: string) {
 
 /* ---------------- 用户消息：右侧气泡 ---------------- */
 const UserMessage = memo(function UserMessage({ msg }: { msg: ChatMsg }) {
+  const lang = useUiStore((s) => s.lang)
   return (
     <div className="flex justify-end gap-3 py-3">
       <div className="max-w-[86%] sm:max-w-[70%]">
@@ -40,7 +43,7 @@ const UserMessage = memo(function UserMessage({ msg }: { msg: ChatMsg }) {
         </div>
       </div>
       <div className="mt-1 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-hover text-[12px] font-semibold text-ink2">
-        我
+        {t("chat.you", lang)}
       </div>
     </div>
   )
@@ -67,6 +70,7 @@ function SegmentRenderer({ seg, streaming }: { seg: Segment; streaming?: boolean
 
 const AssistantMessage = memo(function AssistantMessage({ msg }: { msg: ChatMsg }) {
   const { copied, copy } = useCopy(msg.text)
+  const lang = useUiStore((s) => s.lang)
   const lastTextStreaming = msg.streaming && msg.segments.some((s) => s.kind === "text" && s.text.length > 0)
   const d = useSessionStore((s) => s.status?.display)
   const show = {
@@ -96,18 +100,18 @@ const AssistantMessage = memo(function AssistantMessage({ msg }: { msg: ChatMsg 
                   />
                 ))}
               </span>
-              工作中
+              {t("chat.working", lang)}
             </span>
           )}
           {msg.text && !msg.streaming && (
             <button
               type="button"
               onClick={copy}
-              title="复制全文"
+              title={t("chat.copyAll", lang)}
               className="ml-auto flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] text-ink3 opacity-0 transition-opacity hover:bg-hover hover:text-ink group-hover:opacity-100 focus-visible:opacity-100"
             >
               {copied ? <IconCheck size={12} className="text-ok" /> : <IconCopy size={12} />}
-              {copied ? "已复制" : "复制"}
+              {copied ? t("common.copied", lang) : t("common.copy", lang)}
             </button>
           )}
         </div>
@@ -132,10 +136,11 @@ const AssistantMessage = memo(function AssistantMessage({ msg }: { msg: ChatMsg 
 
 /* ---------------- 错误 / 通知 / 摘要 ---------------- */
 const ErrorMessage = memo(function ErrorMessage({ text }: { text: string }) {
+  const lang = useUiStore((s) => s.lang)
   return (
     <div className="flex justify-center py-3">
       <div className="anim-msg w-full max-w-2xl rounded-xl border border-err/35 bg-err/8 px-4 py-2.5 text-[13px] text-err">
-        <div className="mb-0.5 font-semibold">出错了</div>
+        <div className="mb-0.5 font-semibold">{t("common.error", lang)}</div>
         <p className="whitespace-pre-wrap break-words text-err/90">{text}</p>
       </div>
     </div>

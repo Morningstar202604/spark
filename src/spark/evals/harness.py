@@ -147,7 +147,7 @@ def _judge_run_command(workdir: Path, spec: dict[str, Any]) -> JudgeResult:
     import shlex
 
     # ``{python}`` 占位符展开为当前解释器，避免不同环境下 ``python`` 指向不一致。
-    cmd = shlex.split(str(spec["command"]).replace("{python}", sys.executable))
+    cmd = shlex.split(str(spec["command"]).replace("{python}", f'"{sys.executable}"'))
     proc = subprocess.run(
         cmd,
         cwd=workdir,

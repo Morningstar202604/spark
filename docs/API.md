@@ -36,7 +36,7 @@
 
 | 方法 | 路径 | 请求体 | 说明 |
 | --- | --- | --- | --- |
-| `POST` | `/api/chat/stream` | `{prompt, images?}` | SSE 流式对话。事件：`text_delta` / `tool`（含 tool_call 与结果）/ `approval`（含 diff）/ `turn_end` / `turn_error` / `done`；心跳 `: ping` |
+| `POST` | `/api/chat/stream` | `{prompt, images?}` | SSE 流式对话。事件：`text_delta` / `reasoning_delta` / `tool_start` / `tool_end` / `approval_needed`（含 diff）/ `compaction` / `context` / `plan` / `turn_end` / `turn_error` / `done`；心跳 `: ping` |
 | `POST` | `/api/chat` | `{prompt}` | 非流式对话，返回完整事件数组（调试用） |
 | `POST` | `/api/cancel` | — | 取消当前回合与待审批 |
 | `POST` | `/api/approval` | `{decision}` | 审批决定：`allow` / `allow_always` / `deny` |
@@ -59,12 +59,17 @@
 `/api/chat/stream` 返回 `text/event-stream`，每条事件为 `data: {JSON}\n\n`：
 
 ```jsonc
-{"type": "text_delta", "text": "…"}                       // 增量文本（已脱敏）
-{"type": "tool", "tool": {…}, "ok": true, "result": {…}}  // 工具调用与结果
-{"type": "approval", "approval": {"summary": "…", "diff": "…"}}  // 等待审批
-{"type": "turn_end", "text": "…"}                         // 回合结束
-{"type": "turn_error", "text": "…"}                       // 回合出错
-{"type": "done"}                                          // 流结束
+{"type": "text_delta", "text": "…"}                    // 增量文本（已脱敏）
+{"type": "reasoning_delta", "text": "…"}               // 思考流（模型支持时）
+{"type": "tool_start", "tool_call": {…}}               // 工具开始执行
+{"type": "tool_end", "tool_call": {…}, "result": {…}}  // 工具结果
+{"type": "approval_needed", "approval": {"summary": "…", "diff": "…"}}  // 等待审批
+{"type": "compaction", "text": "…"}                    // 上下文压缩
+{"type": "context", "data": {"usage": {"used": 1, "limit": 2}}}  // 上下文用量
+{"type": "plan", "plan": [ … ]}                        // 计划更新
+{"type": "turn_end", "text": "…"}                      // 回合结束
+{"type": "turn_error", "text": "…"}                    // 回合出错
+{"type": "done"}                                       // 流结束
 ```
 
 连接断开（写失败或对端关闭）会自动取消当前回合；15 秒无数据发送 `: ping` 心跳。

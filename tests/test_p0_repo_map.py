@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from spark.repo_map import RepoMapConfig, build_repo_map, _bucket_rank, _iter_files
+from spark.repo_map import RepoMapConfig, _bucket_rank, _iter_files, build_repo_map
 
 
 @pytest.fixture

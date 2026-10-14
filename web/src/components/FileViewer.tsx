@@ -4,7 +4,28 @@ import { cls, IconButton, Spinner } from "./ui"
 import { IconChevronRight, IconFile, IconFolder, IconX } from "./icons"
 import { useUiStore } from "../store/uiStore"
 import { useSessionStore } from "../store/sessionStore"
+import { t } from "../i18n"
 import hljs from "highlight.js/lib/common"
+
+/** hljs 整段高亮后按行切分渲染。
+ *
+ * 跨行 token（块注释/多行字符串）会生成跨行的 <span>；直接按 "\n" 切 HTML
+ * 会让第二行起丢失颜色或错色。这里维护未闭合 span 栈：每行前缀重开、行尾
+ * 补齐闭合（highlight.js 行号渲染的社区标准做法）。 */
+function splitHighlightedLines(html: string): string[] {
+  const out: string[] = []
+  const openStack: string[] = []
+  for (const rawLine of html.split("\n")) {
+    const prefix = openStack.join("")
+    for (const m of rawLine.matchAll(/<span[^>]*>/g)) openStack.push(m[0])
+    const closeCount = (rawLine.match(/<\/span>/g) ?? []).length
+    for (let i = 0; i < closeCount; i++) {
+      if (openStack.length) openStack.pop()
+    }
+    out.push(prefix + rawLine + "</span>".repeat(openStack.length))
+  }
+  return out
+}
 
 /** 行号前缀高亮的文件预览 */
 function CodePreview({ code, name }: { code: string; name: string }) {
@@ -16,16 +37,16 @@ function CodePreview({ code, name }: { code: string; name: string }) {
   } catch {
     html = code.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
   }
-  const lines = code.split("\n")
+  const lines = splitHighlightedLines(html)
   return (
     <div className="overflow-auto font-mono text-[12px] leading-[1.55]">
       <table className="w-full border-collapse">
         <tbody>
-          {lines.map((_, i) => (
+          {lines.map((line, i) => (
             <tr key={i} className="align-top">
               <td className="w-9 pr-3 text-right text-ink3 select-none">{i + 1}</td>
               <td className="pr-4">
-                <span dangerouslySetInnerHTML={{ __html: html.split("\n")[i] ?? "" }} />
+                <span dangerouslySetInnerHTML={{ __html: line }} />
               </td>
             </tr>
           ))}
@@ -38,6 +59,7 @@ function CodePreview({ code, name }: { code: string; name: string }) {
 export const FileViewer = memo(function FileViewer() {
   const open = useUiStore((s) => s.filesOpen)
   const close = useUiStore((s) => s.closeFiles)
+  const lang = useUiStore((s) => s.lang)
   const workdir = useSessionStore((s) => s.status?.workdir ?? "")
 
   const [stack, setStack] = useState<string[]>([]) // 相对路径栈（[] = 工作目录根）
@@ -98,15 +120,15 @@ export const FileViewer = memo(function FileViewer() {
         className="anim-fade flex h-[min(88vh,640px)] w-[min(96vw,980px)] flex-col overflow-hidden rounded-2xl border border-line bg-canvas shadow-[var(--shadow)]"
         onClick={(e) => e.stopPropagation()}
         role="dialog"
-        aria-label="文件查看器"
+        aria-label={t("files.title", lang)}
       >
         <div className="flex items-center gap-2 border-b border-line px-4 py-3">
           <IconFolder size={15} className="text-accent" />
-          <span className="text-sm font-semibold text-ink">文件查看器</span>
+          <span className="text-sm font-semibold text-ink">{t("files.title", lang)}</span>
           <span className="ml-2 min-w-0 flex-1 truncate font-mono text-[11px] text-ink3" title={workdir}>
             {workdir || "—"}
           </span>
-          <IconButton title="关闭" onClick={close}>
+          <IconButton title={t("common.close", lang)} onClick={close}>
             <IconX size={15} />
           </IconButton>
         </div>
@@ -187,7 +209,7 @@ export const FileViewer = memo(function FileViewer() {
                       </li>
                     ),
                   )}
-                  {entries?.length === 0 && <p className="px-2 py-6 text-center text-xs text-ink3">空目录</p>}
+                  {entries?.length === 0 && <p className="px-2 py-6 text-center text-xs text-ink3">{t("files.emptyDir", lang)}</p>}
                 </ul>
               )}
             </div>
@@ -204,12 +226,12 @@ export const FileViewer = memo(function FileViewer() {
                 <div className="flex items-center gap-2 border-b border-line px-4 py-2">
                   <IconFile size={13} className="text-ink3" />
                   <span className="truncate font-mono text-[12px] font-medium text-ink">{file.name}</span>
-                  {file.binary && <span className="rounded bg-hover px-1.5 py-0.5 text-[10px] text-ink3">二进制文件</span>}
-                  {file.truncated && <span className="rounded bg-hover px-1.5 py-0.5 text-[10px] text-warn">内容过长已截断</span>}
+                  {file.binary && <span className="rounded bg-hover px-1.5 py-0.5 text-[10px] text-ink3">{t("files.binary", lang)}</span>}
+                  {file.truncated && <span className="rounded bg-hover px-1.5 py-0.5 text-[10px] text-warn">{t("files.truncated", lang)}</span>}
                 </div>
                 <div className="min-h-0 flex-1 overflow-auto p-3">
                   {file.binary ? (
-                    <p className="py-8 text-center text-xs text-ink3">该文件为二进制内容，不支持文本预览。</p>
+                    <p className="py-8 text-center text-xs text-ink3">{t("files.binaryNote", lang)}</p>
                   ) : (
                     <CodePreview code={file.content} name={file.name} />
                   )}
@@ -218,7 +240,7 @@ export const FileViewer = memo(function FileViewer() {
             ) : (
               <div className="flex flex-1 flex-col items-center justify-center gap-2 text-ink3">
                 <IconFile size={26} />
-                <p className="text-xs">选择左侧文件查看内容</p>
+                <p className="text-xs">{t("files.selectHint", lang)}</p>
               </div>
             )}
           </div>

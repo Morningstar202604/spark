@@ -3,11 +3,13 @@ import { browseUrl } from "../api"
 import { Button, cls, IconButton, Spinner } from "./ui"
 import { IconGlobe, IconX } from "./icons"
 import { useUiStore } from "../store/uiStore"
+import { t } from "../i18n"
 
 /** 阅读模式浏览器：经后端 web_fetch（含 SSRF 防护）抓取网页纯文本 */
 export const BrowserModal = memo(function BrowserModal() {
   const open = useUiStore((s) => s.browserOpen)
   const close = useUiStore((s) => s.closeBrowser)
+  const lang = useUiStore((s) => s.lang)
   const [url, setUrl] = useState("")
   const [busy, setBusy] = useState(false)
   const [page, setPage] = useState<{ title?: string; url?: string; content?: string; error?: string } | null>(null)
@@ -31,11 +33,10 @@ export const BrowserModal = memo(function BrowserModal() {
     if (!open) return
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") close()
-      if (e.key === "Enter") openUrl()
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
-  }, [open, close, url])
+  }, [open, close])
 
   if (!open) return null
   return (
@@ -44,12 +45,12 @@ export const BrowserModal = memo(function BrowserModal() {
         className="anim-fade flex h-[min(84vh,620px)] w-[min(96vw,860px)] flex-col overflow-hidden rounded-2xl border border-line bg-canvas shadow-[var(--shadow)]"
         onClick={(e) => e.stopPropagation()}
         role="dialog"
-        aria-label="网页阅读"
+        aria-label={t("browser.title", lang)}
       >
         <div className="flex items-center gap-2 border-b border-line px-4 py-3">
           <IconGlobe size={15} className="text-accent" />
-          <span className="text-sm font-semibold text-ink">网页阅读</span>
-          <IconButton title="关闭" onClick={close} className="ml-auto">
+          <span className="text-sm font-semibold text-ink">{t("browser.title", lang)}</span>
+          <IconButton title={t("common.close", lang)} onClick={close} className="ml-auto">
             <IconX size={15} />
           </IconButton>
         </div>
@@ -62,24 +63,24 @@ export const BrowserModal = memo(function BrowserModal() {
             onKeyDown={(e) => {
               if (e.key === "Enter") void openUrl()
             }}
-            placeholder="输入网址，例如 https://github.com/badhope/spark"
+            placeholder={t("browser.urlPh", lang)}
             spellCheck={false}
             className="h-9 min-w-0 flex-1 rounded-lg border border-line bg-panel px-3 font-mono text-[12.5px] text-ink outline-none placeholder:text-ink3 focus:border-accent"
           />
           <Button size="sm" variant="primary" onClick={() => void openUrl()} disabled={busy || !url.trim()}>
-            {busy ? <Spinner size={11} /> : "打开"}
+            {busy ? <Spinner size={11} /> : t("browser.open", lang)}
           </Button>
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto p-4">
           {busy ? (
             <div className="flex h-full items-center justify-center gap-2 text-ink3">
-              <Spinner size={16} className="text-accent" /> 正在抓取页面…
+              <Spinner size={16} className="text-accent" /> {t("browser.fetching", lang)}
             </div>
           ) : page?.error ? (
             <div className="mx-auto max-w-md py-16 text-center">
               <IconGlobe size={28} className="mx-auto text-err" />
-              <p className="mt-3 text-sm font-medium text-err">无法打开该页面</p>
+              <p className="mt-3 text-sm font-medium text-err">{t("browser.openFailed", lang)}</p>
               <p className="mt-1 break-all text-xs text-ink3">{page.error}</p>
             </div>
           ) : page ? (
@@ -100,7 +101,7 @@ export const BrowserModal = memo(function BrowserModal() {
           ) : (
             <div className="flex h-full flex-col items-center justify-center gap-2 text-ink3">
               <IconGlobe size={28} />
-              <p className="text-xs">输入网址后点击「打开」，以阅读模式查看页面内容</p>
+              <p className="text-xs">{t("browser.hint", lang)}</p>
               <div className="mt-3 flex flex-wrap justify-center gap-1.5">
                 {["https://github.com", "https://react.dev", "https://docs.deepseek.com"].map((u) => (
                   <button

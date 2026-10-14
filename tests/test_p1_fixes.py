@@ -43,11 +43,7 @@ def test_enforce_capacity_archives_stale(tmp_path: Path) -> None:
     store = MemoryStore(tmp_path / "m.db", MemoryConfig(capacity=100, enabled=True))
     mid = store.add("stale memory", importance=5)
     old = int(time.time()) - 400 * 86400
-    store._conn.execute(
-        "UPDATE memories SET last_accessed = ?, created_at = ? WHERE id = ?",
-        (old, old, mid),
-    )
-    store._conn.commit()
+    store._apply_metadata_update(mid, [("last_accessed", old), ("created_at", old)])
     archived = store.enforce_capacity(stale_days=90)
     assert store.get(mid).status == "archived"
     assert archived >= 1
@@ -90,11 +86,9 @@ def test_snapshot_dir_not_hardcoded_root(
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
     from spark.core import checkpoints
 
-    assert "/root" not in str(checkpoints.SNAPSHOT_DIR)
-    assert (
-        str(home) in str(checkpoints.SNAPSHOT_DIR)
-        or checkpoints.SNAPSHOT_DIR.is_absolute()
-    )
+    resolved = checkpoints._snapshot_dir()
+    assert "/root" not in str(resolved)
+    assert str(home) in str(resolved) or resolved.is_absolute()
 
 
 def test_latest_snapshot_id_strips_tar_gz(
