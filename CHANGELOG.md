@@ -4,8 +4,8 @@
 
 ## [0.9.2] - 2026-10-14
 
-CI 转绿批次：修复 GitHub Actions 长期全红的四个独立根因，全部先在本地以 CI
-同款命令复现并跑通（含 Linux 平台模拟），再推送。
+CI 转绿批次：修复 GitHub Actions 长期全红的五个独立根因，全部先在本地以 CI
+同款命令复现并跑通（含 Linux 平台模拟与真实 3.11 解释器），再推送。
 
 ### 修复（CI / Security）
 
@@ -31,6 +31,14 @@ CI 转绿批次：修复 GitHub Actions 长期全红的四个独立根因，全�
   永不获得 runner（实测排队近 2 小时）。改为构建矩阵只产出 workflow artifact，
   再由单一 `publish` job 汇总上传；macOS runner 换 `macos-latest`（产物更名
   `spark-macos-arm64`）。
+- **MCP 启动在 Python 3.11 上跨 task 退出 anyio cancel scope（test 3.11 剩余红）**：
+  `_start_on_owner` 用 `asyncio.wait_for(conn.start(), timeout=15)` 包裹连接，超时
+  会取消承载连接的 task，而 anyio 的 cancel scope 是在该 task 中进入的；之后
+  `close()` 在另一 task 里 `aclose()` 抛 `RuntimeError: Attempted to exit cancel
+  scope in a different task than it was entered in`（Python 3.11 + anyio 4.x）。
+  改为超时内移到 `start()`（`asyncio.timeout`）实施、调用方不再包装；`close()` 对
+  已部分展开的 exit stack 吞掉该 RuntimeError（资源已释放），失败日志补
+  `exc_info`。真 3.11.15 全量验证：630 passed / 5 skipped。
 
 ### 新增
 

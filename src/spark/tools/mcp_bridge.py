@@ -48,8 +48,15 @@ class _McpConnection:
         self._exit_stack = AsyncExitStack()
         self._session: ClientSession | None = None
 
-    async def start(self) -> None:
-        """Connect, negotiate protocol version, and enumerate tools."""
+    async def start(self, timeout_sec: float = 15.0) -> None:
+        """Connect, negotiate protocol version, and enumerate tools.
+
+        ``timeout_sec`` 在**本协程内部**实施（``asyncio.timeout``），调用方不要再用
+        ``asyncio.wait_for`` 包裹：``wait_for`` 超时会取消承载本协程的 task，而其
+        ``AsyncExitStack`` 里的 anyio cancel scope 是在该 task 中进入的——之后在别的
+        task 里 ``aclose()`` 会抛 "Attempted to exit cancel scope in a different task"
+        （Python 3.11 + anyio 4.x 上必现）。
+        """
         transport: AbstractAsyncContextManager[Any]
         if self.cfg.transport == "stdio":
             params = StdioServerParameters(
@@ -75,22 +82,25 @@ class _McpConnection:
                 f"MCP server {self.cfg.name} requires http transport but none configured"
             )
 
-        read, write = await self._exit_stack.enter_async_context(transport)
-        session = await self._exit_stack.enter_async_context(ClientSession(read, write))
-        await session.initialize()
-        self._session = session
+        async with asyncio.timeout(timeout_sec):
+            read, write = await self._exit_stack.enter_async_context(transport)
+            session = await self._exit_stack.enter_async_context(
+                ClientSession(read, write)
+            )
+            await session.initialize()
+            self._session = session
 
-        listed = await session.list_tools()
-        self.tools = [
-            {
-                "name": t.name,
-                "description": t.description or "",
-                "inputSchema": t.inputSchema
-                if isinstance(t.inputSchema, dict)
-                else {"type": "object"},
-            }
-            for t in listed.tools
-        ]
+            listed = await session.list_tools()
+            self.tools = [
+                {
+                    "name": t.name,
+                    "description": t.description or "",
+                    "inputSchema": t.inputSchema
+                    if isinstance(t.inputSchema, dict)
+                    else {"type": "object"},
+                }
+                for t in listed.tools
+            ]
         logger.info("MCP server '%s' connected: %d tool(s)", self.cfg.name, len(self.tools))
 
     async def call(self, name: str, arguments: dict[str, Any]) -> ToolResult:
@@ -109,7 +119,16 @@ class _McpConnection:
         return ToolResult(ok=not is_error, payload=payload)
 
     async def close(self) -> None:
-        await self._exit_stack.aclose()
+        """Close the session/transport.
+
+        失败启动过的连接（``start`` 抛错）其 ``AsyncExitStack`` 可能已部分展开；
+        ``aclose()`` 在极少数实现差异下会抛 RuntimeError，此时吞掉并继续——
+        资源本已释放，调用方（``_start_on_owner``）不应因清理失败而中断整个启动流程。
+        """
+        try:
+            await self._exit_stack.aclose()
+        except RuntimeError as exc:  # pragma: no cover - anyio 跨 task 清理差异
+            logger.debug("MCP %s close raised RuntimeError: %s", self.cfg.name, exc)
         self._session = None
         self.tools = []
 
@@ -204,9 +223,14 @@ class McpBridge:
         for cfg in configs:
             conn = _McpConnection(cfg)
             try:
-                await asyncio.wait_for(conn.start(), timeout=15)
+                # 超时由 conn.start 内部实施；不要用 asyncio.wait_for 包裹——
+                # 其超时会取消本 task，导致 anyio cancel scope 跨 task 退出
+                # （Python 3.11 上抛 RuntimeError）。
+                await conn.start()
             except Exception as exc:
-                logger.warning("MCP server '%s' failed to start: %s", cfg.name, exc)
+                logger.warning(
+                    "MCP server '%s' failed to start: %s", cfg.name, exc, exc_info=True
+                )
                 self.errors.append(f"MCP {cfg.name} failed: {exc}")
                 await conn.close()
                 continue
