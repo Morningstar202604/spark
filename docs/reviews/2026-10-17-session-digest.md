@@ -1,9 +1,18 @@
 # 会话精华锚点（2026-10-17）——新会话从这里接手
 
+> **终态更新（2026-10-18 收官）**：P0/P1 全部交付、P2 首批交付，当前基线 **v0.9.6 @ ba622a8 系**
+> ——五仓对齐、PyPI 已上线（pip install spark-agent / uvx spark-agent）、主仓 10/10 检查绿、
+> 文档站 gh-pages 已部署、发布链 tag 触发全自动化、架构图表入库 docs/assets/diagrams/。
+> 密钥已安放主仓 Actions Secrets（MIRROR_*×4 + PYPI_API_TOKEN，轮换方法见 docs/diagrams-ops.md）。
+> 本地工作区已清空——**远程仓库为唯一权威副本**。
+>
+> 下一步接续：P2 余项（LangGraph 迁入专项 / ACP server / OTel→Langfuse / 双粒度时间轴 UI /
+> 前端造轮子替换 / 火焰图 Web 面板）→ P3 信任链+AEF。发版 SOP 见 docs/diagrams-ops.md。
+
 > 本文档是当天的浓缩快照，替代零散对话记录。旧内容以本文档为准。
 
 ## 项目一句话
-Spark = 本地自托管 AI 编程 Agent harness（Python 3.11+，MIT，v0.9.3）。
+Spark = 本地自托管 AI 编程 Agent harness（Python 3.11+，MIT，v0.9.6）。
 战略主轴：**做证据标准的主人**（AEF），残余优势 = R1 信任链一体化 / R2 内嵌vs旁挂 / R3 开放格式反锁定 / R4 工程执行。所有"独有"主张必须先证伪式调研。
 
 ## 五平台发布矩阵（已全部跑通）

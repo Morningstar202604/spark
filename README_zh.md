@@ -135,6 +135,7 @@ dist\spark\spark.exe web                    # 或双击 dist\spark.exe
 | [docs/API.md](docs/API.md) | HTTP API 与 SSE 事件协议 |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | 架构说明 |
 | [docs/competitive-comparison.md](docs/competitive-comparison.md) | 与 Qoder / ZCode / opencode / Codex CLI 的功能对比 |
+| [docs/diagrams-ops.md](docs/diagrams-ops.md) | 架构图 / 发布矩阵 / 路线图 / 密钥与流水线运维手册 |
 
 ## 社区
 
