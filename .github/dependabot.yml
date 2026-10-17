@@ -1,0 +1,15 @@
+# Dependabot 显式接管：只做根目录 uv.lock 的每周例行更新。
+# 动态推断曾错误探测 "/api for unstructured" 并持续报红（无此目录/包不适用）。
+version: 2
+updates:
+  - package-ecosystem: "uv"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    ignore:
+      - dependency-name: "unstructured"
+    groups:
+      minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"
