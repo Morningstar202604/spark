@@ -33,6 +33,11 @@ jobs:
           MIRROR_GH_MORNINGSTAR_TOKEN: ${{ secrets.MIRROR_GH_MORNINGSTAR_TOKEN }}
         run: |
           set -u
+          # 关键：actions/checkout 会为 github.com 注入 extraheader（GITHUB_TOKEN），
+          # 该 header 优先级高于 URL 中的用户凭据，会把推送身份变成 github-actions[bot]
+          # 导致镜像仓 403。推送镜像前先摘掉它。
+          git config --unset-all http.https://github.com/.extraheader || true
+          git config --global --unset-all http.https://github.com/.extraheader || true
           status=0
           add_remote() { git remote add "$1" "$2" 2>/dev/null || git remote set-url "$1" "$2"; }
           add_remote gitee         "https://badhope:${MIRROR_GITEE_TOKEN}@gitee.com/badhope/spark.git"
