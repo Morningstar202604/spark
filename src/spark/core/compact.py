@@ -245,8 +245,8 @@ class Compactor:
         mock / 无 stream 能力的 provider 返回 None，由调用方走 litellm 兜底
         （测试对 litellm 路径打补丁，mock 脚本不应参与摘要）。
         """
-        from spark.providers.mock import MockProvider
         from spark.models import ChatMessage
+        from spark.providers.mock import MockProvider
 
         provider = self._provider
         if provider is None or not hasattr(provider, "stream"):
