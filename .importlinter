@@ -1,0 +1,109 @@
+[importlinter]
+root_package = spark
+
+# 架构分层（自底向上）：
+#   L0 foundation: models / errors / config / platform_compat / asyncutil / sanitize / structured
+#   L1 providers
+#   L2 support:    sandbox / store / policy / git_memory / mcp_registry / skills / agents / hooks / repo_map / edit / memory / tools
+#   L3 engine:     core
+#   L4 surfaces:   web / tui / cli / desktop / onboard / evals
+# 规则：下层不得 import 上层；同层禁止跨包反向。以 5 条 forbidden 契约固化。
+
+[importlinter:contract:foundation-pure]
+name = L0 foundation 不得依赖任何上层
+type = forbidden
+source_modules =
+    spark.models
+    spark.errors
+    spark.config
+    spark.platform_compat
+    spark.asyncutil
+    spark.sanitize
+    spark.structured
+forbidden_modules =
+    spark.providers
+    spark.tools
+    spark.edit
+    spark.memory
+    spark.core
+    spark.web
+    spark.tui
+    spark.cli
+    spark.desktop
+    spark.onboard
+    spark.evals
+    spark.policy
+    spark.sandbox
+    spark.store
+    spark.git_memory
+    spark.mcp_registry
+    spark.skills
+    spark.agents
+    spark.hooks
+    spark.repo_map
+
+[importlinter:contract:providers-standalone]
+name = L1 providers 只依赖 foundation
+type = forbidden
+source_modules =
+    spark.providers
+forbidden_modules =
+    spark.tools
+    spark.edit
+    spark.memory
+    spark.core
+    spark.web
+    spark.tui
+    spark.cli
+    spark.desktop
+    spark.onboard
+    spark.evals
+    spark.policy
+    spark.sandbox
+    spark.store
+    spark.git_memory
+    spark.mcp_registry
+    spark.skills
+    spark.agents
+    spark.hooks
+    spark.repo_map
+
+[importlinter:contract:support-no-engine-surface]
+name = L2 support 不触引擎与表面
+type = forbidden
+source_modules =
+    spark.memory
+    spark.repo_map
+    spark.skills
+    spark.agents
+    spark.hooks
+forbidden_modules =
+    spark.core
+    spark.web
+    spark.tui
+    spark.cli
+    spark.desktop
+    spark.onboard
+    spark.evals
+
+[importlinter:contract:core-no-surface]
+name = L3 core 不触任何表面
+type = forbidden
+source_modules =
+    spark.core
+forbidden_modules =
+    spark.web
+    spark.tui
+    spark.cli
+    spark.desktop
+
+[importlinter:contract:no-cross-surface]
+name = L4 表面之间禁止互相 import（组合只经 public 入口在 cli/desktop 完成）
+type = forbidden
+source_modules =
+    spark.web
+    spark.tui
+forbidden_modules =
+    spark.cli
+    spark.desktop
+    spark.onboard

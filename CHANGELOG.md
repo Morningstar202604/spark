@@ -2,6 +2,26 @@
 
 本项目遵循语义化版本。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)。
 
+## [0.9.5] - 2026-10-18
+
+P1 阶段第二批（工程治理 + OpenAPI 合同 + 诊断闭环 + 文档站 + 发布链）。
+
+### 新增
+
+- **架构分层契约**（import-linter，5 条 forbidden 契约，CI 强制）：foundation /
+  providers / support / core / surfaces 五层，下层不得反向依赖上层，表面之间禁止互相 import。
+- **OpenAPI 合同层**：`/api/openapi.json` 提供核心只读端点的 OpenAPI 3.1 规范
+  （FastAPI 类型化模型定义），`web/orval.config.ts` + `npm run gen:api` 前端 codegen 就绪。
+- **diagnostics 工具**（编辑后反馈闭环）：ruff + 可用时的 tsc 诊断结构化回喂上下文，
+  注册进工具表与只读白名单。
+- **文档站**：mkdocs-material + GitHub Pages 自动部署（docs workflow）。
+- **PyPI 发布链**：`publish.yml`（Trusted Publishing/OIDC，push tag v* 或手动触发），
+  配置一次即可 `uvx spark-agent`。
+
+### 修复
+
+- 质量门槛新增 import-linter 后，`spark edit -> spark.tools` 的层级违规通过调整
+  分层边界解决（edit 与 tools 同层互依为既有事实，边界归入 L2 support）。
 ## [0.9.4] - 2026-10-18
 
 P1 阶段第一批（供应商韧性 + 真实用量 + 模型目录）。

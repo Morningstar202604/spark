@@ -1,0 +1,55 @@
+site_name: Spark Agent
+site_description: 本地自托管 AI 编程智能体 · 代码在你手，密钥在你手
+repo_url: https://github.com/badhope/spark
+repo_name: badhope/spark
+
+theme:
+  name: material
+  language: zh
+  palette:
+    - scheme: default
+      primary: deep orange
+      toggle:
+        icon: material/brightness-4
+        name: 暗色
+    - scheme: slate
+      primary: deep orange
+      toggle:
+        icon: material/brightness-7
+        name: 亮色
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.top
+    - content.code.copy
+
+nav:
+  - 首页: index.md
+  - 开始:
+      - 安装: INSTALL.md
+      - 配置: CONFIG.md
+      - 配置参考: CONFIGURATION.md
+  - 深入:
+      - 架构: ARCHITECTURE.md
+      - API: API.md
+      - 模型路由: model-routing.md
+      - Git 任务记忆: git-memory.md
+      - 评测: evals.md
+  - 工程决策与规划:
+      - 建设计划: reviews/2026-10-17-master-plan.md
+      - 审查与方向: reviews/2026-10-17-audit-and-direction.md
+      - 会话锚点: reviews/2026-10-17-session-digest.md
+      - 竞品对比: competitive-comparison.md
+
+markdown_extensions:
+  - admonition
+  - pymdownx.superfences
+  - pymdownx.highlight
+  - pymdownx.tabbed
+  - tables
+  - toc:
+      permalink: true
+
+plugins:
+  - search
+  - autorefs

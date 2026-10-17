@@ -21,6 +21,8 @@ jobs:
         run: ruff check src/spark tests
       - name: Type check (mypy)
         run: mypy src/spark --ignore-missing-imports
+      - name: Import layering (import-linter)
+        run: lint-imports
       - name: Security scan (bandit)
         run: bandit -r src/spark -ll -ii -c bandit.yaml
 

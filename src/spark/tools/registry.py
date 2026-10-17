@@ -10,7 +10,7 @@ from spark.config import SparkConfig
 from spark.edit.tool import ApplyEditArgs, apply_edit, apply_edit_diff
 from spark.models import ToolCall, ToolResult
 from spark.sandbox import WorkdirSandbox
-from spark.tools import bg, fs, gitops, notebook, search, shell, web
+from spark.tools import bg, diagnostics, fs, gitops, notebook, search, shell, web
 
 MCP_PREFIX = "mcp__"
 
@@ -141,6 +141,17 @@ class ToolRegistry:
                  "glob": {"type": "string", "description": "optional filename filter like '*.py'"},
                  "max_results": {"type": "integer", "description": "default 50"}},
                 ["pattern"]),
+            _schema("diagnostics",
+                "运行 lint/类型诊断（ruff + 可用时的 tsc），把编辑后的问题清单反馈给你。"
+                "编辑代码后应运行以验证没有引入新问题。",
+                {
+                    "paths": {"type": "array", "items": {"type": "string"},
+                              "description": "限定检查的相对路径，留空 = 整个工作目录"},
+                    "python": {"type": "boolean", "default": True},
+                    "typescript": {"type": "boolean", "default": True},
+                },
+                [],  # 无必填
+            ),
             _schema("glob",
                 "Find files inside the workdir by filename pattern, e.g. 'src/**/*.ts' or '*.md'.",
                 {"pattern": {"type": "string"},
@@ -378,6 +389,7 @@ class ToolRegistry:
             "task_finish": lambda a: git_memory.task_finish(ctx.sandbox, git_memory.TaskFinishArgs.model_validate(a)),
             # --- search ---
             "grep": lambda a: search.grep_tool(ctx.sandbox, search.GrepArgs.model_validate(a)),
+            "diagnostics": lambda a: diagnostics.diagnostics_tool(ctx.sandbox, diagnostics.DiagnosticsArgs.model_validate(a)),
             "glob": lambda a: search.glob_tool(ctx.sandbox, search.GlobArgs.model_validate(a)),
             # --- web ---
             "web_search": lambda a: web.web_search_tool(web.WebSearchArgs.model_validate(a)),

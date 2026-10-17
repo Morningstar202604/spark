@@ -300,6 +300,12 @@ def build_handler_class(html: str):
             if path == "/api/status":
                 self._json(200, state.status())
                 return
+            if path == "/api/openapi.json":
+                # P1：OpenAPI 合同层（前端 codegen 单一事实来源；见 web/api_spec.py）
+                from spark.web.api_spec import openapi_schema
+
+                self._json(200, openapi_schema())
+                return
             if path == "/api/config":
                 state.ensure_default_profile()
                 self._json(200, state.full_config())

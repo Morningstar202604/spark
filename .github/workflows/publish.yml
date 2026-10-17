@@ -1,0 +1,39 @@
+# PyPI 发布（Trusted Publishing / OIDC）——首次使用前需在 PyPI 侧完成一次性配置：
+#   pypi.org → spark-agent 项目 → Publishing → 声明 Trusted Publisher：
+#     owner=badhope  repo=spark  workflow=publish.yml  environment=pypi
+# 之后手动触发本工作流即可（或 push tag v* 自动触发）。
+name: publish
+on:
+  push:
+    tags: ["v*"]
+  release:
+    types: [published]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - name: Build sdist & wheel
+        run: |
+          pip install build -i https://mirrors.aliyun.com/pypi/simple/
+          python -m build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+  publish-pypi:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write   # OIDC trusted publishing
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { name: dist, path: dist }
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1

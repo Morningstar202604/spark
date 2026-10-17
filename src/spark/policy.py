@@ -16,6 +16,7 @@ READONLY_TOOLS = {
     "list_dir",
     "update_plan",
     "grep",
+    "diagnostics",
     "glob",
     "web_search",
     "read_notebook",
