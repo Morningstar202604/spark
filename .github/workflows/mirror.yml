@@ -1,0 +1,58 @@
+# 主仓 → 四镜像自动同步（Gitee / GitCode / GitHub-X33834 / GitHub-Morningstar）
+# 分支与标签在每次 push 到 main 后自动镜像；可在 Actions 页手动触发。
+# 依赖仓库 Secrets：MIRROR_GITEE_TOKEN / MIRROR_GITCODE_TOKEN /
+#                   MIRROR_GH_X33834_TOKEN / MIRROR_GH_MORNINGSTAR_TOKEN
+name: mirror
+
+on:
+  push:
+    branches: [main]
+    tags: ["**"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mirror-${{ github.sha }}
+  cancel-in-progress: false
+
+jobs:
+  push-mirrors:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Push to mirrors
+        env:
+          MIRROR_GITEE_TOKEN: ${{ secrets.MIRROR_GITEE_TOKEN }}
+          MIRROR_GITCODE_TOKEN: ${{ secrets.MIRROR_GITCODE_TOKEN }}
+          MIRROR_GH_X33834_TOKEN: ${{ secrets.MIRROR_GH_X33834_TOKEN }}
+          MIRROR_GH_MORNINGSTAR_TOKEN: ${{ secrets.MIRROR_GH_MORNINGSTAR_TOKEN }}
+        run: |
+          set -u
+          status=0
+          add_remote() { git remote add "$1" "$2" 2>/dev/null || git remote set-url "$1" "$2"; }
+          add_remote gitee         "https://badhope:${MIRROR_GITEE_TOKEN}@gitee.com/badhope/spark.git"
+          add_remote gitcode       "https://oauth2:${MIRROR_GITCODE_TOKEN}@gitcode.com/badhope/spark.git"
+          add_remote gh_x33834     "https://x33834:${MIRROR_GH_X33834_TOKEN}@github.com/X33834/spark.git"
+          add_remote gh_morningstar "https://Morningstar202604:${MIRROR_GH_MORNINGSTAR_TOKEN}@github.com/Morningstar202604/spark.git"
+
+          for r in gitee gitcode gh_x33834 gh_morningstar; do
+            echo "::group::mirror -> $r"
+            if git push "$r" HEAD:refs/heads/main; then
+              echo "$r: branch OK"
+            else
+              echo "::error::$r: branch push failed"; status=1
+            fi
+            # 标签失败不阻塞（镜像仓标签可能有差异），仅告警
+            if git push "$r" --tags; then
+              echo "$r: tags OK"
+            else
+              echo "::warning::$r: tags push failed"
+            fi
+            echo "::endgroup::"
+          done
+          exit $status

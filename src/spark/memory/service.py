@@ -54,6 +54,11 @@ class MemoryService:
     def _embed(self, texts: list[str]) -> list[list[float]] | None:
         if not self.cfg.memory.enabled:
             return None
+        # P0 修复：向量检索显式 opt-in（memory.embedding_enabled，默认关）。
+        # 默认配置曾把 /embeddings 请求打到 chat 端点（如 DeepSeek，无该路由），
+        # 每轮失败降级关键词——宣传与实际不符。现在不开启就静默跳过。
+        if not getattr(self.cfg.memory, "embedding_enabled", False):
+            return None
         now = time.time()
         if (
             self.embedding_available is False
@@ -61,11 +66,14 @@ class MemoryService:
         ):
             return None
         p = self.cfg.provider
+        # embedding 端点独立可配；留空时回落 provider 凭据（要求该端点支持 /embeddings）
+        base_url = self.cfg.memory.embedding_base_url or p.base_url
+        api_key = self.cfg.memory.embedding_api_key or p.api_key or "ollama"
 
         def _run_embed():
             return embed_texts(
-                base_url=p.base_url,
-                api_key=p.api_key or "ollama",
+                base_url=base_url,
+                api_key=api_key,
                 model=self.cfg.memory.embedding_model,
                 texts=texts,
             )

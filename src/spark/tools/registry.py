@@ -54,6 +54,8 @@ class ToolRegistry:
         self._registered_scopes: dict[str, set[str]] = {}
         # P1-4: 声明式子代理的工具白名单（None = 全部工具，行为不变）
         self.tool_allowlist: set[str] | None = None
+        # dispatch 表与实例生命周期一致（仅映射静态内置处理器），缓存避免每轮重建
+        self._dispatch_cache: dict[str, Callable] | None = None
 
     @property
     def schema_revision(self) -> int:
@@ -413,9 +415,10 @@ class ToolRegistry:
                     result.payload = {"content": wrap(payload_text(result.payload))}
                 return result
 
-            # Built-in tools dispatched via table
-            table = self._build_dispatch_table()
-            handler = table.get(name)
+            # Built-in tools dispatched via table（缓存：表只含静态内置映射，构建一次）
+            if self._dispatch_cache is None:
+                self._dispatch_cache = self._build_dispatch_table()
+            handler = self._dispatch_cache.get(name)
             if handler is not None:
                 result = handler(call.arguments)
                 if hasattr(result, "__await__"):

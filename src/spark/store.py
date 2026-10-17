@@ -436,6 +436,17 @@ class SessionStore:
     def delete_messages_after(self, session_id: str, message_id: int) -> int:
         """Delete messages with id > message_id (and their tool events). Returns removed count."""
         with self._lock:
+            # P0：FTS rowid 是全库自增的 messages.id，删除必须限定本会话的消息 id，
+            # 否则单库多会话时会连带删掉其他会话消息的搜索索引。
+            # 先删 FTS（子查询引用 messages），再删 messages 本体。
+            try:
+                self._conn.execute(
+                    "DELETE FROM messages_fts WHERE rowid IN "
+                    "(SELECT id FROM messages WHERE session_id = ? AND id > ?)",
+                    (session_id, message_id),
+                )
+            except sqlite3.OperationalError:
+                pass
             cur = self._conn.execute(
                 "DELETE FROM messages WHERE session_id = ? AND id > ?",
                 (session_id, message_id),
@@ -445,12 +456,6 @@ class SessionStore:
                 "DELETE FROM tool_events WHERE session_id = ? AND message_id > ?",
                 (session_id, message_id),
             )
-            try:
-                self._conn.execute(
-                    "DELETE FROM messages_fts WHERE rowid > ?", (message_id,)
-                )
-            except sqlite3.OperationalError:
-                pass
             self._conn.commit()
         return removed
 
@@ -592,6 +597,15 @@ class SessionStore:
             ).fetchone()
             if row is None:
                 return None
+            # P0：同 delete_messages_after——FTS 删除限定本会话，防止跨会话误删
+            try:
+                self._conn.execute(
+                    "DELETE FROM messages_fts WHERE rowid IN "
+                    "(SELECT id FROM messages WHERE session_id = ? AND id >= ?)",
+                    (session_id, message_id),
+                )
+            except sqlite3.OperationalError:
+                pass
             self._conn.execute(
                 "DELETE FROM messages WHERE session_id = ? AND id >= ?",
                 (session_id, message_id),
@@ -600,12 +614,6 @@ class SessionStore:
                 "DELETE FROM tool_events WHERE session_id = ? AND message_id >= ?",
                 (session_id, message_id),
             )
-            try:
-                self._conn.execute(
-                    "DELETE FROM messages_fts WHERE rowid >= ?", (message_id,)
-                )
-            except sqlite3.OperationalError:
-                pass
             self._conn.commit()
         return self.load_messages(session_id)
 

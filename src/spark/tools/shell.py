@@ -66,6 +66,8 @@ def bwrap_command(cwd: str, command: str, workdir: str, home: str | None = None)
     return [
         _bwrap_path(),  # type: ignore[list-item]
         "--unshare-all",
+        "--share-net",  # P0：--unshare-all 会连网络命名空间一起隔离，与"不隔离网络"的
+        #               契约相悖——保留网络，否则 workspace 模式下 pip/npm 等直接失败
         "--die-with-parent",
         *bindings,
         "--chdir", cwd,

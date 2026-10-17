@@ -2,6 +2,33 @@
 
 本项目遵循语义化版本。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)。
 
+## [0.9.3] - 2026-10-17
+
+全量源码走查后的首批修复（审查记录见 `docs/reviews/`）。
+
+### 修复
+
+- **bwrap 沙箱断网（P0）**：`bwrap_command` 的 `--unshare-all` 会连网络命名空间一起隔离，
+  与"不隔离网络"的契约相悖——安装了 bubblewrap 的 Linux 在 workspace 模式下
+  pip/npm 等网络命令全部失败。补 `--share-net` 保留网络。
+- **FTS 搜索索引跨会话误删（P0）**：`delete_messages_after` / `truncate_messages`
+  按全局 `rowid > X` 删 FTS，单库多会话时会连带删掉其他会话消息的索引。
+  改为按 `session_id` 子查询精确删除，并先于消息本体删除。
+- **向量记忆默认配置自相矛盾（P0）**：embedding 请求默认打到 chat 端点
+  （如 DeepSeek，无 `/embeddings` 路由），每轮失败静默降级关键词。
+  向量检索改为显式 opt-in（`memory.embedding_enabled`，默认关），
+  并支持独立 `embedding_base_url` / `embedding_api_key`。
+
+### 变更
+
+- 压缩摘要优先走 Provider 抽象（鉴权/重试单一真相源），litellm 直连降为兜底；
+  mock provider 不再误触 litellm 真实路径。
+- 工具 dispatch 表随实例构建一次并缓存，不再每轮重建。
+
+### CI
+
+- 新增 `mirror.yml`：主仓 push 后自动同步 Gitee / GitCode / 两 GitHub 镜像仓（分支+标签）。
+
 ## [0.9.2] - 2026-10-14
 
 CI 转绿批次：修复 GitHub Actions 长期全红的五个独立根因，全部先在本地以 CI

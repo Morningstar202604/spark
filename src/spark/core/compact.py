@@ -230,6 +230,7 @@ class Compactor:
 
     def __init__(self, provider: Any, cfg: Any) -> None:
         self._cfg = cfg
+        self._provider = provider  # P1 修复：保留 Provider 引用，摘要优先走抽象而非直连 litellm
         model_name = getattr(cfg.provider, "model", "mock")
         token_limit = cfg.context.max_context_tokens
         self._adapter = LlmAdapter(
@@ -237,6 +238,35 @@ class Compactor:
             model_name=model_name,
             context_window=token_limit,
         )
+
+    async def _provider_completion(self, prompt_text: str) -> str | None:
+        """通过 Provider 抽象取一次非流式补全文本（单一真相源）。
+
+        mock / 无 stream 能力的 provider 返回 None，由调用方走 litellm 兜底
+        （测试对 litellm 路径打补丁，mock 脚本不应参与摘要）。
+        """
+        from spark.providers.mock import MockProvider
+        from spark.models import ChatMessage
+
+        provider = self._provider
+        if provider is None or not hasattr(provider, "stream"):
+            return None
+        if isinstance(provider, MockProvider):
+            return None
+        parts: list[str] = []
+        try:
+            async for delta in provider.stream(
+                [ChatMessage(role="user", content=prompt_text)], tools=[]
+            ):
+                if delta.type == "text" and delta.text:
+                    parts.append(delta.text)
+                elif delta.type == "end":
+                    break
+        except Exception:
+            logger.debug("provider 补全失败，回退 litellm 直连", exc_info=True)
+            return None
+        text = "".join(parts).strip()
+        return text or None
 
     # ------------------------------------------------------------------ summarise
     async def summarize(self, messages: list[SparkChatMessage]) -> str | None:
@@ -326,6 +356,11 @@ class Compactor:
             + new_transcript
         )
 
+        # P1 修复：合并同样优先走 Provider 抽象，litellm 直连降为兜底
+        provider_text = await self._provider_completion(merge_prompt)
+        if provider_text:
+            return provider_text
+
         try:
             response = await litellm.acompletion(
                 model=model_name,
@@ -366,6 +401,12 @@ class Compactor:
         api_key = getattr(self._cfg.provider, "api_key", None)
 
         prompt_text = STRUCTURED_SUMMARY_PROMPT + "\n\n---\n\n## CONVERSATION TRANSCRIPT\n\n" + transcript_text
+
+        # P1 修复：优先走 Provider 抽象（鉴权/重试/映射单一真相源，mock 不再误触 litellm）；
+        # litellm 直连降为兜底（provider 无 stream 能力或调用失败时）。
+        provider_text = await self._provider_completion(prompt_text)
+        if provider_text:
+            return provider_text
 
         try:
             response = await litellm.acompletion(

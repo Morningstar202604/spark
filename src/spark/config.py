@@ -167,6 +167,13 @@ class MemoryConfig(BaseModel):
     top_k: int = Field(default=6, ge=1, le=50)
     capacity: int = Field(default=500, ge=1, le=100_000)
     embedding_model: str = "text-embedding-3-small"
+    # P0 修复：向量检索改为显式 opt-in。默认关——chat 端点（如 DeepSeek）大多没有
+    # /embeddings，默认开启只会每轮报错降级关键词。要开就配 embedding_* 三项。
+    embedding_enabled: bool = False
+    # 留空 = 复用 provider.base_url / provider.api_key（要求该端点支持 /embeddings）；
+    # 指向独立 embedding 服务（硅基流动/OpenAI 兼容网关/本地 ollama）时单独填写。
+    embedding_base_url: str = ""
+    embedding_api_key: str = ""
     auto_extract: bool = True
     rerank_model: str = ""  # 留空 = 不启用重排；填 BAAI/bge-reranker-v2-m3 等本地模型
 
