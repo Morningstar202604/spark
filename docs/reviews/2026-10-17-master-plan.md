@@ -158,7 +158,8 @@ plugins/             # 官方插件（audit-proxy、im-gateway、skill-market…
 | **MCP** | tools → **全能力**：resources+templates、prompts、sampling、elicitation、roots、notifications、OAuth 2.1、streamable HTTP（client+server 双侧）；registry 可达性标注扩展 | P2 |
 | **ACP** | spark-server 内置 ACP server → Zed 及一切 ACP 客户端；反向：Hermes 式接 ACP agent 当大脑（agent profiles） | P2 |
 | **LangGraph** | interrupt=审批、SqliteSaver=turn 级恢复、子图=子代理、plan/verify 节点；68 个既有测试做行为等价安全网；graph.py 删除 | P1 |
-| **litellm** | fallback 链、凭据池、`prompt caching` 编排（ProviderTransform 思路）、usage 全回填 | P1 |
+| **litellm** | fallback 链、凭据池、`prompt caching` 编排（ProviderTransform 思路）、usage 全回填；**tag/budget 成本归账内嵌化**（litellm proxy 已有 spend tracking，我们做成引擎内置免部署） | P1 |
+| **观测后端** | OTel 导出 → **自托管 Langfuse 兼容**（trace/prompt payload/成本全量），不自研观测面板；replay.jsonl 与 Langfuse trace 双轨 | P2 |
 | **模型目录** | models.dev/Catwalk 数据源替换 routing.py 硬编码；TTL 缓存 + 离线兜底 | P1 |
 | **OTel** | GenAI 语义约定：trace=turn、span=tool、metric=token/成本/延迟；默认关，doctor 一键开 | P2 |
 | **LSP** | pygls 客户端池：edit→didChange→diagnostics→context 回流（SWE-agent/opencode 范式）；首批 python/ts | P1 |
@@ -168,7 +169,14 @@ plugins/             # 官方插件（audit-proxy、im-gateway、skill-market…
 
 ## 6. 差异化十条 → 工程化落点
 
-| # | 差异化 | 落点 | 阶段 |
+> **⚠️ 6.0 核验修订（2026-10-17 晚，证伪式调研后）**：下表"差异化"降格为"能力建设"，
+> 逐条反例见方向文档 §13。定位口径统一改为：**没有发明级独有，残余优势 = 集成完整性
+> （R1 信任链一体）/ 部署形态（R2 内嵌 vs 旁挂）/ 开放格式（R3 反锁定）/ 工程执行（R4）**。
+> 具体修订：#1 上下文回放追加 OTel→自托管 Langfuse 导出（不自研观测面板，见 §5 补行）；
+> #3 回滚补注 prior art（Claude Code /rewind、aider /undo、Vibe Kanban worktree）；
+> #6 换内核承认 dsh/iPolloWork 在先，我们做"统一信任层的多内核"而非"多内核"本身。
+
+| # | 能力（原"差异化"） | 落点 | 阶段 |
 |---|---|---|---|
 | 1 | 上下文合同 | replay.jsonl（schema 公开）+ Web 回放视图 + `spark replay <turn>` | P2 |
 | 2 | 出网黑匣子 | plugins/audit-proxy（本地正向代理，策略=allow/deny/ask，报告导出） | P3 |

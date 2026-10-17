@@ -283,3 +283,39 @@
 - **Plan/Act/Review 模式档案**（Cline/Kilo）
 - **GitHub 回应式协作**（opencode 生态）：被 @ 时在 CI 里干活——Spark 云 CI 模式可后置
 
+---
+
+## 第五部分：独有性严格核验（2026-10-17 深夜，证伪式调研）
+
+> 方法：对第四部分每条"差异化"主张主动找反例（官方文档/生态目录/竞品仓库）。
+> 结论先行：**没有任何一条是发明级独有。** 该批评完全成立。
+
+### 5.1 逐条核验表
+
+| 主张 | 反例（已核实） | 判定 | 残余价值（正确表述） |
+|---|---|---|---|
+| 换大脑不换壳 | dsh 模型适配器+四源迁移向导（Claude Code/Codex/OpenCode/Hermes→dsh，迁会话/记忆/技能）；**iPolloWork**："unified multi-engine workspace for Codex/DSH/OpenCode"，企业级本地优先；Vibe Kanban/Claude Squad 编排多家 agent | ❌ 不独有 | 我们做的是"统一信任层的多内核"，不是多内核本身 |
+| 任务级时间机器 | Claude Code **/rewind** 官方 checkpointing（每 prompt 检查点，代码+对话同回滚）；aider auto-commit+/undo；Vibe Kanban worktree 隔离 | ❌ 大部存在 | 残余：task 语义（分支+squash 回主干）与统一时间轴 UI |
+| 上下文可回放 | Langfuse/LangSmith **自托管**全量 trace（prompt payload 级）；opencode session export/share；opencode-replay | ❌ 旁挂生态成熟 | 残余：零部署内建 + 证据文件化；方案改为 OTel→Langfuse 兼容 |
+| 成本台账 | **litellm proxy** spend tracking/tag budgets（官方有 Claude Code 粒度归账教程） | ❌ 能力已存在 | 残余：内嵌化——"装上就有" vs "要运维一套 proxy" |
+| 出网审计 | Claude Code 企业网络配置（代理/环境变量治理）+ TLS inspection 拼凑；dsh 生态有 Security & Governance 插件分类 | ⚠️ 拼凑存在，开箱证据级未见成熟实现 | **残余最强的一条**，但表述为"集成完整性"而非发明 |
+| 国产多模型原生 | iFlow CLI（阿里，免费多模型 Qwen3-Coder/Kimi K2，hooks/SDK）；CodeBuddy CLI（腾讯）；Qwen Code | ❌ 拥挤赛道 | 残余：无厂商绑定（也不绑阿里/腾讯）+ MIT + 五端 |
+| 自进化技能库 | hermes 完整实现（任务后建技能/自改进/nudge） | ❌ hermes 领跑 | 我们是集成者，学其设计 |
+| Creator mode | dsh 原生（聊天生成插件+热加载） | ❌ | 集成，本地 Python 生态版 |
+| IM 网关 | hermes 五通道（TG/Discord/Slack/WhatsApp/Signal） | ❌ | 残余：飞书/微信优先的国内通道 |
+| 评分卡发布 | SWE-bench/OpenHands 公开评测惯例 | ❌ 惯例 | 工程实践，不称特色 |
+
+### 5.2 核验后的残余优势（就四条，全部是"组合与执行"不是"发明"）
+
+- **R1 信任链一体化**：审批签名 + 出网审计 + 上下文回放 + 回滚，**同一数据模型、同一时间轴、导出即证据包**。竞品的对应物全是旁挂/拼凑（Langfuse 要部署、企业拼 TLS 检查、Claude Code 无审计文件）。
+- **R2 内嵌 vs 旁挂**：成本归账、观测、沙箱、fallback——竞品要装运维一套 proxy/面板，Spark 装上就有。部署形态差异，不是功能差异。
+- **R3 开放格式反锁定**：sessions/上下文 JSONL 公开 schema + OTel 标准导出 + MIT。数据随时搬走，这是对"订阅绑架"的真实差异化。
+- **R4 工程执行力**：五端同源、五平台镜像、CI、分数卡、证伪式核验文化本身。
+
+### 5.3 企业/HR 问"你到底有什么用"的现实话术（禁用"本地化"等烂大街词）
+
+- **对掏钱的人**：同一个任务，模型路线差 10–20 倍成本；Spark 把预算、降级链、按任务归账做成引擎内置——AI 开销从"黑盒订阅"变成"带台账的工程支出"。
+- **对交差的人**：每个 agent 任务自动产出三份可归档文件——审计日志、成本流水、上下文回放。安全审查和财务流程直接接，不用为 AI 单开流程。
+- **对干活的人**：并行任务编排（worktree）+ 团队规范自动执行（AGENTS.md+hooks）+ 夜间批处理——工程师从"盯着 agent 干活"变成"验收它产出的 PR"。
+- **对面试官/HR（个人层面）**：完整交付过一个跨五端、五平台分发、有 CI/评测/文档体系的开源系统；所有卖点做过证伪式核验并公开否定了自己一半的初始判断——这展示的是工程判断力，而工程判断力是招人时最贵的东西。
+
