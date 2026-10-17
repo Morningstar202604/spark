@@ -165,6 +165,34 @@ plugins/             # 官方插件（audit-proxy、im-gateway、skill-market…
 | **LSP** | pygls 客户端池：edit→didChange→diagnostics→context 回流（SWE-agent/opencode 范式）；首批 python/ts | P1 |
 | **A2A** | 观望，接口留位（agent profile 未来可指远程 A2A agent） | P4 |
 
+### 5.5 横向扩展地图（已有功能 × 自定义面 × 生态先例 × 我们改什么）
+
+> 原则：扩展≠照抄。每项必须回答"先例是谁、我们改什么"，否则不立项。
+> 先例核实日期：2026-10-17（Claude Code 30 hook 事件/四层设置、opencode small_model/
+> 自定义命令/keybinds、codex profiles、Roo checkpoints、aider lint/test 钩子、
+> Gemini extensions 打包、agentskills RFC lockfile、claude-code-action、Crush themes）。
+
+| # | 已有功能 | 扩展面（自定义点） | 生态先例 | 我们改什么（≠照抄） | 阶段 |
+|---|---|---|---|---|---|
+| H1 | 内置 33 工具 | 自定义工具 SDK：entry-points 注册 + 参数预设/别名 | opencode plugins、MCP 自定义工具 | pydantic 类型化规范 + 工具级成本标注进 AEF | P4 |
+| H2 | hooks（6 shell 事件） | 事件面扩到 ~20；Command/HTTP/Prompt/Agent 四类 hook | Claude Code hooks（30 事件，四类） | hook 输出即 AEF 证据源，审计内联 | P2 |
+| H3 | permission_rules | 多作用域设置 user/project/local（deny 跨层优先）+ 时段/分支条件 | Claude Code 四层 settings | 策略可导出 AEF；按任务类型模板化 | P2 |
+| H4 | 6 档审批模式 | 自定义模式档案（=提示+工具白名单+模型档组合） | Cline/Roo custom modes、opencode modes | 档案可入库分享；与分支/任务类型联动 | P2 |
+| H5 | slash 命令（内置） | 自定义命令目录 `.spark/commands/*.md`（参数占位） | CC custom slash、opencode commands、codex prompts | 命令=技能组合糖 + 内嵌证据视图 | P2 |
+| H6 | 声明式子代理 | 团队编排模板（多代理流水线 YAML） | CC subagents、Gemini extensions 打包 | 父子链写进 AEF（可回放谁干的） | P4 |
+| H7 | skills 目录 | lockfile + 签名 + 注册表 | agentskills RFC（skills-lock）、tech-leads-club registry | 注册表带质量画像（该技能历史成本/成功率） | P4 |
+| H8 | MCP client/server | per-server 沙箱+配额+健康检查+信任分（运行时） | **空白（无成熟先例）** | "MCP 的 systemd"——独立引流件 | P4 |
+| H9 | 四档沙箱 | 后端插件化（bwrap/landlock/docker） | Codex landlock/seatbelt | 沙箱后端即插件，含 MCP 沙箱复用 | P2/P4 |
+| H10 | Compactor | 压缩器可插拔 + small_model 指定 | opencode small_model、CC compact hooks | 压缩决策写进上下文合同（可回放） | P2 |
+| H11 | 记忆（向量+关键词） | 团队记忆 MR 化 + 记忆规则（记什么/忘什么）自定义 | hermes nudge、CC memory hierarchy | 记忆变更=git MR，可 review 可回滚——独此一家 | P4 |
+| H12 | 检查点/git_memory | 自动检查点策略（每工具/每 turn/每 N 分钟）+ 回滚粒度 | Roo checkpoints、CC /rewind、aider /undo | 三粒度统一时间轴；任务级 squash 语义 | P2 |
+| H13 | 模型路由 | profile 系统 + 任务类型自动路由 + 预算即代码 | codex profiles、litellm budgets | 超限自动降级链；路由决策进 AEF | P2/P4 |
+| H14 | Web 前端 | 主题市场 + 面板开关 + 状态栏自定义 | Crush themes、CC statusline | 主题=design tokens 包，社区可发布 | P4 |
+| H15 | TUI/CLI | keybinds+leader key、statusline、自定义命令 | opencode keybinds（leader） | 三端一份 TOML 同源生成（CC/opencode 都是分裂的） | P4 |
+| H16 | evals harness | 工作流影子重放（升级回归）+ 个人 eval 录制 | 自家 evals.yml、SWE-bench | 用户工作流录制→新版本 CI 自动重放对比 | P4 |
+| H17 | CI 模式（缺） | spark-action：@spark 处理 issue/PR/定时 | claude-code-action | **PR 自带 AEF 证据包**——别人没有 | P4 |
+| H18 | 审批引擎（自研强项） | IM 网关把审批卡推到飞书/微信/TG 现场完成 | hermes 五通道（纯通知） | 通道上可**审批/回滚**，不只是看消息——信任链的移动端 | P4 |
+
 ---
 
 ## 6. 差异化十条 → 工程化落点
@@ -248,12 +276,14 @@ tag  ──► release.yml：wheel+sdist（PyPI trusted publishing）+ EXE×win 
 | 阶段 | 版本 | 内容（依赖序） | DoD |
 |---|---|---|---|
 | **P0 卫生周** | v0.9.3 | 3 个 P0 修复 + P1 快修（usage 回填/registry 缓存/ Compactor 走 provider）+ 五平台镜像 CI + conventional commits 启用 | 全绿 CI；镜像同步 <60s；P0 关闭 |
-| **P1 模块化+分发** | v0.10 | 拆包+import-linter；FastAPI/OpenAPI+前端 codegen；litellm fallback/凭据池/usage 全回填；模型目录；LSP 诊断闭环（py/ts）；repo map PageRank；rich CLI+补全+agent/ide 命令；文档站 v1（Diátaxis+自动配置参考）；uvx 发布 | 冷启动/首屏预算达标；pip 一行可用；docs 死链 0 |
-| **P2 座舱+协议** | v0.11 | LangGraph 迁入；MCP 全能力；ACP server；agent profiles（IDE/Agent 一键切换）；上下文合同回放；双粒度时间轴 UI；Web 前端造轮子替换完成 | 行为等价测试全过；Zed 可用；回放 100% 覆盖 |
-| **P3 进化+信任** | v0.12–0.13 | 自进化技能库；Creator mode+插件目录；出网黑匣子；IM 网关（飞书先行）；EXE 更新器+安装器 | 分数卡三连版可对比；黑匣子报告样例发布 |
-| **P4 生态** | v0.14 | A2A 留位/远程 agent；插件市场治理（审收流程）；企业版预留（审计导出/SSO 留接口） | 外部贡献者走通插件 PR |
+| **P1 模块化+分发** | v0.10 | 拆包+import-linter；FastAPI/OpenAPI+前端 codegen；litellm fallback/凭据池/usage 全回填+tag 成本归账；模型目录；LSP 诊断闭环（py/ts）；repo map PageRank；small_model 全局配置；rich CLI+补全；文档站 v1（Diátaxis+自动配置参考）；uvx 发布 | 冷启动/首屏预算达标；pip 一行可用；docs 死链 0 |
+| **P2 座舱+协议** | v0.11 | LangGraph 迁入；MCP 全能力；ACP server；agent profiles（IDE/Agent 一键切换）；上下文合同回放（OTel→Langfuse 兼容）；双粒度时间轴 UI；多作用域设置（user/project/local，deny 优先）；自定义 slash 命令；hook 事件面扩容（~20 事件，四类 hook）；模式档案（Plan/Act/Review 自定义）；Web 前端造轮子替换完成；**上下文火焰图 v1** | 行为等价测试全过；Zed 可用；回放 100% 覆盖；火焰图能定位单 turn 上下文浪费 |
+| **P3 信任链+AEF** | v0.12 | **AEF v0.1 规范发布**（任务证据文件：审批/egress/上下文/成本/回滚五件套 JSON Schema）+ 出网黑匣子（首个 AEF 完整实现）+ PR 证据包（MR 模板渲染 AEF）+ provenance blame（代码行级溯源查询）+ 夜间无人值守安全包（队列+熔断+早报）+ EXE 更新器+安装器 | AEF 规范+参考实现发布；黑匣子报告样例；夜间模式 7×24 试点无事故 |
+| **P4 横向扩展全量** | v0.13 | 自定义工具 SDK（entry-points）；团队记忆 MR 化（记忆变更=可 review 的 git 提交）；工作流影子重放（升级回归）；任务质量画像；预算即代码（超限降级链）；MCP 沙箱运行时（per-server 沙箱+配额+健康检查）；skills lockfile+签名注册表；主题市场+statusline+keybinds（三端同源配置）；spark-action（GitHub Action，PR 自带证据包）；IM 网关（飞书审批卡先行）；Creator mode+插件目录 | 每项独立 DoD 清单；外部用户完成一次"自定义工具→市场安装技能→IM 审批"闭环 |
+| **P5 标准与生态** | v0.14–v0.15 | AEF 推广（aef-export 兼容转换器：dsh/opencode/Claude Code 存储互转）；评分卡渲染 AEF；合规包（等保向证据导出）；A2A 留位；企业版预留（SSO/集中策略下发） | ≥2 个外部项目采用 AEF 导出；合规包样例通过一次真实内网评审 |
 
 里程碑原则：**每阶段结束必是可发布态**；任何阶段可被中断而不烂尾（风险登记册联动）。
+节奏说明：IM 网关/Creator mode 等后置项全部保留（全量纳入），但排在信任链之后——先有证据标准，通道类功能才有差异化载体。
 
 ---
 
