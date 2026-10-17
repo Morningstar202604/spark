@@ -34,4 +34,10 @@ def create_provider(cfg: SparkConfig, mock: MockProvider | None = None) -> Provi
         if not base or base == "https://api.deepseek.com/v1":
             base = "http://127.0.0.1:11434/v1"
         return OllamaProvider(base, cfg.provider.model, key)
-    return OpenAICompatProvider(cfg.provider.base_url, cfg.provider.model, key or "")
+    return OpenAICompatProvider(
+        cfg.provider.base_url,
+        cfg.provider.model,
+        key or "",
+        fallback_models=getattr(cfg.provider, "fallback_models", None),
+        api_keys=getattr(cfg.provider, "api_keys", None),
+    )

@@ -231,6 +231,10 @@ class Compactor:
     def __init__(self, provider: Any, cfg: Any) -> None:
         self._cfg = cfg
         self._provider = provider  # P1 修复：保留 Provider 引用，摘要优先走抽象而非直连 litellm
+        # P1：小模型分工——摘要/合并等辅助调用优先用 small_model（留空 = 主模型）
+        self._summary_model = (
+            getattr(cfg.provider, "small_model", "") or getattr(cfg.provider, "model", "mock")
+        )
         model_name = getattr(cfg.provider, "model", "mock")
         token_limit = cfg.context.max_context_tokens
         self._adapter = LlmAdapter(
@@ -253,9 +257,26 @@ class Compactor:
             return None
         if isinstance(provider, MockProvider):
             return None
+        # P1：小模型分工——配置了 small_model 且 provider 支持克隆时，摘要走小模型
+        target = provider
+        summary_model = getattr(self, "_summary_model", "")
+        if (
+            summary_model
+            and summary_model != getattr(provider, "model", None)
+            and hasattr(provider, "base_url")
+        ):
+            from spark.providers.openai_compat import OpenAICompatProvider
+
+            if isinstance(provider, OpenAICompatProvider):
+                target = OpenAICompatProvider(
+                    provider.base_url,
+                    summary_model,
+                    provider.api_key,
+                    max_retries=provider.max_retries,
+                )
         parts: list[str] = []
         try:
-            async for delta in provider.stream(
+            async for delta in target.stream(
                 [ChatMessage(role="user", content=prompt_text)], tools=[]
             ):
                 if delta.type == "text" and delta.text:
@@ -334,7 +355,7 @@ class Compactor:
 
         Returns a single structured 5-section Markdown string.
         """
-        model_name = getattr(self._cfg.provider, "model", "mock")
+        model_name = getattr(self, "_summary_model", None) or getattr(self._cfg.provider, "model", "mock")
         base_url = getattr(self._cfg.provider, "base_url", None)
         api_key = getattr(self._cfg.provider, "api_key", None)
 
@@ -396,7 +417,7 @@ class Compactor:
         so compaction still works even if the provider doesn't support the
         direct litellm path.
         """
-        model_name = getattr(self._cfg.provider, "model", "mock")
+        model_name = getattr(self, "_summary_model", None) or getattr(self._cfg.provider, "model", "mock")
         base_url = getattr(self._cfg.provider, "base_url", None)
         api_key = getattr(self._cfg.provider, "api_key", None)
 

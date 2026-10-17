@@ -150,23 +150,43 @@ class OpenAICompatProvider:
         model: str,
         api_key: str,
         max_retries: int = 3,
+        fallback_models: list[str] | None = None,
+        api_keys: list[str] | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.model = model
         self.api_key = api_key
         self.max_retries = max_retries
+        # P1：fallback 链（去重，排除主模型）；凭据池（api_key 永远是池首，去重保序）
+        self.fallback_models = [m for m in (fallback_models or []) if m and m != model]
+        pool: list[str] = []
+        for k in [api_key, *(api_keys or [])]:
+            if k and k not in pool:
+                pool.append(k)
+        self._key_pool: list[str] = pool or [api_key]
+        self._key_cursor = 0
 
-    def _litellm_model(self) -> tuple[str, str | None]:
+    def _next_key(self) -> str:
+        """P1：凭据池轮换——每次尝试取下一把钥匙（单钥匙时恒等）。"""
+        if not self._key_pool:
+            return self.api_key
+        key = self._key_pool[self._key_cursor % len(self._key_pool)]
+        self._key_cursor += 1
+        return key
+
+    def _litellm_model(self, model: str | None = None) -> tuple[str, str | None]:
         """Return ``(model, custom_llm_provider)`` for the LiteLLM call.
 
         裸模型名一律按 OpenAI 兼容处理（''api_base'' 已显式给出）：LiteLLM 只能
         按内置规则推断 provider，任何自定义模型名（glm-5.3-flash、Qwen-… 等）
         都会直接报 "LLM Provider NOT provided"。带 "/" 的名字视为用户显式使用
         LiteLLM 前缀语法（openai/xxx、deepseek/xxx），原样尊重。
+        ``model`` 传入时覆盖 ``self.model``（fallback 目标用）。
         """
-        if "/" in self.model:
-            return self.model, None
-        return self.model, "openai"
+        name = model or self.model
+        if "/" in name:
+            return name, None
+        return name, "openai"
 
     # -- public interface (Provider protocol) ----------------------------------
 
@@ -247,83 +267,116 @@ class OpenAICompatProvider:
         effort: str | None = None,
     ) -> AsyncIterator[ChatDelta]:
         last_exc: Exception | None = None
-        for attempt in range(self.max_retries + 1):
-            try:
-                model_arg, provider_hint = self._litellm_model()
-                completion_kwargs: dict[str, Any] = dict(
-                    model=model_arg,
-                    messages=_to_openai(messages),
-                    tools=tools or None,
-                    stream=True,
-                    api_base=self.base_url or None,
-                    api_key=self.api_key or None,
-                    num_retries=0,  # we handle retries explicitly for fine-grained control
-                    drop_params=True,  # pass through non-standard fields (e.g. reasoning_content)
-                    timeout=120.0,  # httpx.Timeout(120.0) equivalent for LiteLLM
-                )
-                if provider_hint:
-                    completion_kwargs["custom_llm_provider"] = provider_hint
-                if effort:
-                    completion_kwargs["reasoning_effort"] = effort
-                    if "deepseek" in self.model.lower():
-                        completion_kwargs["extra_body"] = {
-                            "thinking": {
-                                "type": "enabled",
-                                "budget_tokens": {
-                                    "low": 2048,
-                                    "medium": 4096,
-                                    "high": 8192,
-                                }[effort],
+        # P1：目标链 = 主模型 + fallback_models；每个目标独立重试，凭据池逐次轮换。
+        # 任一目标成功即返回；全部失败才抛错（错误信息脱敏全部池内密钥）。
+        targets: list[str] = [self.model, *self.fallback_models]
+        response = None
+        for ti, target in enumerate(targets):
+            for attempt in range(self.max_retries + 1):
+                try:
+                    model_arg, provider_hint = self._litellm_model(target)
+                    request_key = self._next_key()
+                    completion_kwargs: dict[str, Any] = dict(
+                        model=model_arg,
+                        messages=_to_openai(messages),
+                        tools=tools or None,
+                        stream=True,
+                        # P1：请求流尾 usage 帧（choices 为空、usage 有值）；
+                        # drop_params=True 兜底不支持该参数的 provider
+                        stream_options={"include_usage": True},
+                        api_base=self.base_url or None,
+                        api_key=request_key or None,
+                        num_retries=0,  # we handle retries explicitly for fine-grained control
+                        drop_params=True,  # pass through non-standard fields (e.g. reasoning_content)
+                        timeout=120.0,  # httpx.Timeout(120.0) equivalent for LiteLLM
+                    )
+                    if provider_hint:
+                        completion_kwargs["custom_llm_provider"] = provider_hint
+                    if effort:
+                        completion_kwargs["reasoning_effort"] = effort
+                        if "deepseek" in target.lower():
+                            completion_kwargs["extra_body"] = {
+                                "thinking": {
+                                    "type": "enabled",
+                                    "budget_tokens": {
+                                        "low": 2048,
+                                        "medium": 4096,
+                                        "high": 8192,
+                                    }[effort],
+                                }
                             }
-                        }
-                response = await litellm.acompletion(**completion_kwargs)
-            except Exception as exc:
-                last_exc = exc
-                status = self._extract_status_code(exc)
-                is_retryable = (
-                    status in _RETRYABLE_STATUS_CODES
-                    or (
-                        status is None
-                        and isinstance(exc, _RETRYABLE_EXCEPTIONS)
+                    response = await litellm.acompletion(**completion_kwargs)
+                except Exception as exc:
+                    last_exc = exc
+                    status = self._extract_status_code(exc)
+                    is_retryable = (
+                        status in _RETRYABLE_STATUS_CODES
+                        or (
+                            status is None
+                            and isinstance(exc, _RETRYABLE_EXCEPTIONS)
+                        )
                     )
+                    if is_retryable and attempt < self.max_retries:
+                        backoff = 2**attempt  # 1, 2, 4 seconds
+                        logger.warning(
+                            "provider_retry model=%s attempt=%d/%d status=%s base_url=%s backoff=%ds error=%s",
+                            target,
+                            attempt + 1,
+                            self.max_retries,
+                            status,
+                            self.base_url,
+                            backoff,
+                            str(exc)[:200],
+                        )
+                        await asyncio.sleep(backoff)
+                        continue
+                    # 本目标不可重试（如 4xx）——交给外层决定是否切下一目标
+                    break
+                # Successful request — proceed to stream
+                last_exc = None
+                break
+            if last_exc is None and response is not None:
+                break
+            if ti < len(targets) - 1:
+                logger.warning(
+                    "provider_fallback: 模型 %s 不可用，切换到 %s", target, targets[ti + 1]
                 )
-                if is_retryable and attempt < self.max_retries:
-                    backoff = 2**attempt  # 1, 2, 4 seconds
-                    logger.warning(
-                        "provider_retry attempt=%d/%d status=%s base_url=%s backoff=%ds error=%s",
-                        attempt + 1,
-                        self.max_retries,
-                        status,
-                        self.base_url,
-                        backoff,
-                        str(exc)[:200],
-                    )
-                    await asyncio.sleep(backoff)
-                    continue
-                msg = str(exc)
-                # Never leak credentials into error output
-                if self.api_key and self.api_key in msg:
-                    msg = msg.replace(self.api_key, "***")
-                raise RuntimeError(
-                    f"Provider request to '{self.base_url}' failed: {msg}"
-                ) from exc
-            # Successful request — proceed to stream
-            last_exc = None
-            break
-        # If all retries exhausted without success
-        if last_exc is not None:
-            msg = str(last_exc)
-            if self.api_key and self.api_key in msg:
-                msg = msg.replace(self.api_key, "***")
+                continue
+        # If all targets exhausted without success
+        if last_exc is not None or response is None:
+            msg = str(last_exc) if last_exc else "no response"
+            # Never leak credentials into error output（全池脱敏）
+            for k in self._key_pool:
+                if k and k in msg:
+                    msg = msg.replace(k, "***")
             raise RuntimeError(
                 f"Provider request to '{self.base_url}' failed after "
-                f"{self.max_retries} retries: {msg}"
+                f"{self.max_retries} retries (models tried: {', '.join(targets)}): {msg}"
             ) from last_exc
 
         tool_acc: dict[int, dict[str, str]] = {}
         think_state: dict[str, bool] = {"open": False, "closed": False}
+        reported_usage: dict[str, int] = {}
 
         async for chunk in response:
+            # P1：usage 帧通常出现在流尾且 choices 为空——先提取再跳过
+            usage_obj = getattr(chunk, "usage", None)
+            if usage_obj is not None:
+                try:
+                    if getattr(usage_obj, "prompt_tokens", None):
+                        reported_usage["prompt_tokens"] = int(usage_obj.prompt_tokens)
+                    if getattr(usage_obj, "completion_tokens", None):
+                        reported_usage["completion_tokens"] = int(
+                            usage_obj.completion_tokens
+                        )
+                    details = getattr(usage_obj, "completion_tokens_details", None)
+                    reasoning_tok = (
+                        getattr(details, "reasoning_tokens", None) if details else None
+                    )
+                    if reasoning_tok:
+                        reported_usage["reasoning_tokens"] = int(reasoning_tok)
+                except (TypeError, ValueError):
+                    pass
             # Guard against LiteLLM returning None/empty chunks
             if not chunk or not chunk.choices:
                 continue
@@ -381,7 +434,7 @@ class OpenAICompatProvider:
                     arguments=args,
                 ),
             )
-        yield ChatDelta(type="end")
+        yield ChatDelta(type="end", usage=reported_usage or None)
 
 
 class OllamaProvider(OpenAICompatProvider):

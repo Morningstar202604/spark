@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import logging
 import os
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -152,6 +153,34 @@ def _node_text(source: bytes, node) -> str:
         return ""
 
 
+
+def _git_heat(root: Path, limit: int = 2000) -> dict[str, int]:
+    """P1：git 热度（aider PageRank 思路的轻量近似）。
+
+    统计最近 ``limit`` 次提交中各文件的被提及次数，作为桶内排序权重：
+    改得越频繁的文件越先进入地图（替代纯目录遍历顺序的偏置）。
+    非 git 仓库 / git 不可用 / 超时 → 返回空 dict，行为与旧版完全一致。
+    """
+    try:
+        proc = subprocess.run(
+            ["git", "log", f"-{limit}", "--format=format:", "--name-only", "--"],
+            cwd=str(root),
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return {}
+    if proc.returncode != 0:
+        return {}
+    heat: dict[str, int] = {}
+    for line in proc.stdout.splitlines():
+        name = line.strip()
+        if name:
+            heat[name] = heat.get(name, 0) + 1
+    return heat
+
+
 def _bucket_rank(lines: int) -> int:
     for rank, (lo, hi) in enumerate(BUCKETS):
         if lo <= lines < hi:
@@ -209,6 +238,9 @@ def build_repo_map(root: Path, cfg: RepoMapConfig | None = None) -> str:
     if not files:
         return ""
 
+    # P1：git 热度参与桶内排序（高频改动文件优先进入预算）
+    heat = _git_heat(root)
+
     # 按桶排名分组：rank 0（<50 行）→ 输出符号；rank 1 → 符号 + 截断；rank 2 → 仅文件名
     per_bucket: dict[int, list[tuple[Path, int, list[str]]]] = {}
     for p in files:
@@ -231,7 +263,14 @@ def build_repo_map(root: Path, cfg: RepoMapConfig | None = None) -> str:
     for rank in sorted(per_bucket):
         if budget <= 0:
             break
-        entries = sorted(per_bucket[rank], key=lambda e: (e[1], str(e[0])))
+        entries = sorted(
+            per_bucket[rank],
+            key=lambda e: (
+                -heat.get(str(e[0].relative_to(root)), 0),
+                e[1],
+                str(e[0]),
+            ),
+        )
         for p, lines, syms in entries:
             rel = p.relative_to(root)
             if rank == 0 and syms:

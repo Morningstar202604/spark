@@ -44,6 +44,9 @@ class ChatDelta(BaseModel):
     type: Literal["text", "reasoning", "tool_call", "end"]
     text: str | None = None
     tool_call: ToolCall | None = None
+    # P1：end 帧可携带 provider 上报的真实 usage（prompt/completion/reasoning tokens），
+    # AgentLoop 回填 token_usage 表（source=reported），无上报时仍走估算。
+    usage: dict[str, int] | None = None
 
 
 class ToolResult(BaseModel):

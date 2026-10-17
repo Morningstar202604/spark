@@ -177,10 +177,11 @@ class AgentLoop:
         text_parts: list[str],
         reasoning_parts: list[str],
     ) -> None:
-        """Write per-turn token spend into the SQLite audit table (estimated).
+        """Write per-turn token spend into the SQLite audit table.
 
-        ``source="estimated"`` — spark 不依赖 provider 的 usage 字段，统一按
-        tokenizer 估算；后续接入 provider 真实 usage 时改传 ``source="reported"``。
+        P1：优先使用 provider 流式上报的真实 usage（``source="reported"``，
+        来自 ChatDelta(type="end", usage=...)）；未上报时回退启发式估算
+        （``source="estimated"``）。
         """
         try:
             input_est = sum(estimate_message_tokens(m) for m in messages)
@@ -190,8 +191,22 @@ class AgentLoop:
             reasoning_est = estimate_message_tokens(
                 ChatMessage(role="assistant", content="".join(reasoning_parts) or None)
             )
+            source = "estimated"
+            ru = getattr(self, "_reported_usage", None)
+            if ru:
+                in_tok = int(ru.get("prompt_tokens") or 0)
+                out_tok = int(ru.get("completion_tokens") or 0)
+                reasoning_tok = int(ru.get("reasoning_tokens") or 0)
+                if in_tok or out_tok or reasoning_tok:
+                    input_est, output_est, reasoning_est = in_tok, out_tok, reasoning_tok
+                    source = "reported"
             self.store.append_token_usage(
-                self.session_id, message_id, input_est, output_est, reasoning_est
+                self.session_id,
+                message_id,
+                input_est,
+                output_est,
+                reasoning_est,
+                source=source,
             )
         except Exception:
             logger.debug("persist token usage failed", exc_info=True)
@@ -495,6 +510,7 @@ class AgentLoop:
             text_parts: list[str] = []
             reasoning_parts: list[str] = []
             tool_calls: list[ToolCall] = []
+            self._reported_usage: dict[str, int] | None = None  # P1：本轮流式真实 usage
             try:
                 async for delta in self.provider.stream(
                     messages, self.registry.schemas(), **self._stream_extra
@@ -512,6 +528,9 @@ class AgentLoop:
                         yield TurnEvent(type="text_delta", text=delta.text)
                     elif delta.type == "tool_call" and delta.tool_call:
                         tool_calls.append(delta.tool_call)
+                    elif delta.type == "end" and delta.usage:
+                        # P1：provider 上报的真实 usage，覆盖估算口径
+                        self._reported_usage = delta.usage
             except Exception as exc:
                 yield TurnEvent(type="turn_error", text=str(exc))
                 return

@@ -11,4 +11,4 @@ import os
 # every entry point (cli/web/desktop) imports spark first.
 os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")
 
-__version__ = "0.9.3"
+__version__ = "0.9.4"

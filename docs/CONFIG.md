@@ -110,3 +110,22 @@ model = "deepseek-chat"
 放在工作目录的 `.spark.toml` 会与全局配置合并，但会经过安全清洗：provider、MCP、hooks 等可执行配置项不允许由项目文件注入（防提示注入提权）。细节见 `config.py` 的 `_sanitize_project_config`。
 
 > AI生成
+
+## P1 新增：供应商韧性配置（v0.9.4+）
+
+```toml
+[provider]
+model = "deepseek-chat"
+# 凭据池：请求失败逐次轮换（单 key 行为不变）
+api_keys = ["sk-backup-1", "sk-backup-2"]
+# fallback 链：主模型重试耗尽后依次切换（同端点）
+fallback_models = ["deepseek-v4-flash"]
+# 小模型分工：压缩/摘要/合并等辅助调用用便宜模型（留空 = 主模型）
+small_model = "deepseek-v4-flash"
+```
+
+- **usage 真实回填**：OpenAI 兼容端点会在流尾上报 token 用量（自动请求，
+  不支持的端点自动降级估算）；`token_usage` 表 `source` 列为 `reported`。
+- **模型目录**：`spark models [关键词]` 查询 models.dev 开放目录
+  （232+ 供应商、价格、上下文长度；24h 本地缓存，离线回退内置快照）。
+- **repo map git 热度**：代码地图按 git 提交频率排序（高频文件优先入图）。

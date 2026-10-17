@@ -515,6 +515,32 @@ def version_cmd() -> None:
     typer.echo(version_line(detail))
 
 
+@app.command("models", help="查询开放模型目录（models.dev）——搜索模型/价格/上下文长度")
+def models_cmd(
+    query: str = typer.Argument("", help="关键词（供应商或模型名，留空列出少量热门）"),
+    limit: int = typer.Option(20, "--limit", "-n", help="最多返回条数"),
+    refresh: bool = typer.Option(False, "--refresh", help="强制刷新目录缓存（默认 24h）"),
+) -> None:
+    from spark import model_catalog
+    from spark.config import default_home
+
+    catalog = model_catalog.fetch_catalog(default_home(), force=refresh)
+    rows = model_catalog.search(catalog, query, limit=limit)
+    if not rows:
+        typer.echo("（无匹配结果——网络不可达时会退回内置精简目录）")
+        return
+    typer.echo(f"{'供应商':<16} {'模型':<34} {'上下文':<10} 价格(USD/1M in/out)")
+    for r in rows:
+        cost = r.get("cost") or {}
+        ctx = r.get("context")
+        ctx_s = f"{ctx // 1000}k" if isinstance(ctx, int) else "-"
+        try:
+            price_s = f"{float(cost.get('input') or 0):g} / {float(cost.get('output') or 0):g}"
+        except (TypeError, ValueError):
+            price_s = "-"
+        typer.echo(f"{r['provider'][:16]:<16} {r['model'][:34]:<34} {ctx_s:<10} {price_s}")
+
+
 @app.command("init")
 def init_cmd(
     config: Path | None = typer.Option(None, "--config", help="写入的配置文件路径"),

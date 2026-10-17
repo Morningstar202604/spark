@@ -2,6 +2,29 @@
 
 本项目遵循语义化版本。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)。
 
+## [0.9.4] - 2026-10-18
+
+P1 阶段第一批（供应商韧性 + 真实用量 + 模型目录）。
+
+### 新增
+
+- **usage 真实回填**：流式请求自动带上 `stream_options.include_usage`（不支持的端点
+  自动降级），流尾 usage 帧随 `ChatDelta(type="end")` 上抛；`token_usage` 表出现
+  `source="reported"` 记录——成本台账从估算升级为实测。
+- **fallback 链 + 凭据池**（`[provider]` 新配置 `fallback_models` / `api_keys`）：
+  主模型重试耗尽后依次切换备选模型；密钥池逐次轮换；错误信息对全池密钥脱敏。
+- **小模型分工**（`provider.small_model`）：压缩/摘要/合并等辅助调用走便宜模型，
+  留空 = 主模型，行为不变。
+- **开放模型目录**（`spark models [关键词]`）：models.dev 数据源（232+ 供应商、
+  价格、上下文长度），24h 本地缓存 + 离线内置快照兜底；`estimate_cost()` 为
+  成本台账提供计价基础。
+- **repo map git 热度**：代码地图桶内按 git 提及频率排序（aider PageRank 轻量近似），
+  高频改动文件优先进入上下文预算；非 git 仓库行为不变。
+
+### 变更
+
+- 压缩摘要的 litellm 兜底路径同样遵循 `small_model` 配置。
+
 ## [0.9.3] - 2026-10-17
 
 全量源码走查后的首批修复（审查记录见 `docs/reviews/`）。

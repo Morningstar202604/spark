@@ -104,6 +104,12 @@ class ProviderConfig(BaseModel):
     model: str = "deepseek-chat"
     api_key_env: str = "SPARK_API_KEY"
     api_key: str | None = None
+    # P1：凭据池——与 api_key 并列的备选密钥，请求失败逐次轮换（单 key 行为不变）
+    api_keys: list[str] = Field(default_factory=list)
+    # P1：fallback 链——同端点备选模型，主模型重试耗尽后依次切换
+    fallback_models: list[str] = Field(default_factory=list)
+    # P1：小模型分工——压缩/摘要/记忆抽取等辅助调用使用（留空 = 主模型）
+    small_model: str = ""
 
 
 class AgentConfig(BaseModel):
