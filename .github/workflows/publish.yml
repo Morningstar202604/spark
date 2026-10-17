@@ -39,9 +39,7 @@ jobs:
         id: vercheck
         run: |
           VER=$(python -c "import tomllib;print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
-          if curl -sf https://pypi.org/pypi/spark-agent/json | python3 -c "
-import json,sys
-sys.exit(0 if json.load(sys.stdin).get('info',{}).get('version')=='$VER' else 1)"; then
+          if curl -sf https://pypi.org/pypi/spark-agent/json | python3 -c "import json,sys; sys.exit(0 if json.load(sys.stdin).get('info',{}).get('version')=='$VER' else 1)"; then
             echo "skip=true" >> "$GITHUB_OUTPUT"
             echo "version $VER already on PyPI — skip publish (本地已发布)"
           else
