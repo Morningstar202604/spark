@@ -17,6 +17,7 @@ from spark.config import (
     env_api_key,
     load_config,
     require_api_key,
+    save_config,
     write_config_template,
 )
 from spark.core.loop import AgentLoop
@@ -120,6 +121,7 @@ def _launch_tui(
     registry = ToolRegistry(tool_ctx)
     bridge = asyncio.run(_boot_mcp(cfg, registry))
     tool_ctx.mcp_call = bridge.call
+    tool_ctx.mcp_bridge = bridge
     SparkApp(
         workdir=workdir,
         cfg=cfg,
@@ -212,6 +214,7 @@ async def _exec_async(
     registry = ToolRegistry(tool_ctx)
     bridge = await _boot_mcp(cfg, registry)
     tool_ctx.mcp_call = bridge.call
+    tool_ctx.mcp_bridge = bridge
     loop = AgentLoop(
         workdir=workdir,
         cfg=cfg,
@@ -539,6 +542,75 @@ def models_cmd(
         except (TypeError, ValueError):
             price_s = "-"
         typer.echo(f"{r['provider'][:16]:<16} {r['model'][:34]:<34} {ctx_s:<10} {price_s}")
+
+
+@app.command("context-profile", help="上下文火焰图——这轮请求的上下文都被谁吃了")
+def context_profile_cmd(
+    session: str = typer.Option("", "--session", "-s", help="会话 id（留空 = 最近一个）"),
+    workdir: Path = typer.Option(Path("."), "--workdir"),
+    config: Path | None = typer.Option(None, "--config"),
+) -> None:
+    from spark.core.context_profile import profile_context
+    from spark.store import SessionStore
+
+    cfg = _common_cfg(workdir, config, None, None, None)
+    store = SessionStore(default_home() / "sessions.db")
+    sid = session
+    if not sid:
+        rows = store.list_sessions()
+        if not rows:
+            typer.echo("（没有任何会话——先跑一次对话）", err=True)
+            raise typer.Exit(1)
+        sid = rows[0]["id"]
+        typer.echo(f"（最近会话 {sid}）")
+    profile = profile_context(store, sid, workdir.resolve(), cfg)
+    typer.echo(profile.render())
+
+
+agent_app = typer.Typer(help="大脑档案管理——一键切换模型/供应商组合（P2：agent profiles）")
+app.add_typer(agent_app, name="agent")
+
+
+@agent_app.command("list")
+def agent_list_cmd(
+    config: Path | None = typer.Option(None, "--config"),
+) -> None:
+    """列出全部大脑档案，标记当前激活项。"""
+    cfg = read_config(config, Path(".").resolve())
+    if not cfg.model_profiles:
+        typer.echo("（尚无档案——在 Web 设置中添加，或编辑 config.toml 的 [[model_profiles]]）")
+        return
+    for p in cfg.model_profiles:
+        mark = "●" if p.id == cfg.active_profile_id else " "
+        typer.echo(f" {mark} {p.id:<18} {p.name:<16} {p.provider:<12} {p.model}")
+
+
+@agent_app.command("use")
+def agent_use_cmd(
+    profile: str = typer.Argument(..., help="档案 id 或名称"),
+    config: Path | None = typer.Option(None, "--config"),
+) -> None:
+    """一键切换大脑（写回 active_profile_id 并持久化）。"""
+    cfg = read_config(config, Path(".").resolve())
+    if not cfg.model_profiles:
+        typer.echo("（尚无档案可切换）", err=True)
+        raise typer.Exit(1)
+    hit = next(
+        (p for p in cfg.model_profiles if p.id == profile or p.name == profile),
+        None,
+    )
+    if hit is None:
+        typer.echo(f"档案不存在: {profile}（用 `spark agent list` 查看）", err=True)
+        raise typer.Exit(1)
+    cfg.active_profile_id = hit.id
+    if hit.api_key:
+        cfg.provider.api_key = hit.api_key
+        cfg.provider.name = hit.provider
+        cfg.provider.base_url = hit.base_url or cfg.provider.base_url
+        cfg.provider.model = hit.model
+    path = save_config(cfg, config)
+    typer.echo(f"● 大脑已切换: {hit.name or hit.id} ({hit.provider}/{hit.model})")
+    typer.echo(f"  配置已写入 {path}")
 
 
 @app.command("init")

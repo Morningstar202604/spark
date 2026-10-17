@@ -935,6 +935,7 @@ class AgentLoop:
         sub_cfg.agent.max_tool_rounds = min(15, max(5, sub_cfg.agent.max_tool_rounds))
         sub_ctx = ToolContext(sandbox=self.registry.ctx.sandbox, config=sub_cfg)
         sub_ctx.mcp_call = self.registry.ctx.mcp_call
+        sub_ctx.mcp_bridge = self.registry.ctx.mcp_bridge
         return sub_ctx
 
     def _inherit_registry(self, sub_registry: ToolRegistry) -> None:

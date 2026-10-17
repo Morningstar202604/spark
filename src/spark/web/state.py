@@ -200,6 +200,7 @@ class SparkWebState:
         if self.mcp_bridge is not None:
             self.mcp_bridge.register_into(registry)
             tool_ctx.mcp_call = self.mcp_bridge.call
+            tool_ctx.mcp_bridge = self.mcp_bridge
         provider = create_provider(self.cfg)
         if session_id is None and reuse_latest:
             latest = next(

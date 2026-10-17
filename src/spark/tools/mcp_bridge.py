@@ -25,6 +25,7 @@ from mcp import ClientSession, StdioServerParameters
 from mcp.client.sse import sse_client
 from mcp.client.stdio import stdio_client
 from mcp.client.streamable_http import streamable_http_client
+from pydantic import AnyUrl
 
 from spark.config import McpServerConfig
 from spark.models import ToolResult
@@ -117,6 +118,84 @@ class _McpConnection:
         is_error = getattr(result, "isError", False)
         payload = _content_to_payload(result.content)
         return ToolResult(ok=not is_error, payload=payload)
+
+
+    async def list_resources(self) -> dict[str, Any]:
+        if self._session is None:
+            return {"error": f"MCP {self.cfg.name} not connected"}
+        try:
+            res = await self._session.list_resources()
+        except Exception as exc:
+            detail = str(exc).strip() or exc.__class__.__name__
+            return {"error": detail}
+        return {
+            "resources": [
+                {
+                    "uri": str(r.uri),
+                    "name": getattr(r, "name", None),
+                    "description": getattr(r, "description", None),
+                    "mimeType": getattr(r, "mimeType", None),
+                }
+                for r in (getattr(res, "resources", None) or [])
+            ]
+        }
+
+    async def read_resource(self, uri: str) -> ToolResult:
+        if self._session is None:
+            return ToolResult(ok=False, payload={"error": f"MCP {self.cfg.name} not connected"})
+        try:
+            res = await self._session.read_resource(AnyUrl(uri))  # SDK 要求 AnyUrl 类型
+        except Exception as exc:
+            detail = str(exc).strip() or exc.__class__.__name__
+            return ToolResult(ok=False, payload={"error": detail})
+        contents = [
+            {
+                "uri": str(getattr(c, "uri", "")),
+                "mimeType": getattr(c, "mimeType", None),
+                "text": getattr(c, "text", None),
+            }
+            for c in (getattr(res, "contents", None) or [])
+        ]
+        return ToolResult(ok=True, payload={"contents": contents})
+
+    async def list_prompts(self) -> dict[str, Any]:
+        if self._session is None:
+            return {"error": f"MCP {self.cfg.name} not connected"}
+        try:
+            res = await self._session.list_prompts()
+        except Exception as exc:
+            detail = str(exc).strip() or exc.__class__.__name__
+            return {"error": detail}
+        return {
+            "prompts": [
+                {
+                    "name": p.name,
+                    "description": getattr(p, "description", None),
+                    "arguments": [
+                        {"name": a.name, "description": getattr(a, "description", None), "required": getattr(a, "required", False)}
+                        for a in (getattr(p, "arguments", None) or [])
+                    ],
+                }
+                for p in (getattr(res, "prompts", None) or [])
+            ]
+        }
+
+    async def get_prompt(self, name: str, arguments: dict[str, Any]) -> ToolResult:
+        if self._session is None:
+            return ToolResult(ok=False, payload={"error": f"MCP {self.cfg.name} not connected"})
+        try:
+            res = await self._session.get_prompt(name, arguments)
+        except Exception as exc:
+            detail = str(exc).strip() or exc.__class__.__name__
+            return ToolResult(ok=False, payload={"error": detail})
+        messages = [
+            {
+                "role": getattr(m, "role", "user"),
+                "text": getattr(getattr(m, "content", None), "text", None),
+            }
+            for m in (getattr(res, "messages", None) or [])
+        ]
+        return ToolResult(ok=True, payload={"messages": messages})
 
     async def close(self) -> None:
         """Close the session/transport.
@@ -265,6 +344,45 @@ class McpBridge:
     async def call(self, namespaced: str, arguments: dict[str, Any]) -> ToolResult:
         """Call a namespaced MCP tool: ``mcp__<server>__<tool>``."""
         return await self._on_owner(self._call_on_owner(namespaced, arguments))
+
+
+    async def list_resources(self) -> list[dict[str, Any]]:
+        """聚合所有 server 的 resources 列表（P2：MCP 全能力——resources）。"""
+        return await self._on_owner(self._resources_on_owner())
+
+    async def read_resource(self, server: str, uri: str) -> ToolResult:
+        return await self._on_owner(self._read_resource_on_owner(server, uri))
+
+    async def list_prompts(self) -> list[dict[str, Any]]:
+        """聚合所有 server 的 prompts 列表（P2：MCP 全能力——prompts）。"""
+        return await self._on_owner(self._prompts_on_owner())
+
+    async def get_prompt(self, server: str, name: str, arguments: dict[str, Any]) -> ToolResult:
+        return await self._on_owner(self._get_prompt_on_owner(server, name, arguments))
+
+    async def _resources_on_owner(self) -> list[dict[str, Any]]:
+        out: list[dict[str, Any]] = []
+        for name, conn in self.servers.items():
+            out.append({"server": name, **await conn.list_resources()})
+        return out
+
+    async def _read_resource_on_owner(self, server: str, uri: str) -> ToolResult:
+        conn = self.servers.get(server)
+        if conn is None:
+            return ToolResult(ok=False, payload={"error": f"MCP server not found: {server}"})
+        return await conn.read_resource(uri)
+
+    async def _prompts_on_owner(self) -> list[dict[str, Any]]:
+        out: list[dict[str, Any]] = []
+        for name, conn in self.servers.items():
+            out.append({"server": name, **await conn.list_prompts()})
+        return out
+
+    async def _get_prompt_on_owner(self, server: str, name: str, arguments: dict[str, Any]) -> ToolResult:
+        conn = self.servers.get(server)
+        if conn is None:
+            return ToolResult(ok=False, payload={"error": f"MCP server not found: {server}"})
+        return await conn.get_prompt(name, arguments)
 
     async def _call_on_owner(self, namespaced: str, arguments: dict[str, Any]) -> ToolResult:
         parts = namespaced.split("__", 2)

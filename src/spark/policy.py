@@ -17,6 +17,8 @@ READONLY_TOOLS = {
     "update_plan",
     "grep",
     "diagnostics",
+    "mcp_resources",
+    "mcp_prompts",
     "glob",
     "web_search",
     "read_notebook",

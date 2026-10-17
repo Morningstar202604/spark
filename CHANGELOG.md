@@ -2,6 +2,21 @@
 
 本项目遵循语义化版本。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)。
 
+## [0.9.6] - 2026-10-18
+
+P2 第一批（agent profiles + 上下文火焰图 + MCP 全能力首批）。
+
+### 新增
+
+- **agent profiles CLI**：`spark agent list` / `spark agent use <档案>`——
+  大脑（模型/供应商组合）一键切换并持久化（P2：换大脑不换壳的命令面）。
+- **上下文火焰图**：`spark context-profile`——按与 AgentLoop 相同的估算口径
+  剖析会话上下文构成（system/agents.md/逐消息），输出条形剖面 + 浪费信号
+  （单条消息占比过大、同文件反复读取）；为上下文合同提供数据基础。
+- **MCP 全能力首批**：`mcp_resources` / `mcp_prompts` 两个工具（list/read、
+  list/get），bridge 四个聚合方法，子代理与 Web/CLI 全链路传播，
+  输出经 untrusted 围栏包裹；端到端测试（假 stdio server）一次通过。
+
 ## [0.9.5] - 2026-10-18
 
 P1 阶段第二批（工程治理 + OpenAPI 合同 + 诊断闭环 + 文档站 + 发布链）。
