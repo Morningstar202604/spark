@@ -87,7 +87,7 @@ a = Analysis(
         'llama_index.core',
         'langgraph',
         'langgraph.graph',
-        # spark 内部延迟导入（桌面壳 / Web / 技能）
+        # spark 内部延迟导入（桌面壳 / Web / 技能 / ACP）
         'spark.web',
         'spark.web.server',
         'spark.web.routes',
@@ -99,6 +99,8 @@ a = Analysis(
         'spark.desktop',
         'spark.tools',
         'spark.tools.web',
+        'spark.acp_server',
+        'acp',
         # litellm 资源目录（空 __init__.py + JSON 数据，仅经 importlib.resources 触达）
         'litellm.litellm_core_utils.tokenizers',
         # 桌面壳（可选依赖，安装后打进二进制；未装则由运行时报缺失）

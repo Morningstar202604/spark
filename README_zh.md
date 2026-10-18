@@ -96,6 +96,7 @@ dist\spark\spark.exe web                    # 或双击 dist\spark.exe
 | 桌面窗口 | `spark desktop` | 原生窗口（pywebview），固定本机绑定 |
 | 终端 TUI | `spark` | 纯终端环境、SSH 远程 |
 | CLI / 脚本 | `spark exec "任务"` | 自动化、CI、管道输出 |
+| IDE 接入 | `spark acp` | 以 ACP agent 被 Zed 等编辑器拉起（详见 [docs/ACP.md](docs/ACP.md)） |
 | MCP Server | `spark mcp-serve` | 把自己的全部工具反向暴露给其他 MCP 客户端 |
 
 ## 特性一览

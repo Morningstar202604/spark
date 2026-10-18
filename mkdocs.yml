@@ -32,6 +32,7 @@ nav:
   - 深入:
       - 架构: ARCHITECTURE.md
       - API: API.md
+      - ACP 接入: ACP.md
       - 模型路由: model-routing.md
       - Git 任务记忆: git-memory.md
       - 评测: evals.md

@@ -6,7 +6,7 @@ root_package = spark
 #   L1 providers
 #   L2 support:    sandbox / store / policy / git_memory / mcp_registry / skills / agents / hooks / repo_map / edit / memory / tools
 #   L3 engine:     core
-#   L4 surfaces:   web / tui / cli / desktop / onboard / evals
+#   L4 surfaces:   web / tui / cli / desktop / onboard / evals / acp_server
 # 规则：下层不得 import 上层；同层禁止跨包反向。以 5 条 forbidden 契约固化。
 
 [importlinter:contract:foundation-pure]
@@ -96,6 +96,7 @@ forbidden_modules =
     spark.tui
     spark.cli
     spark.desktop
+    spark.acp_server
 
 [importlinter:contract:no-cross-surface]
 name = L4 表面之间禁止互相 import（组合只经 public 入口在 cli/desktop 完成）
@@ -103,7 +104,9 @@ type = forbidden
 source_modules =
     spark.web
     spark.tui
+    spark.acp_server
 forbidden_modules =
     spark.cli
     spark.desktop
     spark.onboard
+    spark.acp_server

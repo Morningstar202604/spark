@@ -362,6 +362,37 @@ def mcp_serve_cmd(
         raise typer.Exit(exc.exit_code) from exc
 
 
+@app.command("acp", help="以 ACP（Agent Client Protocol）agent 身份在 stdio 上运行，供 Zed 等 IDE 拉起")
+def acp_cmd(
+    workdir: Path = typer.Option(Path("."), "--workdir"),
+    approval: str | None = typer.Option(
+        None,
+        "--approval",
+        help="full-auto | auto-edit | approve-plan | suggest | plan-only | manual",
+    ),
+    model: str | None = typer.Option(None, "--model"),
+    provider: str | None = typer.Option(None, "--provider"),
+    config: Path | None = typer.Option(None, "--config"),
+    sandbox_mode: str | None = typer.Option(
+        None,
+        "--sandbox-mode",
+        help="sandbox-only | workspace | full-access | unrestricted",
+    ),
+) -> None:
+    """stdio 上跑 ACP JSON-RPC（stdout 是协议通道，日志只走 stderr）。"""
+    try:
+        workdir = workdir.resolve()
+        cfg = _common_cfg(
+            workdir, config, approval, model, provider, sandbox_mode=sandbox_mode
+        )
+        from spark.acp_server import run_stdio
+
+        run_stdio(workdir, cfg)
+    except SparkError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(exc.exit_code) from exc
+
+
 @app.command("desktop")
 def desktop_cmd(
     workdir: Path = typer.Option(Path("."), "--workdir"),

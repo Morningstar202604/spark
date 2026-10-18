@@ -95,6 +95,7 @@ dist\spark\spark.exe web                    # or just double-click dist\spark.ex
 | Desktop | `spark desktop` | Native window via pywebview, bound to loopback |
 | Terminal TUI | `spark` | Pure terminal environments, remote SSH |
 | CLI / scripts | `spark exec "task"` | Automation, CI, piping |
+| IDE (ACP) | `spark acp` | Run as an ACP agent inside Zed and other editors (see [docs/ACP.md](docs/ACP.md)) |
 | MCP server | `spark mcp-serve` | Expose every built-in tool to other MCP clients |
 
 ## Feature Overview

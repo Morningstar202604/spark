@@ -2,6 +2,33 @@
 
 本项目遵循语义化版本。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)。
 
+## [0.9.7] - 2026-10-18
+
+P2 第二批（ACP server——Spark 进 Zed 的第一扇门）。
+
+### 新增
+
+- **ACP server**：`spark acp --workdir <path>`——以 [Agent Client Protocol](https://agentclientprotocol.com)
+  agent 身份在 stdio 上跑 JSON-RPC，被 Zed 等编辑器拉起。基于官方 Python SDK
+  （`agent-client-protocol` 0.12.x，锁 <0.13 防协议 1.0 破坏性变更）。
+  - 方法面：`initialize`（loadSession + image prompt 能力公告）、`session/new`
+    （cwd 校验 + 客户端传入 MCP servers 合并进会话配置）、`session/prompt`、
+    `session/cancel`、`session/load`（历史回放 user/assistant 文本消息）。
+  - 事件桥：`text_delta`→`agent_message_chunk`、`reasoning_delta`→`agent_thought_chunk`、
+    工具 `tool_start/tool_end`→`tool_call/tool_call_update`（ToolKind 映射）、
+    `update_plan`→`plan` 条目同步；StopReason 映射（取消/轮次上限/预算/真错误）。
+  - 审批桥：审批六档语义不变，`decide()==prompt` 时向客户端发
+    `session/request_permission`（allow_once/allow_always/reject_once 三选项），
+    `allow_always` 持久化复用 Spark 既有签名缓存；通道异常按 deny 兜底。
+  - 会话模式：六档审批投影为 ACP `modes`（suggest/auto-edit/full-auto/plan-only/approve-plan）。
+- **分层契约**：`acp_server` 纳入 L4 surface 管控（5 条 import-linter 契约全量更新）。
+- **测试**：in-process 双端 socketpair e2e（握手/流式/审批 allow/deny/取消/历史回放）+
+  真实子进程 `python -m spark acp` 全链路，共 10 个用例。
+
+### 变更
+
+- `create_provider` 组装路径统一经 `provider_factory` 注入点（测试与嵌入场景可替换 provider）。
+
 ## [0.9.6] - 2026-10-18
 
 P2 第一批（agent profiles + 上下文火焰图 + MCP 全能力首批）。
