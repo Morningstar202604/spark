@@ -2,6 +2,42 @@
 
 本项目遵循语义化版本。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)。
 
+## [0.9.10] - 2026-10-18
+
+P2 第五批（**OTel GenAI 观测**——trace=turn / span=tool / metrics，默认关）。
+
+### 新增
+
+- **GenAI 语义观测**（`otel.py` 扩展 + loop 接线）：
+  - `spark.turn` span：`gen_ai.system` / `gen_ai.request.model` /
+    `gen_ai.conversation.id` / `spark.turn.resumed`（恢复 turn）；
+    终态补 `gen_ai.usage.{input,output,reasoning}_tokens`（reported 优先、
+    estimated 兜底，`spark.usage.source` 标明口径）与 `spark.turn.latency_ms`。
+  - `spark.tool` 子 span（显式 parent context——LangGraph 节点跨 task，
+    contextvar 链不可依赖）：`gen_ai.tool.name` / `spark.tool.arguments` /
+    `spark.tool.ok` / `spark.tool.approval` / `spark.tool.duration_ms`。
+  - metrics histogram：`spark.turn.tokens`（kind 三分）、`spark.turn.latency_ms`、
+    `spark.tool.duration_ms`。
+- **默认关语义**：`SPARK_OTEL_ENDPOINT` / `SPARK_OTEL_ENABLED=1` 二者之一
+  才启用；未启用全链路 NoOp（零开销）。`SPARK_OTEL_ENDPOINT=inmemory`
+  保留给测试。自托管 Langfuse = OTLP 端点直连，不做专属 client。
+- **doctor 一键开**：体检新增观测行（未开启 → 开启指引；已开启 → 端点展示）。
+- 文档：`docs/OBSERVABILITY.md`（Langfuse 自托管示例 + 语义映射表）。
+
+### 变更
+
+- `otel.py` 改为**自管 provider**（OTel 全局 `set_tracer_provider` 只能生效
+  一次，自管模式支持测试与多实例重置）——顺带消除全局单例污染。
+- 成本计价暂未进观测路径（`fetch_catalog` 首次调用同步走网络，不能阻塞
+  turn 边界）；成本归账随上下文合同/replay 批次落。
+- `_run_tool` 拆为观测包装层 + `_run_tool_body`（直调测试兼容不变）。
+
+### 测试
+
+- `tests/test_otel.py`：默认关零 span、GenAI attributes 齐备 + 父子关系、
+  工具失败 ERROR 状态、取消无泄漏、恢复 turn 标记，共 5 例。
+  全量 **661 passed / 5 skipped**。
+
 ## [0.9.9] - 2026-10-18
 
 P2 第四批（**审批 interrupt 化 + turn 级崩溃恢复**——A10 落地）。

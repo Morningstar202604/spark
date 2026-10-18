@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Any, cast
 
@@ -277,6 +278,27 @@ def check_health(
         if cfg.agent.approval == "suggest"
         else ("ok", f"审批模式：{cfg.agent.approval}", "")
     )
+    # 观测（默认关；doctor 一键开）
+    from spark.otel import telemetry_enabled
+
+    if telemetry_enabled():
+        endpoint = os.environ.get("SPARK_OTEL_ENDPOINT", "").strip() or "(inmemory)"
+        rows.append(
+            (
+                "ok",
+                f"OTel 观测已开启（endpoint={endpoint}）",
+                "",
+            )
+        )
+    else:
+        rows.append(
+            (
+                "warn",
+                "OTel 观测未开启（默认关）",
+                "设置 SPARK_OTEL_ENDPOINT=<OTLP 端点>（自托管 Langfuse 兼容）后重启，"
+                "详见 docs/OBSERVABILITY.md",
+            )
+        )
     return rows
 
 

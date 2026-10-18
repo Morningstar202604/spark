@@ -104,6 +104,7 @@ class AgentLoop:
         self._turn_tokens = 0
         self._turn_graph = None  # LangGraph 状态机（首次 iter_turn 编译缓存）
         self._last_round: dict[str, Any] = {"tool_calls": [], "text": "", "error": None}
+        self._otel_span: Any = None  # 当前 turn 的观测 span（trace=turn）
         self._active_children: list[AgentLoop] = []
         # P1-4: 声明式子代理的专属 system prompt（body 注入 system 槽，而非用户消息）
         self._extra_system_prompt: str = ""
@@ -137,6 +138,32 @@ class AgentLoop:
         except Exception:
             # hook 失败不应阻塞主循环，但需保留调试信息
             logger.warning("hook %s 执行失败", event, exc_info=True)
+
+    def _end_otel_turn(self, started: float, *, resumed: bool) -> None:
+        """turn 终态观测：补 usage/延迟 attributes 并结束 span（NoOp 安全）。"""
+        from spark.otel import end_turn_span
+
+        span = self._otel_span
+        self._otel_span = None
+        if span is None:
+            return
+        reported = getattr(self, "_reported_usage", None)
+        if reported:
+            in_tok = int(reported.get("prompt_tokens") or 0)
+            out_tok = int(reported.get("completion_tokens") or 0)
+            reasoning_tok = int(reported.get("reasoning_tokens") or 0)
+            source = "reported"
+        else:
+            in_tok, out_tok, reasoning_tok = self._turn_tokens, 0, 0
+            source = "estimated"
+        end_turn_span(
+            span,
+            input_tokens=in_tok,
+            output_tokens=out_tok,
+            reasoning_tokens=reasoning_tok,
+            latency_ms=int((time.monotonic() - started) * 1000),
+            source=source,
+        )
 
     def cancel(self) -> None:
         self.cancelled = True
@@ -461,6 +488,16 @@ class AgentLoop:
             "turn_start",
             {"session_id": self.session_id, "message": user_text},
         )
+        # 观测（trace=turn）：显式管理 span 生命周期（async generator 跨 yield）
+        from spark.otel import start_turn_span
+
+        self._otel_span = start_turn_span(
+            session_id=self.session_id,
+            model=self.cfg.provider.model,
+            provider_name=str(self.cfg.provider.name),
+            workdir=str(self.workdir),
+        )
+        turn_started = time.monotonic()
 
         compacted = await self._maybe_compact()
         if compacted:
@@ -507,6 +544,7 @@ class AgentLoop:
             ):
                 yield event
         finally:
+            self._end_otel_turn(turn_started, resumed=False)
             # 正常/错误终态 → 清理 checkpoint 与登记；审批挂起等异常退出
             # （崩溃/取消）时 astream 未走完，注册保留供恢复。
             snapshot = await self._turn_graph.aget_state(config)
@@ -578,10 +616,21 @@ class AgentLoop:
         snapshot = await self._turn_graph.aget_state(config)
         if snapshot is None or not snapshot.next:
             raise ValueError(f"no pending turn at thread: {thread_id}")
+        from spark.otel import start_turn_span
+
+        self._otel_span = start_turn_span(
+            session_id=self.session_id,
+            model=self.cfg.provider.model,
+            provider_name=str(self.cfg.provider.name),
+            workdir=str(self.workdir),
+            resumed=True,
+        )
+        turn_started = time.monotonic()
         try:
             async for event in self._drive_graph(None, config):
                 yield event
         finally:
+            self._end_otel_turn(turn_started, resumed=True)
             snapshot = await self._turn_graph.aget_state(config)
             if not snapshot.next:
                 await self._checkpointer.unregister(thread_id)
@@ -900,7 +949,38 @@ class AgentLoop:
     async def _run_tool(
         self, call: ToolCall, message_id: int, verdict: dict[str, Any] | None = None
     ):
-        """执行单个工具并产出事件流。
+        """执行单个工具（观测包装：span=tool），主体见 ``_run_tool_body``。"""
+        from spark.otel import start_tool_span
+
+        span = start_tool_span(
+            self._otel_span,
+            tool_name=call.name,
+            args_summary=json.dumps(call.arguments, ensure_ascii=False, default=str)[:200],
+        )
+        started = time.monotonic()
+        final_event: TurnEvent | None = None
+        try:
+            async for event in self._run_tool_body(call, message_id, verdict=verdict):
+                if event.type == "tool_end":
+                    final_event = event
+                yield event
+        finally:
+            from spark.otel import end_tool_span
+
+            result = final_event.result if final_event is not None else None
+            # approval 取判定层结论（graph 路径可靠；旧路径未判定时记 auto）
+            approval_label = str(verdict.get("action")) if verdict else "auto"
+            end_tool_span(
+                span,
+                ok=bool(result.ok) if result is not None else False,
+                approval_label=approval_label,
+                latency_ms=int((time.monotonic() - started) * 1000),
+            )
+
+    async def _run_tool_body(
+        self, call: ToolCall, message_id: int, verdict: dict[str, Any] | None = None
+    ):
+        """工具执行主体。
 
         *verdict* 由 approve 节点预先生成（graph 路径）：
         ``{"action": "allow"|"allow_always"|"deny"|"hook_block"|"plan_only", "reason": str}``。
