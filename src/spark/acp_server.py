@@ -106,7 +106,12 @@ def tool_kind(name: str) -> str:
 
 
 class _ToolIdMap:
-    """spark 内部 call id ↔ ACP tool_call_id 的双向映射（审批桥与事件桥共用）。"""
+    """spark 内部 call id ↔ ACP tool_call_id 的映射（审批桥与事件桥共用）。
+
+    register 幂等：同一 spark call id 永远映射到同一个 ACP id。这一点在
+    LangGraph custom stream 下至关重要——审批请求在节点内先于 tool_start
+    事件被客户端消费，映射必须在两侧都可见且稳定。
+    """
 
     def __init__(self) -> None:
         self.to_acp: dict[str, str] = {}
@@ -115,8 +120,10 @@ class _ToolIdMap:
         return self.to_acp.get(spark_call_id, spark_call_id)
 
     def register(self, spark_call_id: str) -> str:
-        acp_id = f"tool_{uuid.uuid4().hex[:12]}"
-        self.to_acp[spark_call_id] = acp_id
+        acp_id = self.to_acp.get(spark_call_id)
+        if acp_id is None:
+            acp_id = f"tool_{uuid.uuid4().hex[:12]}"
+            self.to_acp[spark_call_id] = acp_id
         return acp_id
 
 
@@ -208,13 +215,15 @@ def make_acp_approver(conn: AgentSideConnection, session: SparkAcpSession) -> Ap
     """
 
     async def approver(request: ApprovalRequest) -> ApprovalDecision:
+        # LangGraph custom stream 下 tool_start 事件的消费可能晚于本回调，
+        # 因此这里主动 ensure 注册（幂等），保证审批与事件流共用同一 ACP id。
         tool_call = tool_call_update(
             title=request.summary or request.tool_call.name,
             kind=tool_kind(request.tool_call.name),
             status="pending",
             raw_input=request.tool_call.arguments,
             result=None,
-            acp_id=session.tool_ids.acp_id(request.tool_call.id),
+            acp_id=session.tool_ids.register(request.tool_call.id),
             diff=request.diff,
         )
         try:

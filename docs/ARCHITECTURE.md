@@ -228,8 +228,8 @@ spark/
 │   ├── cli.py               # CLI 入口（typer）
 │   ├── config.py            # 配置加载（pydantic + toml）
 │   ├── core/
-│   │   ├── loop.py          # AgentLoop 主循环（经典 ReAct）
-│   │   ├── graph.py         # LangGraph 状态机路径
+│   │   ├── loop.py          # AgentLoop 外围职责（历史/存储/记忆/压缩/计账/hooks/子代理）
+│   │   ├── graph.py         # LangGraph 状态机——ReAct 控制流唯一真相源（llm→tools→finalize）
 │   │   ├── context.py       # 上下文引擎
 │   │   ├── compact.py       # 对话压缩（LlamaIndex + 结构化摘要）
 │   │   ├── tokens.py        # Token 估算

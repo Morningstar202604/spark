@@ -2,6 +2,42 @@
 
 本项目遵循语义化版本。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)。
 
+## [0.9.8] - 2026-10-18
+
+P2 第三批（**LangGraph 迁入**——A11 消除，ReAct 控制流单一真相源）。
+
+### 变更
+
+- **生产控制流迁入 LangGraph**（拍板方案 A 落地）：
+  - `core/graph.py` 重写为**唯一控制流真相源**：`build_turn_graph(loop)`
+    编译 `llm → tools → llm → … → finalize / END` 状态机，节点闭包绑定
+    loop 实例（state 只放可序列化轻量字段）。
+  - `core/loop.py` 删除手写 while 循环：`iter_turn` 前置（turn_start hook /
+    压缩 / context / 记忆 / user 入库）不变，控制流段拆为 `_llm_round` /
+    `_tools_round` / `_finalize_turn` 三个协作方法，由 graph 节点驱动；
+    graph 跨 turn 编译一次缓存于实例。
+  - **事件泵用 LangGraph custom stream**（`get_stream_writer`）：节点内实时
+    推送 TurnEvent，`astream(stream_mode="custom")` 消费——text/reasoning
+    逐 delta 流式语义与旧循环逐字节等价；审批仍走 `approver` 回调。
+  - 旧行为全量保留：审批六档、熔断、token 预算、plan-only、approve-plan
+    计划门、auto-checkpoint、hooks、子代理（子代理同经新 graph 路径）。
+  - 全量 **651 passed / 5 skipped** 零断言改动（行为等价安全网兑现）。
+- **修复（迁移牵出）**：ACP 审批桥的 tool_call_id 映射在 LangGraph custom
+  stream 下存在时序差（审批请求先于 tool_start 事件被客户端消费）——
+  `_ToolIdMap.register` 幂等化 + 审批桥主动 ensure，两侧 id 恒一致。
+
+### 移除
+
+- 旧参考实现 API（`ReActState` / `build_react_graph*` / `_route_tools` /
+  `_make_node_llm/tools`）——`test_langgraph_path.py` /
+  `test_graph_routing.py` 同步重写为真驱动测试（含防回退接线回归：
+  iter_turn 必须经 `build_turn_graph`）。
+
+### 后续（下一批）
+
+- `interrupt` 审批跨进程挂起 + `SqliteSaver` turn 级崩溃恢复（A10，需
+  Web 审批桥配合改造）。
+
 ## [0.9.7] - 2026-10-18
 
 P2 第二批（ACP server——Spark 进 Zed 的第一扇门）。

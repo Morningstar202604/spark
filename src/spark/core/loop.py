@@ -10,6 +10,7 @@ from collections.abc import Awaitable, Callable
 from importlib.resources import files
 from pathlib import Path
 from stat import S_ISREG
+from typing import Any
 
 from spark.config import SparkConfig
 from spark.core.compact import Compactor
@@ -89,6 +90,8 @@ class AgentLoop:
         self._call_window: deque[str] = deque(maxlen=self._breaker_window())
         self._call_counts: dict[str, int] = {}
         self._turn_tokens = 0
+        self._turn_graph = None  # LangGraph 状态机（首次 iter_turn 编译缓存）
+        self._last_round: dict[str, Any] = {"tool_calls": [], "text": "", "error": None}
         self._active_children: list[AgentLoop] = []
         # P1-4: 声明式子代理的专属 system prompt（body 注入 system 槽，而非用户消息）
         self._extra_system_prompt: str = ""
@@ -470,147 +473,177 @@ class AgentLoop:
         if session and session.get("title") == "untitled":
             self.store.touch(self.session_id, title=user_text[:80])
 
-        rounds = 0
         self._turn_tokens = 0
         self._call_window = deque(maxlen=self._breaker_window())
         self._call_counts.clear()
-        while True:
-            if self.cancelled:
-                yield TurnEvent(type="turn_error", text="Turn cancelled")
-                return
-            if rounds >= self.cfg.agent.max_tool_rounds:
-                yield TurnEvent(
-                    type="turn_error",
-                    text="Reached max_tool_rounds",
-                    data=self._budget_state(),
-                )
-                return
-            if self._budget_exceeded():
-                yield TurnEvent(
-                    type="turn_error",
-                    text=(
-                        "Token budget exceeded for this turn "
-                        f"({self._turn_tokens}/{self.cfg.agent.max_turn_tokens})"
-                    ),
-                    data=self._budget_state(),
-                )
-                return
-            messages = build_messages(
-                workdir=self.workdir,
-                cfg=self.cfg,
-                history=self.history,
-                memory_block=memory_block,
-                _compactor=self._compactor,
-            )
-            if self._extra_system_prompt and messages and messages[0].role == "system":
-                base_system = messages[0].content or ""
-                messages[0] = messages[0].model_copy(
-                    update={"content": f"{base_system}\n\n{self._extra_system_prompt}"}
-                )
-            text_parts: list[str] = []
-            reasoning_parts: list[str] = []
-            tool_calls: list[ToolCall] = []
-            self._reported_usage: dict[str, int] | None = None  # P1：本轮流式真实 usage
-            try:
-                async for delta in self.provider.stream(
-                    messages, self.registry.schemas(), **self._stream_extra
-                ):
-                    if self.cancelled:
-                        yield TurnEvent(type="turn_error", text="Turn cancelled")
-                        return
-                    if delta.type == "reasoning" and delta.text:
-                        reasoning_parts.append(delta.text)
-                        # show_thinking=False 时不下发 SSE（节省带宽），仍计入 token 用量
-                        if self.cfg.agent.show_thinking:
-                            yield TurnEvent(type="reasoning_delta", text=delta.text)
-                    elif delta.type == "text" and delta.text:
-                        text_parts.append(delta.text)
-                        yield TurnEvent(type="text_delta", text=delta.text)
-                    elif delta.type == "tool_call" and delta.tool_call:
-                        tool_calls.append(delta.tool_call)
-                    elif delta.type == "end" and delta.usage:
-                        # P1：provider 上报的真实 usage，覆盖估算口径
-                        self._reported_usage = delta.usage
-            except Exception as exc:
-                yield TurnEvent(type="turn_error", text=str(exc))
-                return
+        # 控制流移交 LangGraph 状态机（graph.py = 唯一真相源）：
+        # llm →(有工具) tools → llm → … → finalize / END；事件经 custom stream 实时透传。
+        if self._turn_graph is None:
+            from spark.core.graph import build_turn_graph
 
-            self._charge_tokens(text_parts, reasoning_parts)
-            self._persist_usage(None, messages, text_parts, reasoning_parts)
+            self._turn_graph = build_turn_graph(self)
+        assert self._turn_graph is not None
+        async for event in self._turn_graph.astream(
+            {
+                "rounds": 0,
+                "tool_calls": [],
+                "memory_block": memory_block,
+                "error": None,
+            },
+            stream_mode="custom",
+        ):
+            yield event
+        logger.info("turn_end session=%s", sid_prefix)
 
-            if tool_calls:
-                tripped = None
-                for call in tool_calls:
-                    guard = self._record_call(call)
-                    if guard is not None:
-                        tripped = (call.name, guard[1])
-                        break
-                if tripped is not None:
-                    name, count = tripped
-                    yield TurnEvent(
-                        type="context",
-                        data={
-                            "usage": self._usage(),
-                            "circuit_breaker": {
-                                "tool": name,
-                                "repeats": count,
-                                "limit": self.cfg.agent.max_repeat_calls,
-                            },
-                            **self._budget_state(),
-                        },
-                    )
-                    yield TurnEvent(
-                        type="turn_error",
-                        text=(
-                            f"Circuit breaker: tool '{name}' repeated with identical "
-                            f"arguments {count} times (limit "
-                            f"{self.cfg.agent.max_repeat_calls})"
-                        ),
-                        data=self._budget_state(),
-                    )
-                    return
-                assistant = ChatMessage(
-                    role="assistant",
-                    content="".join(text_parts) or None,
-                    tool_calls=tool_calls,
-                )
-                self._append_history(assistant)
-                msg_id = self.store.append_message(self.session_id, assistant)
-                for call in tool_calls:
-                    async for event in self._run_tool(call, msg_id):
-                        yield event
-                        if event.type == "turn_error":
-                            return
-                    if call.name == "update_plan" and self.registry.plan:
-                        yield TurnEvent(type="plan", data={"steps": self.registry.plan})
-                        # approve-plan：计划一经产出即进入计划审批门
-                        async for event in self._maybe_approve_plan(call):
-                            yield event
-                rounds += 1
-                continue
+    async def _llm_round(self, memory_block: str | None, rounds: int):
+        """一轮 LLM 调用（原 while 循环体上半段，事件语义逐字节等价）。
 
-            assistant = ChatMessage(role="assistant", content="".join(text_parts))
-            self._append_history(assistant)
-            assistant_id = self.store.append_message(self.session_id, assistant)
-            self._maybe_auto_checkpoint(assistant_id)
-            yield TurnEvent(
-                type="context",
-                data={"usage": self._usage(), **self._budget_state()},
-            )
-            if self._budget_exceeded():
-                yield TurnEvent(
-                    type="turn_error",
-                    text=(
-                        "Token budget exceeded for this turn "
-                        f"({self._turn_tokens}/{self.cfg.agent.max_turn_tokens})"
-                    ),
-                    data=self._budget_state(),
-                )
-                return
-            self._notify_safe("turn_end", {"content": assistant.content or ""})
-            yield TurnEvent(type="turn_end", text=assistant.content)
-            logger.info("turn_end session=%s", sid_prefix)
+        Yield TurnEvent；终值写入 ``self._last_round``：
+        {"tool_calls": [...], "text": str, "error": str | None}。
+        """
+        self._last_round = {"tool_calls": [], "text": "", "error": None}
+        if self.cancelled:
+            yield TurnEvent(type="turn_error", text="Turn cancelled")
+            self._last_round["error"] = "cancelled"
             return
+        if rounds >= self.cfg.agent.max_tool_rounds:
+            yield TurnEvent(
+                type="turn_error",
+                text="Reached max_tool_rounds",
+                data=self._budget_state(),
+            )
+            self._last_round["error"] = "max_rounds"
+            return
+        if self._budget_exceeded():
+            yield TurnEvent(
+                type="turn_error",
+                text=(
+                    "Token budget exceeded for this turn "
+                    f"({self._turn_tokens}/{self.cfg.agent.max_turn_tokens})"
+                ),
+                data=self._budget_state(),
+            )
+            self._last_round["error"] = "budget"
+            return
+        messages = build_messages(
+            workdir=self.workdir,
+            cfg=self.cfg,
+            history=self.history,
+            memory_block=memory_block,
+            _compactor=self._compactor,
+        )
+        if self._extra_system_prompt and messages and messages[0].role == "system":
+            base_system = messages[0].content or ""
+            messages[0] = messages[0].model_copy(
+                update={"content": f"{base_system}\n\n{self._extra_system_prompt}"}
+            )
+        text_parts: list[str] = []
+        reasoning_parts: list[str] = []
+        tool_calls: list[ToolCall] = []
+        self._reported_usage: dict[str, int] | None = None  # P1：本轮流式真实 usage
+        try:
+            async for delta in self.provider.stream(
+                messages, self.registry.schemas(), **self._stream_extra
+            ):
+                if self.cancelled:
+                    yield TurnEvent(type="turn_error", text="Turn cancelled")
+                    self._last_round["error"] = "cancelled"
+                    return
+                if delta.type == "reasoning" and delta.text:
+                    reasoning_parts.append(delta.text)
+                    # show_thinking=False 时不下发 SSE（节省带宽），仍计入 token 用量
+                    if self.cfg.agent.show_thinking:
+                        yield TurnEvent(type="reasoning_delta", text=delta.text)
+                elif delta.type == "text" and delta.text:
+                    text_parts.append(delta.text)
+                    yield TurnEvent(type="text_delta", text=delta.text)
+                elif delta.type == "tool_call" and delta.tool_call:
+                    tool_calls.append(delta.tool_call)
+                elif delta.type == "end" and delta.usage:
+                    # P1：provider 上报的真实 usage，覆盖估算口径
+                    self._reported_usage = delta.usage
+        except Exception as exc:
+            yield TurnEvent(type="turn_error", text=str(exc))
+            self._last_round["error"] = str(exc)
+            return
+
+        self._charge_tokens(text_parts, reasoning_parts)
+        self._persist_usage(None, messages, text_parts, reasoning_parts)
+
+        if tool_calls:
+            tripped = None
+            for call in tool_calls:
+                guard = self._record_call(call)
+                if guard is not None:
+                    tripped = (call.name, guard[1])
+                    break
+            if tripped is not None:
+                name, count = tripped
+                yield TurnEvent(
+                    type="context",
+                    data={
+                        "usage": self._usage(),
+                        "circuit_breaker": {
+                            "tool": name,
+                            "repeats": count,
+                            "limit": self.cfg.agent.max_repeat_calls,
+                        },
+                        **self._budget_state(),
+                    },
+                )
+                yield TurnEvent(
+                    type="turn_error",
+                    text=(
+                        f"Circuit breaker: tool '{name}' repeated with identical "
+                        f"arguments {count} times (limit "
+                        f"{self.cfg.agent.max_repeat_calls})"
+                    ),
+                    data=self._budget_state(),
+                )
+                self._last_round["error"] = "circuit_breaker"
+                return
+        self._last_round = {"tool_calls": tool_calls, "text": "".join(text_parts), "error": None}
+
+    async def _tools_round(self, tool_calls: list[ToolCall], text: str):
+        """一轮工具执行（原 while 循环体 tools 分支，事件语义逐字节等价）。"""
+        assistant = ChatMessage(
+            role="assistant",
+            content=text or None,
+            tool_calls=tool_calls,
+        )
+        self._append_history(assistant)
+        msg_id = self.store.append_message(self.session_id, assistant)
+        for call in tool_calls:
+            async for event in self._run_tool(call, msg_id):
+                yield event
+            if call.name == "update_plan" and self.registry.plan:
+                yield TurnEvent(type="plan", data={"steps": self.registry.plan})
+                # approve-plan：计划一经产出即进入计划审批门
+                async for event in self._maybe_approve_plan(call):
+                    yield event
+
+    async def _finalize_turn(self, text: str = ""):
+        """收尾（原 while 循环体无工具分支，事件语义逐字节等价）。"""
+        assistant = ChatMessage(role="assistant", content=text)
+        self._append_history(assistant)
+        assistant_id = self.store.append_message(self.session_id, assistant)
+        self._maybe_auto_checkpoint(assistant_id)
+        yield TurnEvent(
+            type="context",
+            data={"usage": self._usage(), **self._budget_state()},
+        )
+        if self._budget_exceeded():
+            yield TurnEvent(
+                type="turn_error",
+                text=(
+                    "Token budget exceeded for this turn "
+                    f"({self._turn_tokens}/{self.cfg.agent.max_turn_tokens})"
+                ),
+                data=self._budget_state(),
+            )
+            return
+        self._notify_safe("turn_end", {"content": assistant.content or ""})
+        yield TurnEvent(type="turn_end", text=assistant.content)
 
     def _maybe_auto_checkpoint(self, assistant_id: int) -> None:
         """Snapshot the workdir + conversation after turns that touched files or ran shell."""
