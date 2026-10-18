@@ -1,0 +1,155 @@
+"""Turn 级检查点存储（A10：in-flight turn 崩溃恢复的基础设施）。
+
+一个 ``TurnCheckpointer`` 实例 = 一个 AsyncSqliteSaver + 一张 ``pending_turns``
+登记表，同库共存（默认 ``$SPARK_HOME/checkpoints.db``）：
+
+- **checkpoints/writes**：LangGraph 官方表（AsyncSqliteSaver 自管），保存
+  挂起 turn 的完整轮次状态（含审批 interrupt 位点）。
+- **pending_turns**：自建索引表——turn 开始登记、正常结束/错误清除、
+  崩溃/审批挂起保留。恢复 API 以此为事实来源（避免依赖 LangGraph 内部表结构）。
+
+线程/并发约束：AsyncSqliteSaver 内部有锁，AgentLoop 层面单会话 turn 串行
+（session.busy 门），多会话各持各的库连接；本封装不做额外并发控制。
+"""
+
+from __future__ import annotations
+
+import logging
+import time
+from pathlib import Path
+from typing import Any
+
+from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+
+logger = logging.getLogger(__name__)
+
+__all__ = ["TurnCheckpointer", "MemoryTurnCheckpointer"]
+
+_SCHEMA = """
+CREATE TABLE IF NOT EXISTS pending_turns (
+    thread_id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    workdir TEXT NOT NULL,
+    model TEXT NOT NULL,
+    created_at REAL NOT NULL
+);
+"""
+
+
+class TurnCheckpointer:
+    """持久 turn 检查点：AsyncSqliteSaver + pending_turns 索引。"""
+
+    def __init__(self, db_path: Path | str) -> None:
+        self.db_path = Path(db_path)
+        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        self._conn: Any = None
+        self._saver: AsyncSqliteSaver | None = None
+
+    @property
+    def saver(self) -> AsyncSqliteSaver:
+        if self._saver is None:
+            raise RuntimeError("TurnCheckpointer.start() 未调用")
+        return self._saver
+
+    async def start(self) -> None:
+        """建立连接并初始化表（幂等；连接生命周期归本实例管理）。"""
+        import aiosqlite
+
+        if self._saver is not None:
+            return
+        # aiosqlite<0.22：langgraph-checkpoint-sqlite 依赖 Thread.is_alive()
+        self._conn = await aiosqlite.connect(str(self.db_path))
+        self._saver = AsyncSqliteSaver(self._conn)
+        await self._saver.setup()
+        async with self._conn.executescript(_SCHEMA):
+            await self._conn.commit()
+
+    async def close(self) -> None:
+        if self._conn is not None:
+            try:
+                await self._conn.close()
+            except Exception:  # pragma: no cover
+                logger.debug("checkpoint db close failed", exc_info=True)
+            self._conn = None
+            self._saver = None
+
+    # -- pending turn 登记 ---------------------------------------------------
+
+    async def register(self, thread_id: str, session_id: str, workdir: str, model: str) -> None:
+        assert self._conn is not None, "start() 未调用"
+        await self._conn.execute(
+            "INSERT OR REPLACE INTO pending_turns"
+            " (thread_id, session_id, workdir, model, created_at) VALUES (?,?,?,?,?)",
+            (thread_id, session_id, workdir, model, time.time()),
+        )
+        await self._conn.commit()
+
+    async def unregister(self, thread_id: str) -> None:
+        """turn 终态（正常/错误/丢弃）后清除登记 + 删除 checkpoint。"""
+        assert self._conn is not None, "start() 未调用"
+        await self._conn.execute(
+            "DELETE FROM pending_turns WHERE thread_id = ?", (thread_id,)
+        )
+        await self._conn.commit()
+        if self._saver is not None:
+            try:
+                await self._saver.adelete_thread(thread_id)
+            except Exception:  # pragma: no cover
+                logger.debug("delete_thread failed: %s", thread_id, exc_info=True)
+
+    async def list_pending(self) -> list[dict[str, Any]]:
+        assert self._conn is not None, "start() 未调用"
+        cursor = await self._conn.execute(
+            "SELECT thread_id, session_id, workdir, model, created_at"
+            " FROM pending_turns ORDER BY created_at"
+        )
+        rows = await cursor.fetchall()
+        return [
+            {
+                "thread_id": r[0],
+                "session_id": r[1],
+                "workdir": r[2],
+                "model": r[3],
+                "created_at": r[4],
+            }
+            for r in rows
+        ]
+
+
+class MemoryTurnCheckpointer:
+    """进程内 turn 检查点（子代理 / 短生命周期 CLI）：接口同 TurnCheckpointer。
+
+    MemorySaver 无持久化——"崩溃恢复"退化为同进程内的审批挂起恢复，
+    接口语义保持一致，调用方无需区分。
+    """
+
+    def __init__(self) -> None:
+        from langgraph.checkpoint.memory import MemorySaver
+
+        self._saver = MemorySaver()
+        self._pending: dict[str, dict[str, Any]] = {}
+
+    @property
+    def saver(self) -> Any:
+        return self._saver
+
+    async def start(self) -> None:  # noqa: D102 — 接口同 TurnCheckpointer
+        return None
+
+    async def close(self) -> None:
+        return None
+
+    async def register(self, thread_id: str, session_id: str, workdir: str, model: str) -> None:
+        self._pending[thread_id] = {
+            "thread_id": thread_id,
+            "session_id": session_id,
+            "workdir": workdir,
+            "model": model,
+            "created_at": time.time(),
+        }
+
+    async def unregister(self, thread_id: str) -> None:
+        self._pending.pop(thread_id, None)
+
+    async def list_pending(self) -> list[dict[str, Any]]:
+        return sorted(self._pending.values(), key=lambda r: r["created_at"])

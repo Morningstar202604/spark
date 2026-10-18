@@ -78,7 +78,7 @@ def _tool_call_provider() -> MockProvider:
 
 def test_route_after_llm_transitions() -> None:
     assert route_after_llm({"error": "boom"}) == END
-    assert route_after_llm({"error": None, "tool_calls": [object()]}) == "tools"
+    assert route_after_llm({"error": None, "tool_calls": [object()]}) == "approve"
     assert route_after_llm({"error": None, "tool_calls": []}) == "finalize"
     # 缺省（首轮前置 state 之外的极端输入）也必须安全
     assert route_after_llm({}) == "finalize"
@@ -100,7 +100,14 @@ async def test_graph_drives_react_cycle(tmp_path: Path) -> None:
     events = [
         event
         async for event in graph.astream(
-            {"rounds": 0, "tool_calls": [], "memory_block": None, "error": None},
+            {
+                "rounds": 0,
+                "tool_calls": [],
+                "verdicts": [],
+                "memory_block": None,
+                "error": None,
+            },
+            {"configurable": {"thread_id": "t-direct"}},
             stream_mode="custom",
         )
     ]
@@ -126,7 +133,14 @@ async def test_graph_finalizes_without_tools(tmp_path: Path) -> None:
     events = [
         event
         async for event in graph.astream(
-            {"rounds": 0, "tool_calls": [], "memory_block": None, "error": None},
+            {
+                "rounds": 0,
+                "tool_calls": [],
+                "verdicts": [],
+                "memory_block": None,
+                "error": None,
+            },
+            {"configurable": {"thread_id": "t-direct-final"}},
             stream_mode="custom",
         )
     ]
@@ -155,7 +169,14 @@ async def test_graph_provider_error_stops(tmp_path: Path) -> None:
     events = [
         event
         async for event in graph.astream(
-            {"rounds": 0, "tool_calls": [], "memory_block": None, "error": None},
+            {
+                "rounds": 0,
+                "tool_calls": [],
+                "verdicts": [],
+                "memory_block": None,
+                "error": None,
+            },
+            {"configurable": {"thread_id": "t-direct-err"}},
             stream_mode="custom",
         )
     ]
@@ -179,9 +200,9 @@ async def test_iter_turn_wires_through_graph(tmp_path: Path, monkeypatch) -> Non
     calls = {"build": 0}
     real_build = graph_mod.build_turn_graph
 
-    def spy(loop_arg):
+    def spy(loop_arg, checkpointer=None):
         calls["build"] += 1
-        return real_build(loop_arg)
+        return real_build(loop_arg, checkpointer=checkpointer)
 
     monkeypatch.setattr(graph_mod, "build_turn_graph", spy)
 

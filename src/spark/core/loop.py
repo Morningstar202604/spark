@@ -5,12 +5,13 @@ import hashlib
 import json
 import logging
 import time
+import uuid
 from collections import deque
 from collections.abc import Awaitable, Callable
 from importlib.resources import files
 from pathlib import Path
 from stat import S_ISREG
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from spark.config import SparkConfig
 from spark.core.compact import Compactor
@@ -43,6 +44,9 @@ from spark.sandbox import safe_bare_filename
 from spark.store import SessionStore
 from spark.tools.registry import ToolContext, ToolRegistry
 
+if TYPE_CHECKING:  # pragma: no cover - 仅类型引用
+    from spark.core.turn_store import MemoryTurnCheckpointer, TurnCheckpointer
+
 Approver = Callable[[ApprovalRequest], Awaitable[ApprovalDecision]]
 
 logger = logging.getLogger(__name__)
@@ -60,6 +64,7 @@ class AgentLoop:
         session_id: str,
         approver: Approver | None = None,
         memory=None,
+        checkpointer: "TurnCheckpointer | MemoryTurnCheckpointer | None" = None,
     ) -> None:
         self.workdir = workdir
         self.cfg = cfg
@@ -69,6 +74,13 @@ class AgentLoop:
         self.session_id = session_id
         self.approver = approver
         self.memory = memory
+        # turn 级检查点（A10）：主会话可注入持久 TurnCheckpointer；
+        # 缺省进程内 Memory（子代理/短生命周期场景），审批挂起仍可工作。
+        if checkpointer is None:
+            from spark.core.turn_store import MemoryTurnCheckpointer
+
+            checkpointer = MemoryTurnCheckpointer()
+        self._checkpointer = checkpointer
         self.allow_always: set[str] = set()
         self.cancelled = False
         # approve-plan 模式：计划已产出并经用户批准后才自动执行写/执行工具
@@ -477,23 +489,110 @@ class AgentLoop:
         self._call_window = deque(maxlen=self._breaker_window())
         self._call_counts.clear()
         # 控制流移交 LangGraph 状态机（graph.py = 唯一真相源）：
-        # llm →(有工具) tools → llm → … → finalize / END；事件经 custom stream 实时透传。
+        # llm →(有工具) approve →(interrupt 审批) execute → llm → … → finalize / END。
         if self._turn_graph is None:
             from spark.core.graph import build_turn_graph
 
-            self._turn_graph = build_turn_graph(self)
+            self._turn_graph = build_turn_graph(self, checkpointer=self._checkpointer.saver)
         assert self._turn_graph is not None
-        async for event in self._turn_graph.astream(
-            {
-                "rounds": 0,
-                "tool_calls": [],
-                "memory_block": memory_block,
-                "error": None,
-            },
-            stream_mode="custom",
-        ):
-            yield event
+        thread_id = f"{self.session_id}:t{uuid.uuid4().hex[:12]}"
+        config = {"configurable": {"thread_id": thread_id}}
+        await self._checkpointer.register(
+            thread_id, self.session_id, str(self.workdir), self.cfg.provider.model
+        )
+        try:
+            async for event in self._drive_graph(
+                {"rounds": 0, "tool_calls": [], "verdicts": [], "memory_block": memory_block, "error": None},
+                config,
+            ):
+                yield event
+        finally:
+            # 正常/错误终态 → 清理 checkpoint 与登记；审批挂起等异常退出
+            # （崩溃/取消）时 astream 未走完，注册保留供恢复。
+            snapshot = await self._turn_graph.aget_state(config)
+            if not snapshot.next:
+                await self._checkpointer.unregister(thread_id)
         logger.info("turn_end session=%s", sid_prefix)
+
+    async def _drive_graph(self, graph_input: Any, config: dict):
+        """驱动状态机直至终态；审批 interrupt 在此统一处理。
+
+        - ``custom`` 通道：TurnEvent 实时透传；
+        - ``updates`` 通道：感知 ``__interrupt__``——构造 approval_needed
+          事件、触发 hook 通知、调用 approver 回调、resume 继续。
+          （approve 节点 interrupt 前无副作用，resume 重跑零重复。）
+        """
+        from langgraph.types import Command
+
+        assert self._turn_graph is not None
+        pending_input = graph_input
+        while True:
+            interrupt_requests: list[ApprovalRequest] = []
+            async for mode, chunk in self._turn_graph.astream(
+                pending_input, config, stream_mode=["custom", "updates"]
+            ):
+                if mode == "custom":
+                    yield chunk
+                elif isinstance(chunk, dict) and "__interrupt__" in chunk:
+                    for intr in chunk["__interrupt__"]:
+                        payload = intr.value if isinstance(intr.value, dict) else {}
+                        approval_data = payload.get("approval") or {}
+                        interrupt_requests.append(ApprovalRequest.model_validate(approval_data))
+            if not interrupt_requests:
+                return
+            pending_input = None
+            for request in interrupt_requests:
+                self._notify_safe(
+                    "approval_needed",
+                    {
+                        "tool_call": request.tool_call.name,
+                        "arguments": request.tool_call.arguments,
+                        "summary": request.summary,
+                    },
+                )
+                yield TurnEvent(type="approval_needed", approval=request, tool_call=request.tool_call)
+                if self.approver is None:
+                    verdict = {"action": "deny", "reason": "no approver"}
+                else:
+                    decision = await self.approver(request)
+                    verdict = {
+                        "action": decision.action,
+                        # 与旧路径 approver-deny 的 payload 文案保持一致
+                        "reason": "denied" if decision.action == "deny" else "",
+                    }
+                pending_input = Command(resume=verdict)
+
+    async def resume_pending_turn(self, thread_id: str):
+        """恢复一个挂起的 turn（审批 interrupt 位点或执行中断点）。
+
+        从 checkpointer 重建轮次状态后继续驱动；挂起在审批的 turn 会重新
+        走 approval_needed → approver → resume 循环。事件流与 ``iter_turn``
+        同构（tool/plan/approval_needed/turn_end…）。
+        """
+        if self._turn_graph is None:
+            from spark.core.graph import build_turn_graph
+
+            self._turn_graph = build_turn_graph(self, checkpointer=self._checkpointer.saver)
+        assert self._turn_graph is not None
+        config = {"configurable": {"thread_id": thread_id}}
+        snapshot = await self._turn_graph.aget_state(config)
+        if snapshot is None or not snapshot.next:
+            raise ValueError(f"no pending turn at thread: {thread_id}")
+        try:
+            async for event in self._drive_graph(None, config):
+                yield event
+        finally:
+            snapshot = await self._turn_graph.aget_state(config)
+            if not snapshot.next:
+                await self._checkpointer.unregister(thread_id)
+
+    async def list_pending_turns(self) -> list[dict[str, Any]]:
+        """列出本 checkpointer 上所有挂起 turn（崩溃恢复入口）。"""
+        return await self._checkpointer.list_pending()
+
+    async def discard_pending_turn(self, thread_id: str) -> None:
+        """丢弃一个挂起 turn（清理 checkpoint 与登记）。"""
+        await self._checkpointer.unregister(thread_id)
 
     async def _llm_round(self, memory_block: str | None, rounds: int):
         """一轮 LLM 调用（原 while 循环体上半段，事件语义逐字节等价）。
@@ -604,8 +703,72 @@ class AgentLoop:
                 return
         self._last_round = {"tool_calls": tool_calls, "text": "".join(text_parts), "error": None}
 
-    async def _tools_round(self, tool_calls: list[ToolCall], text: str):
-        """一轮工具执行（原 while 循环体 tools 分支，事件语义逐字节等价）。"""
+    async def _decide_calls(self, tool_calls: list[ToolCall]) -> list[dict[str, Any]]:
+        """审批阶段判定（approve 节点专用，可被 interrupt 挂起）。
+
+        返回逐 call 的判定列表，元素形如：
+        ``{"action": "allow"|"allow_always"|"deny"|"hook_block"|"plan_only", "reason": str}``。
+
+        prompt 档经 LangGraph ``interrupt`` 挂起等待外层审批；本方法**不得
+        emit 事件或触发 hook**——resume 时 approve 节点从头重跑，interrupt
+        之前的副作用会重复（graph.py 模块 docstring）。
+        """
+        from langgraph.types import interrupt
+
+        from spark.policy import decide
+
+        verdicts: list[dict[str, Any]] = []
+        for call in tool_calls:
+            if self.hooks.enabled:
+                hook_verdict = self.hooks.notify(
+                    "pre_tool", {"tool": call.name, "arguments": call.arguments}
+                )
+                if not hook_verdict.allow:
+                    verdicts.append(
+                        {"action": "hook_block", "reason": hook_verdict.reason}
+                    )
+                    continue
+            if self.cfg.agent.approval == "plan-only":
+                readonly = READONLY_TOOLS | self.registry.readonly_mcp
+                if call.name not in readonly:
+                    verdicts.append({"action": "plan_only", "reason": ""})
+                    continue
+            decision = decide(
+                self.cfg.agent.approval,
+                call,
+                allow_always=self.allow_always,
+                readonly_mcp=self.registry.readonly_mcp,
+                rules=self.cfg.permission_rules or None,
+                plan_approved=self._plan_approved is True,
+            )
+            if decision == "deny":
+                verdicts.append({"action": "deny", "reason": "denied by permission rule"})
+                continue
+            if decision == "prompt":
+                # 审批 interrupt：挂起点（有 checkpointer 时位点落盘，A10）。
+                summary, diff = self.registry.approval_summary(call)
+                request = ApprovalRequest(tool_call=call, summary=summary, diff=diff)
+                resumed = interrupt(
+                    {"approval": request.model_dump(mode="json")}
+                )
+                action = str(resumed.get("action", "deny")) if isinstance(resumed, dict) else "deny"
+                reason = str(resumed.get("reason", "")) if isinstance(resumed, dict) else ""
+                verdicts.append({"action": action, "reason": reason})
+                continue
+            verdicts.append({"action": "allow", "reason": ""})
+        return verdicts
+
+    async def _execute_round(
+        self,
+        tool_calls: list[ToolCall],
+        verdicts: list[dict[str, Any]],
+        text: str = "",
+    ):
+        """一轮工具执行（execute 节点）：assistant 入历史 → 逐个执行 → rounds 由 graph 推进。
+
+        判定由 approve 节点预先生成（*verdicts*），执行阶段只负责副作用与
+        事件发射——resume 重跑发生在 approve，本节点天然无重放风险。
+        """
         assistant = ChatMessage(
             role="assistant",
             content=text or None,
@@ -613,8 +776,8 @@ class AgentLoop:
         )
         self._append_history(assistant)
         msg_id = self.store.append_message(self.session_id, assistant)
-        for call in tool_calls:
-            async for event in self._run_tool(call, msg_id):
+        for call, verdict in zip(tool_calls, verdicts):
+            async for event in self._run_tool(call, msg_id, verdict=verdict):
                 yield event
             if call.name == "update_plan" and self.registry.plan:
                 yield TurnEvent(type="plan", data={"steps": self.registry.plan})
@@ -734,24 +897,27 @@ class AgentLoop:
         verdict = await self.approver(request)
         self._plan_approved = verdict.action in ("allow", "allow_always")
 
-    async def _run_tool(self, call: ToolCall, message_id: int):
+    async def _run_tool(
+        self, call: ToolCall, message_id: int, verdict: dict[str, Any] | None = None
+    ):
+        """执行单个工具并产出事件流。
+
+        *verdict* 由 approve 节点预先生成（graph 路径）：
+        ``{"action": "allow"|"allow_always"|"deny"|"hook_block"|"plan_only", "reason": str}``。
+        提供时跳过 hooks/plan-only/审批段（判定已完成，本方法只做副作用与事件）。
+        缺省（None，测试/兼容直调路径）走完整判定 + approver 回调。
+        """
         yield TurnEvent(type="tool_start", tool_call=call)
         _tool_call_start = time.monotonic()
         _tool_args_summary = json.dumps(call.arguments, ensure_ascii=False, default=str)[:200]
-        if self.hooks.enabled:
-            hook_verdict = self.hooks.notify(
-                "pre_tool",
-                {"tool": call.name, "arguments": call.arguments},
-            )
-            if not hook_verdict.allow:
-                result = ToolResult(ok=False, payload={"error": hook_verdict.reason})
+        if verdict is not None:
+            # graph 路径：判定前置完成，这里按结论走
+            if verdict["action"] == "hook_block":
+                result = ToolResult(ok=False, payload={"error": verdict.get("reason") or "blocked by hook"})
                 await self._persist_tool(call, message_id, result, "hook_block")
                 yield TurnEvent(type="tool_end", tool_call=call, result=result)
                 return
-        rules = self.cfg.permission_rules or None
-        if self.cfg.agent.approval == "plan-only":
-            readonly = READONLY_TOOLS | self.registry.readonly_mcp
-            if call.name not in readonly:
+            if verdict["action"] == "plan_only":
                 result = ToolResult(
                     ok=False,
                     payload={
@@ -762,54 +928,90 @@ class AgentLoop:
                 await self._persist_tool(call, message_id, result, "plan_only")
                 yield TurnEvent(type="tool_end", tool_call=call, result=result)
                 return
-        decision = decide(
-            self.cfg.agent.approval,
-            call,
-            allow_always=self.allow_always,
-            readonly_mcp=self.registry.readonly_mcp,
-            rules=rules,
-            plan_approved=self._plan_approved is True,
-        )
-        approval_label = "allow"
-        if decision == "deny":
-            result = ToolResult(
-                ok=False,
-                payload={"error": "denied by permission rule", "tool": call.name},
-            )
-            await self._persist_tool(call, message_id, result, "deny")
-            yield TurnEvent(type="tool_end", tool_call=call, result=result)
-            return
-        if decision == "prompt":
-            summary, diff = self.registry.approval_summary(call)
-            request = ApprovalRequest(tool_call=call, summary=summary, diff=diff)
-            self._notify_safe(
-                "approval_needed",
-                {
-                    "tool_call": call.name,
-                    "arguments": call.arguments,
-                    "summary": summary,
-                },
-            )
-            yield TurnEvent(type="approval_needed", approval=request, tool_call=call)
-            if self.approver is None:
+            if verdict["action"] == "deny":
                 result = ToolResult(
-                    ok=False, payload={"error": "denied", "reason": "no approver"}
+                    ok=False,
+                    payload={"error": verdict.get("reason") or "denied by permission rule", "tool": call.name},
                 )
                 await self._persist_tool(call, message_id, result, "deny")
                 yield TurnEvent(type="tool_end", tool_call=call, result=result)
                 return
-            verdict = await self.approver(request)
-            if verdict.action == "deny":
-                result = ToolResult(ok=False, payload={"error": "denied"})
+            approval_label = verdict["action"]
+            if approval_label == "allow_always" and call.name not in NEVER_PERSIST_ALLOW:
+                self.allow_always.add(call_signature(call))
+        else:
+            if self.hooks.enabled:
+                hook_verdict = self.hooks.notify(
+                    "pre_tool",
+                    {"tool": call.name, "arguments": call.arguments},
+                )
+                if not hook_verdict.allow:
+                    result = ToolResult(ok=False, payload={"error": hook_verdict.reason})
+                    await self._persist_tool(call, message_id, result, "hook_block")
+                    yield TurnEvent(type="tool_end", tool_call=call, result=result)
+                    return
+            rules = self.cfg.permission_rules or None
+            if self.cfg.agent.approval == "plan-only":
+                readonly = READONLY_TOOLS | self.registry.readonly_mcp
+                if call.name not in readonly:
+                    result = ToolResult(
+                        ok=False,
+                        payload={
+                            "error": "plan-only: write/execute tools are disabled; output the plan and ask the user to switch to auto modes",
+                            "tool": call.name,
+                        },
+                    )
+                    await self._persist_tool(call, message_id, result, "plan_only")
+                    yield TurnEvent(type="tool_end", tool_call=call, result=result)
+                    return
+            decision = decide(
+                self.cfg.agent.approval,
+                call,
+                allow_always=self.allow_always,
+                readonly_mcp=self.registry.readonly_mcp,
+                rules=rules,
+                plan_approved=self._plan_approved is True,
+            )
+            approval_label = "allow"
+            if decision == "deny":
+                result = ToolResult(
+                    ok=False,
+                    payload={"error": "denied by permission rule", "tool": call.name},
+                )
                 await self._persist_tool(call, message_id, result, "deny")
                 yield TurnEvent(type="tool_end", tool_call=call, result=result)
                 return
-            if (
-                verdict.action == "allow_always"
-                and call.name not in NEVER_PERSIST_ALLOW
-            ):
-                self.allow_always.add(call_signature(call))
-            approval_label = verdict.action
+            if decision == "prompt":
+                summary, diff = self.registry.approval_summary(call)
+                request = ApprovalRequest(tool_call=call, summary=summary, diff=diff)
+                self._notify_safe(
+                    "approval_needed",
+                    {
+                        "tool_call": call.name,
+                        "arguments": call.arguments,
+                        "summary": summary,
+                    },
+                )
+                yield TurnEvent(type="approval_needed", approval=request, tool_call=call)
+                if self.approver is None:
+                    result = ToolResult(
+                        ok=False, payload={"error": "denied", "reason": "no approver"}
+                    )
+                    await self._persist_tool(call, message_id, result, "deny")
+                    yield TurnEvent(type="tool_end", tool_call=call, result=result)
+                    return
+                verdict_r = await self.approver(request)
+                if verdict_r.action == "deny":
+                    result = ToolResult(ok=False, payload={"error": "denied"})
+                    await self._persist_tool(call, message_id, result, "deny")
+                    yield TurnEvent(type="tool_end", tool_call=call, result=result)
+                    return
+                if (
+                    verdict_r.action == "allow_always"
+                    and call.name not in NEVER_PERSIST_ALLOW
+                ):
+                    self.allow_always.add(call_signature(call))
+                approval_label = verdict_r.action
         if call.name == "task" and self.registry.ctx.task_runner is not None:
             # P1-4: 声明式子代理（.claude/agents/*.md）。agent 为该文件的 name，
             # 其 body 作为子代理的 system prompt，tools 字段收敛子代理工具集。

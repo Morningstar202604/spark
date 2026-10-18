@@ -2,6 +2,50 @@
 
 本项目遵循语义化版本。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)。
 
+## [0.9.9] - 2026-10-18
+
+P2 第四批（**审批 interrupt 化 + turn 级崩溃恢复**——A10 落地）。
+
+### 新增
+
+- **审批经 LangGraph interrupt 挂起**：`approve` 节点（新增，execute 前置）对
+  prompt 档工具逐个 `interrupt()`；外层消费 `__interrupt__` 构造
+  `approval_needed` 事件 → approver 回调 → `Command(resume)` 继续。三端
+  （Web/TUI/ACP）approver 回调语义不变。事件顺序变化（如实记录）：
+  `approval_needed` 现在先于 `tool_start`（旧序相反）——interrupt resume
+  会重跑节点，tool_start 移到 execute 节点保证恢复重跑零重复；审批卡片
+  先于工具卡展示（体验更直观），测试无顺序断言（已核验）。
+- **turn 级崩溃恢复（A10）**：`core/turn_store.py`——`TurnCheckpointer`
+  （AsyncSqliteSaver + `pending_turns` 自建索引表，同库
+  `$SPARK_HOME/checkpoints.db`）/ `MemoryTurnCheckpointer`（子代理与短
+  生命周期场景）。per-turn thread_id；turn 正常/错误终态自动清理 checkpoint
+  与登记，审批挂起/崩溃保留。
+- **恢复 API**：`AgentLoop.resume_pending_turn(thread_id)`（事件流与
+  iter_turn 同构，挂起在审批的 turn 重新走审批循环）、
+  `list_pending_turns()`、`discard_pending_turn(thread_id)`。
+  Web UI 恢复入口随双粒度时间轴批次接线。
+
+### 变更
+
+- graph 拓扑：`llm → approve → execute → llm`（原 tools 节点拆分为审批段与
+  执行段）——resume 重跑只发生在 approve（无副作用位点），已批准工具不重复
+  执行。`_run_tool` 新增 `verdict` 参数（graph 路径跳过判定段；缺省 None
+  保持旧判定路径，直调测试兼容）。
+- 恢复语义边界（诚实标注）：**审批挂起点崩溃 → 零重复恢复**（核心场景）；
+  **工具执行中崩溃 → checkpoint 停在上一节点边界，恢复后该轮工具重跑**
+  （工具副作用非原子，LangGraph 节点级粒度的固有限制）。
+
+### 修复
+
+- 依赖兼容：aiosqlite 0.22 移除了 langgraph-checkpoint-sqlite 2.0.x 依赖的
+  `Thread.is_alive()`——显式锁定 `aiosqlite>=0.20,<0.22`。
+
+### 测试
+
+- `tests/test_turn_recovery.py`：审批挂起 → 模拟崩溃 → 全新实例恢复完整执行、
+  恢复后拒绝执行、pending 生命周期（登记/终态清除/挂起保留）、discard、
+  消息链一致性，共 5 例。全量 **656 passed / 5 skipped**。
+
 ## [0.9.8] - 2026-10-18
 
 P2 第三批（**LangGraph 迁入**——A11 消除，ReAct 控制流单一真相源）。

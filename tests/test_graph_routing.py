@@ -26,8 +26,8 @@ def test_route_tools_error_state_ends() -> None:
 
 
 def test_route_tools_with_calls_continues() -> None:
-    """有工具调用 → tools。"""
-    assert route_after_llm({"error": None, "tool_calls": [{"id": "c1"}]}) == "tools"
+    """有工具调用 → approve（审批节点，interrupt 位点所在）。"""
+    assert route_after_llm({"error": None, "tool_calls": [{"id": "c1"}]}) == "approve"
 
 
 def test_route_tools_no_calls_finalizes() -> None:
@@ -48,7 +48,7 @@ def test_route_tools_error_beats_calls() -> None:
 def test_agent_turn_state_fields() -> None:
     """AgentTurnState 是 TypedDict：字段面即控制流契约。"""
     annotations = AgentTurnState.__annotations__
-    assert set(annotations) == {"rounds", "tool_calls", "memory_block", "error"}
+    assert set(annotations) == {"rounds", "tool_calls", "verdicts", "memory_block", "error"}
 
 
 def test_graph_factory_creates_graph(tmp_path) -> None:
@@ -60,4 +60,4 @@ def test_graph_factory_creates_graph(tmp_path) -> None:
     graph = build_turn_graph(_FakeLoop())  # type: ignore[arg-type]
     assert hasattr(graph, "nodes")
     node_names = set(graph.nodes)
-    assert {"llm", "tools", "finalize"} <= node_names
+    assert {"llm", "approve", "execute", "finalize"} <= node_names
