@@ -23,6 +23,10 @@ SNAPSHOT_DIR: Path | None = None
 MAX_SNAPSHOT_BYTES = 50 * 1024 * 1024
 MANIFEST_VERSION = 1
 MANIFEST_SUFFIX = ".manifest.json"
+# extract(filter="data") 依赖 tarfile 安全过滤器（Python 3.12 / 3.11.4+ 安全回移）。
+# 更老的解释器（3.11.0-3.11.3）无 data_filter——降级为无 filter 提取，路径安全
+# 由 _validated_tar_members 的逐成员校验（穿越/超长/绝对路径）保证。
+_HAS_EXTRACT_FILTER = hasattr(tarfile, "data_filter")
 SKIP_DIRS = {
     ".git",
     "node_modules",
@@ -314,6 +318,16 @@ def _expected_archive_names(manifest: dict | None, baseline: dict | None) -> set
     }
 
 
+def _extract_member(
+    archive: tarfile.TarFile, member: tarfile.TarInfo, workdir: Path
+) -> None:
+    """按解释器能力选择 extract 形态（filter 参数需 3.11.4+ 的安全回移）。"""
+    if _HAS_EXTRACT_FILTER:
+        archive.extract(member, workdir, filter="data")  # type: ignore[call-arg]
+    else:
+        archive.extract(member, workdir)
+
+
 def restore_workdir(workdir: Path, snapshot_id: str) -> dict:
     """Restore a snapshot over the workdir. Returns counts; refuses unknown/unsafe ids."""
     workdir = workdir.resolve()
@@ -366,7 +380,7 @@ def restore_workdir(workdir: Path, snapshot_id: str) -> dict:
             for member in members:
                 if member.isfile():
                     try:
-                        archive.extract(member, workdir, filter="data")
+                        _extract_member(archive, member, workdir)
                     except (OSError, tarfile.TarError) as exc:
                         # 单文件恢复失败（被占用/权限）不应让整次回滚崩溃；
                         # 收集进 errors 由调用方呈现（其余文件继续恢复）。

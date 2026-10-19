@@ -170,6 +170,14 @@ class WorkdirSandbox:
                 continue
             raise SandboxPolicyError(f"Blocked protected path: {raw}")
 
+    def is_path_allowed(self, path: Path) -> bool:
+        """True 当 *path* 未命中保护路径清单（供只读遍历工具过滤候选文件）。"""
+        try:
+            self._check_protected(path)
+        except SandboxPolicyError:
+            return False
+        return True
+
     def _command_tokens(self, command: str) -> list[str]:
         """Sanitise a shell command into safe tokens.
 

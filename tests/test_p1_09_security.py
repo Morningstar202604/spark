@@ -41,7 +41,9 @@ class FakeConn:
         self.cfg = cfg
         self.tools = tools
 
-    async def start(self) -> None:  # 真实逻辑在 bridge 里过滤 self.tools
+    async def start(self, timeout_sec: float = 15.0, **kwargs) -> None:
+        # P2 起 bridge 会注入 sampling/elicitation/message_handler 回调，
+        # 测试替身保持签名兼容即可（真实逻辑在 bridge 里过滤 self.tools）。
         return None
 
     async def close(self) -> None:

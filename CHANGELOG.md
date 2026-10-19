@@ -2,6 +2,97 @@
 
 本项目遵循语义化版本。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)。
 
+## [0.9.11] - 2026-10-19
+
+P2 第六批（**上下文合同 + 双粒度时间机器 + 权限/审批扩展 + MCP 全能力推进**），
+同时清偿全部已知测试失败（17 → 0）与代码级技术债。
+
+### 新增
+
+- **上下文合同 replay.jsonl**（`core/replay.py`，schema `spark.replay/1`）：
+  - `TurnReplayRecorder` 把每个 turn 归一化为一行 JSON（prompt / 文本 /
+    思考流 / 工具轨迹按 start-end 配对 / 审批请求+决策回填 / 压缩 / usage
+    / 检查点 id），逐会话追加写 `$SPARK_HOME/replays/<sid>.jsonl`；
+  - AgentLoop 双入口接线（`iter_turn` + 崩溃恢复 `resume_pending_turn`），
+    approver 包装捕获每次审批决策；`[replay] enabled` 开关，观测路径
+    永不阻塞主循环；
+  - CLI `spark replay`（会话列表 / turn 明细 / `--json`）；
+  - Web `GET /api/replays` + `GET /api/replays/turn?index=`；
+  - 前端 **ReplayModal**（列表 + 明细：状态/耗时/工具轨迹/审批/用量，
+    命令面板入口，中英双语）。
+- **双粒度时间机器**：
+  - `store.list_message_briefs` + `GET /api/timeline`（检查点 + 消息统一
+    时间轴）+ `POST /api/messages/truncate`（消息级 undo——只回退对话、
+    文件保留，与检查点回滚互补）；
+  - CheckpointModal 扩展为双区时间轴（检查点回滚 + 消息级 undo）。
+- **三层权限作用域**（H3）：
+  - `.spark/settings.toml`（项目层，**不可信：仅 deny 被采纳**——克隆仓库
+    只能收紧权限，与 `.spark.toml` 消毒同一威胁模型）+
+    `.spark/settings.local.toml`（本地层，全量）+ 全局 user 层；
+  - `policy.decide` 实现 **deny 跨层优先**（压过 allow_always，防过期授权
+    被仓库层 deny 打穿）；扁平 `permission_rules` 向后兼容；
+  - `sandbox.is_path_allowed()` 公开化（只读遍历工具过滤保护路径）。
+- **审批/行为档案**（H4）：`[[approval_profiles]]`（approval 模式 + 工具
+  glob 白名单 + system_prompt + 联动模型档案）；激活经 `_approval_override`
+  零配置突变；CLI `spark profile list/use`。
+- **自定义命令**（H5）：`.spark/commands/*.md` 文件即命令（`$ARGUMENTS`
+  占位），内建 `/test` 永不遮蔽；web / TUI / CLI 三入口接线；
+  `GET /api/commands` 供前端。
+- **MCP 全能力推进**：
+  - **sampling**：server 反向请求补全 → 经 Spark Provider（system 槽 +
+    消息序列透传，失败降级 error-stop）；web / TUI / CLI / ACP 四
+    surface 挂载；
+  - **elicitation**：策略性 decline（hook 点就位，UI 通道后接）；
+  - **tools/list_changed**：经 `message_handler` 动态重注册
+    （`register_scope`，最小权限白名单在重注册时同样强制）；
+  - **resource templates** 聚合进 `mcp_resources` 列表。
+
+### 修复
+
+- **17 个预存测试失败全部清零**，定位到 3 个真实根因：
+  - `tarfile.extract(filter=)` 依赖 Python 3.11.4+ 安全回移——checkpoints
+    增加 `data_filter` 特性检测 + 降级路径（路径安全仍由
+    `_validated_tar_members` 逐成员校验保证）；
+  - `run_tests` 在 POSIX 缺 `python` 别名（Debian/Ubuntu 常见）时直接
+    失败——增加 `python`→`python3` 回退；
+  - 测试用 `sys.executable`（常在 `/usr/bin`）触发 workspace 沙箱保护
+    路径拦截——相关测试改用 PATH 上的 `python3`（沙箱行为本身正确）。
+- `/api/memory` 查询参数未 URL 解码——前端 `encodeURIComponent` 的中文
+  查询以 percent 串进入搜索导致失效，改用 `parse_qs`。
+- `WebApprover._tool_call_id` 未初始化（`respond()` 先于 `__call__` 会
+  AttributeError）。
+
+### 重构 / 技术债清偿
+
+- **审批判定双路径统一**：抽出 `_classify_call` 公共判定段（hooks →
+  plan-only → 规则决策），graph 路径与直调路径收敛到同一执行分派，
+  删除约 80 行重复；两条路径的 deny/no-approver payload 文案从此一致。
+- **httpx 直连收敛到 LiteLLM 单一通道**：新增 `providers/aux.py`
+  （`chat_once` / `embed_once`），memory 摘要/记忆抽取/web 标题生成
+  统一走 LiteLLM（模型名规则抽为模块级 `litellm_model_name` 单一真相源）；
+  `providers/probe.py` 保留裸 httpx 并注明设计定位（探活 = 原始线上协议
+  符合性验证，经 LiteLLM 宽容解析反而掩盖不兼容端点）。
+- **glob 匹配统一**：删除 `**`/非 `**` 双 matcher 分支，统一
+  `_glob_to_regex`（`*` 恒为单段），语义一致。
+- **memory 乐观锁方法公开化**：`_update_content_if_version` →
+  `update_content_if_version`（service 跨模块私有访问消除）。
+- **文档与实现不符修正**：`trim_recent` 实为字符预算（口径
+  `history_budget_chars`），修正 docstring 并同步 context.py 注释；
+  memory 搜索双路径重新定位（线性加权是 embedding 关闭时的默认主路径，
+  两路均一等公民）；清理 config.py 错位孤立 docstring。
+- **`_handlers.py` 862 行拆分**为 5 个域子模块（models / knowledge /
+  sessions / chat / settings）+ 共享助手，原文件改为 facade，
+  routes.py 与测试导入路径零变动。
+- web 会话切换的重复消息构建复用 `_history_messages`。
+
+### 测试
+
+- 新增 5 个测试文件：`test_replay.py`（6）、`test_permission_scopes.py`（6）、
+  `test_profiles_and_commands.py`（8）、`test_mcp_p2.py`（6）+
+  既有边界测试更新。
+- 全量 **687 passed / 5 skipped / 0 failed**（基线 644+17 失败）；
+  ruff / mypy / tsc 全绿；前端 dist 已随批重建。
+
 ## [0.9.10] - 2026-10-18
 
 P2 第五批（**OTel GenAI 观测**——trace=turn / span=tool / metrics，默认关）。

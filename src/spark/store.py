@@ -641,6 +641,29 @@ class SessionStore:
             self._conn.commit()
         return self.load_messages(session_id)
 
+    def list_message_briefs(self, session_id: str, limit: int = 200) -> list[dict]:
+        """时间轴用：消息 id/角色/预览/时间（honouring compact-from 截断）。"""
+        with self._lock:
+            rows = self._conn.execute(
+                """SELECT id, role, content, created_at FROM messages
+                   WHERE session_id = ?
+                     AND id >= COALESCE((SELECT compact_from FROM sessions WHERE id = ?), 0)
+                   ORDER BY id DESC LIMIT ?""",
+                (session_id, session_id, max(1, int(limit))),
+            ).fetchall()
+        briefs: list[dict] = []
+        for row in reversed(rows):
+            content = row["content"] or ""
+            briefs.append(
+                {
+                    "id": int(row["id"]),
+                    "role": row["role"],
+                    "preview": content[:120].replace("\n", " "),
+                    "created_at": int(row["created_at"]),
+                }
+            )
+        return briefs
+
     def search(self, q: str, limit: int = 20) -> list[dict]:
         """会话搜索：FTS5（trigram，中文子串友好）优先，短查询回退 LIKE。
 

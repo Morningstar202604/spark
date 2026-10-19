@@ -137,6 +137,22 @@ def _split_think(text: str, state: dict) -> list[tuple[str, str]]:
 # ---------------------------------------------------------------------------
 
 
+def litellm_model_name(name: str) -> tuple[str, str | None]:
+    """Return ``(model, custom_llm_provider)`` for a LiteLLM call.
+
+    裸模型名一律按 OpenAI 兼容处理（``api_base`` 已显式给出）：LiteLLM 只能
+    按内置规则推断 provider，任何自定义模型名（glm-5.3-flash、Qwen-… 等）
+    都会直接报 "LLM Provider NOT provided"。带 "/" 的名字视为用户显式使用
+    LiteLLM 前缀语法（openai/xxx、deepseek/xxx），原样尊重。
+
+    模块级函数：``OpenAICompatProvider._litellm_model`` 与
+    :mod:`spark.providers.aux` 共用同一规则（单一真相源）。
+    """
+    if "/" in name:
+        return name, None
+    return name, "openai"
+
+
 class OpenAICompatProvider:
     """Unified LLM provider backed by `LiteLLM <https://litellm.ai>`_.
 
@@ -177,16 +193,10 @@ class OpenAICompatProvider:
     def _litellm_model(self, model: str | None = None) -> tuple[str, str | None]:
         """Return ``(model, custom_llm_provider)`` for the LiteLLM call.
 
-        裸模型名一律按 OpenAI 兼容处理（''api_base'' 已显式给出）：LiteLLM 只能
-        按内置规则推断 provider，任何自定义模型名（glm-5.3-flash、Qwen-… 等）
-        都会直接报 "LLM Provider NOT provided"。带 "/" 的名字视为用户显式使用
-        LiteLLM 前缀语法（openai/xxx、deepseek/xxx），原样尊重。
-        ``model`` 传入时覆盖 ``self.model``（fallback 目标用）。
+        ``model`` 传入时覆盖 ``self.model``（fallback 目标用）；规则见
+        :func:`litellm_model_name`。
         """
-        name = model or self.model
-        if "/" in name:
-            return name, None
-        return name, "openai"
+        return litellm_model_name(model or self.model)
 
     # -- public interface (Provider protocol) ----------------------------------
 

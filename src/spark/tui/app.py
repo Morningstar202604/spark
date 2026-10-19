@@ -418,13 +418,23 @@ class SparkApp(App):
         )
 
     async def _run_prompt(self, text: str) -> None:
+        # H5：自定义命令展开（.spark/commands/*.md），展示原文、执行展开产物
+        from spark.slash import expand_command
+
+        turn_text = text
+        try:
+            expanded = expand_command(self.registry.ctx.sandbox.root, text)
+        except Exception:
+            expanded = None
+        if expanded:
+            turn_text = expanded
         self._running = True
         self._current_text = ""
         self._update_status()
         chat = self.query_one("#chat", RichLog)
         chat.write(f"[bold cyan]你[/bold cyan] {rich_escape(text)}")
         try:
-            async for event in self.loop_engine.iter_turn(text):
+            async for event in self.loop_engine.iter_turn(turn_text):
                 self._render(event, chat)
         finally:
             self._flush_text(chat)

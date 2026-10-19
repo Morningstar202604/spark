@@ -9,6 +9,12 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
+# 设计定位：探活刻意使用裸 httpx 而非 LiteLLM——它要验证的是端点的
+# **原始线上协议**（SSE 帧格式、finish_reason / [DONE]、非流式结构）。
+# LiteLLM 的宽容解析会掩盖不兼容端点，使 ``spark test`` / 设置页"测试连接"
+# 失去诊断价值。其余一次性辅助调用（摘要/标题/记忆）已收敛到
+# :mod:`spark.providers.aux`，本模块是唯一保留的直连实现。
+
 PROBE_PROMPT = (
     "Reply with exactly the token SPARK_OK followed by one short sentence "
     "about local coding agents. Do not refuse."

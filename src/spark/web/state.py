@@ -39,6 +39,7 @@ class WebApprover:
         self._event = threading.Event()
         self._cancel_event = threading.Event()
         self._action: ApprovalAction = "deny"
+        self._tool_call_id = ""
 
     async def __call__(self, request) -> ApprovalDecision:
         self.pending = True
@@ -86,9 +87,8 @@ def _generate_session_meta_async(
         import json as _json
         import re
 
-        import httpx
-
-        from spark.web.utils import _extract_text
+        from spark.asyncutil import run_coroutine_sync
+        from spark.providers.aux import chat_once
 
         base_url = state.cfg.provider.base_url.rstrip("/")
         # Ensure the URL ends with /v1 for OpenAI-compatible APIs. Users may
@@ -109,21 +109,17 @@ def _generate_session_meta_async(
                 "标题概括用户核心意图，关键词提炼 2-4 个主题词。只输出 JSON，不要其他内容。\n\n"
                 f"对话：\n{convo}"
             )
-            timeout = httpx.Timeout(connect=10.0, read=45.0, write=10.0, pool=10.0)
-            resp = httpx.post(
-                f"{base_url}/chat/completions",
-                headers={"Authorization": f"Bearer {api_key}"} if api_key else {},
-                json={
-                    "model": model,
-                    "messages": [{"role": "user", "content": prompt}],
-                    "stream": False,
-                    "max_tokens": 120,
-                    "temperature": 0.2,
-                },
-                timeout=timeout,
+            text = run_coroutine_sync(
+                chat_once(
+                    base_url=base_url,
+                    api_key=api_key,
+                    model=model,
+                    user=prompt,
+                    temperature=0.2,
+                    max_tokens=120,
+                ),
+                timeout=60.0,
             )
-            resp.raise_for_status()
-            text = _extract_text(resp.json())
             match = re.search(r"\{.*\}", text, re.DOTALL)
             if not match:
                 return
@@ -202,6 +198,9 @@ class SparkWebState:
             tool_ctx.mcp_call = self.mcp_bridge.call
             tool_ctx.mcp_bridge = self.mcp_bridge
         provider = create_provider(self.cfg)
+        if self.mcp_bridge is not None:
+            # P2：server 反向 sampling 以当前 Provider 为大脑
+            self.mcp_bridge.set_sampling_handler(provider)
         if session_id is None and reuse_latest:
             latest = next(
                 (

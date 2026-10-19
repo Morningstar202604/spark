@@ -332,6 +332,16 @@ def run_tests(sandbox: WorkdirSandbox, args: RunTestsArgs) -> ToolResult:
         resolved_python = shutil.which(argv[0])
         if resolved_python:
             argv[0] = resolved_python
+    elif (
+        os.name != "nt"
+        and argv[0] == "python"
+        and shutil.which("python") is None
+    ):
+        # POSIX：`python` 别名缺失（Debian/Ubuntu 未装 python-is-python3 常见）
+        # → 回退 PATH 里的 python3（解析为绝对路径，行为可预期）。
+        resolved = shutil.which("python3")
+        if resolved:
+            argv[0] = resolved
     try:
         completed = subprocess.run(
             argv,

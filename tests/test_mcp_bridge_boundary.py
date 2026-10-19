@@ -136,7 +136,7 @@ class TestMcpBridgeRegistration:
         bridge = McpBridge()
         registry = MagicMock()
         bridge.register_into(registry)
-        registry.add_mcp_schema.assert_not_called()
+        registry.register_scope.assert_not_called()
 
     def test_register_server_with_no_tools(self):
         bridge = McpBridge()
@@ -146,7 +146,7 @@ class TestMcpBridgeRegistration:
         bridge.servers["empty_srv"] = mock_conn
         registry = MagicMock()
         bridge.register_into(registry)
-        registry.add_mcp_schema.assert_not_called()
+        registry.register_scope.assert_not_called()
 
     def test_register_skips_tools_without_name(self):
         bridge = McpBridge()
@@ -158,7 +158,9 @@ class TestMcpBridgeRegistration:
         bridge.servers["srv"] = mock_conn
         registry = MagicMock()
         bridge.register_into(registry)
-        assert registry.add_mcp_schema.called
+        # P2 重构：注册机制收敛为 register_scope（动态重注册复用同一入口）；
+        # 无名工具回退 "tool" 的语义保持不变。
+        assert registry.register_scope.called
 
     def test_register_with_readonly_tools(self):
         bridge = McpBridge()

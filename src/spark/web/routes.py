@@ -27,6 +27,7 @@ from spark.web._handlers import (  # noqa: F401  (re-export for backward-compat)
     _handle_chat_stream,
     _handle_checkpoints_rollback,
     _handle_memory,
+    _handle_messages_truncate,
     _handle_models_activate,
     _handle_models_delete,
     _handle_models_save,
@@ -350,9 +351,8 @@ def build_handler_class(html: str):
                 )
                 return
             if path == "/api/memory":
-                raw_query = urlparse(self.path).query
-                params = dict(p.split("=", 1) for p in raw_query.split("&") if "=" in p)
-                q = params.get("q", "")
+                query = parse_qs(urlparse(self.path).query)
+                q = (query.get("q", [""])[0] or "").strip()
                 items = state.memory.list_memories()
                 search_hits: list[dict] = []
                 if q:
@@ -395,6 +395,66 @@ def build_handler_class(html: str):
             if path == "/api/checkpoints":
                 cps = state.store.list_checkpoints(state.session_id)
                 self._json(200, {"checkpoints": cps})
+                return
+            # P2 上下文合同：turn 级重放记录（当前会话）
+            if path == "/api/replays":
+                from spark.core.replay import load_replays
+
+                records = load_replays(state.session_id)
+                turns = []
+                for i, record in enumerate(records):
+                    t = record.get("turn") or {}
+                    turns.append(
+                        {
+                            "index": i,
+                            "prompt": (t.get("prompt") or "")[:120],
+                            "status": t.get("status"),
+                            "duration_ms": t.get("duration_ms"),
+                            "tools": len(t.get("tool_calls") or []),
+                            "resumed": t.get("resumed", False),
+                            "text_preview": (t.get("text") or "")[:160],
+                            "usage": t.get("usage"),
+                            "recorded_at": record.get("recorded_at"),
+                        }
+                    )
+                self._json(200, {"session_id": state.session_id, "turns": turns})
+                return
+            if path == "/api/replays/turn":
+                from spark.core.replay import load_replays
+
+                query = parse_qs(urlparse(self.path).query)
+                try:
+                    index = int((query.get("index", ["0"])[0] or "0").strip())
+                except ValueError:
+                    index = -1
+                records = load_replays(state.session_id)
+                if index < 0 or index >= len(records):
+                    self._json(404, {"error": f"turn index out of range (0..{len(records) - 1})"})
+                    return
+                self._json(200, records[index])
+                return
+            # P2 双粒度时间机器：检查点 + 消息级 undo 统一时间轴
+            if path == "/api/timeline":
+                checkpoints = state.store.list_checkpoints(state.session_id)
+                messages = state.store.list_message_briefs(state.session_id, limit=200)
+                self._json(
+                    200,
+                    {
+                        "session_id": state.session_id,
+                        "checkpoints": checkpoints,
+                        "messages": messages,
+                    },
+                )
+                return
+            # H5：自定义命令目录（供命令面板补全）
+            if path == "/api/commands":
+                from spark.slash import discover_commands
+
+                items = [
+                    {"name": c.name, "description": c.description}
+                    for c in discover_commands(state.workdir)
+                ]
+                self._json(200, {"commands": items})
                 return
             if path == "/api/history":
                 messages = []
@@ -515,6 +575,7 @@ _POST_HANDLERS: dict[str, Any] = {
     "/api/memory": _handle_memory,
     "/api/cancel": _handle_cancel,
     "/api/checkpoints/rollback": _handle_checkpoints_rollback,
+    "/api/messages/truncate": _handle_messages_truncate,
     "/api/approval": _handle_approval,
     "/api/sessions/new": _handle_sessions_new,
     "/api/sessions/delete": _handle_sessions_delete,

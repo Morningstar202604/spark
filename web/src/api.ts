@@ -425,6 +425,88 @@ export async function rollbackCheckpoint(checkpointId: number): Promise<{
 }
 
 /* ------------------------------------------------------------------ */
+/* P2 上下文合同：turn 级重放记录 + 双粒度时间机器                       */
+/* ------------------------------------------------------------------ */
+
+export interface ReplayTurnSummary {
+  index: number
+  prompt: string
+  status?: string
+  duration_ms?: number
+  tools: number
+  resumed?: boolean
+  text_preview?: string
+  usage?: { input_tokens?: number; output_tokens?: number; reasoning_tokens?: number; source?: string }
+  recorded_at?: number
+}
+
+export interface ReplayToolCall {
+  id: string
+  name: string
+  arguments: unknown
+  ok?: boolean | null
+  result?: unknown
+}
+
+export interface ReplayRecord {
+  schema: string
+  session_id: string
+  model: string
+  recorded_at: number
+  turn: {
+    index: number
+    prompt: string
+    resumed?: boolean
+    duration_ms: number
+    status: string
+    error?: string | null
+    usage?: ReplayTurnSummary["usage"]
+    text: string
+    reasoning?: string
+    tool_calls: ReplayToolCall[]
+    approvals?: { tool?: string; summary: string; decision?: string | null }[]
+    compaction?: { before_tokens?: number; after_tokens?: number } | null
+  }
+}
+
+export async function fetchReplays(): Promise<{ session_id: string; turns: ReplayTurnSummary[] }> {
+  return readJson(await fetchWithTimeout("/api/replays"))
+}
+
+export async function fetchReplayTurn(index: number): Promise<ReplayRecord> {
+  return readJson(await fetchWithTimeout(`/api/replays/turn?index=${index}`))
+}
+
+export interface TimelineMessageBrief {
+  id: number
+  role: string
+  preview: string
+  created_at: number
+}
+
+export async function fetchTimeline(): Promise<{
+  session_id: string
+  checkpoints: CheckpointRow[]
+  messages: TimelineMessageBrief[]
+}> {
+  return readJson(await fetchWithTimeout("/api/timeline"))
+}
+
+export async function truncateFromMessage(messageId: number): Promise<{
+  ok: boolean
+  status: Status
+  messages: HistoryMessage[]
+}> {
+  return readJson(
+    await fetchWithTimeout("/api/messages/truncate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message_id: messageId }),
+    }),
+  )
+}
+
+/* ------------------------------------------------------------------ */
 /* 只读工具：文件查看 / 网页阅读（与 agent 工具共用同一套安全边界）      */
 /* ------------------------------------------------------------------ */
 

@@ -126,14 +126,17 @@ def test_shell_runs_and_captures(tmp_path: Path) -> None:
 
 
 def test_shell_output_is_bounded_and_marked(tmp_path: Path, monkeypatch) -> None:
+    import os
     import subprocess
     import sys
 
     import spark.tools.shell as shell
 
     monkeypatch.setattr(shell, "MAX_SHELL_OUTPUT_BYTES", 64)
+    # POSIX 裸 "python3" 走 PATH（/usr/bin 绝对路径触发沙箱保护路径拦截）
+    exe = sys.executable if os.name == "nt" else "python3"
     command = subprocess.list2cmdline(
-        [sys.executable, "-c", "print('x' * 100000, end='')"]
+        [exe, "-c", "print('x' * 100000, end='')"]
     )
     result = run_shell(
         WorkdirSandbox(tmp_path),
@@ -148,6 +151,7 @@ def test_shell_output_is_bounded_and_marked(tmp_path: Path, monkeypatch) -> None
 
 
 def test_shell_timeout_kills_child_process_tree(tmp_path: Path) -> None:
+    import os
     import subprocess
     import sys
     import time
@@ -181,7 +185,8 @@ def test_shell_timeout_kills_child_process_tree(tmp_path: Path) -> None:
     )
     command = subprocess.list2cmdline(
         [
-            sys.executable,
+            # POSIX 裸 "python3" 走 PATH（/usr/bin 绝对路径触发沙箱保护路径拦截）
+            sys.executable if os.name == "nt" else "python3",
             str(parent_script),
             str(child_script),
             str(started),

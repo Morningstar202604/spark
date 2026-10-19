@@ -257,8 +257,9 @@ def build_messages(
 ) -> list[ChatMessage]:
     """Build the list of messages sent to the provider.
 
-    Budget trimming 统一走 Compactor 的 token-aware 实现；``_compactor`` 参数
-    仅为向后兼容保留（可传实例或 None）。
+    Budget trimming 走 Compactor 的字符预算实现（口径 =
+    ``context.history_budget_chars``）；``_compactor`` 参数仅为向后兼容
+    保留（可传实例或 None）。
     """
     messages: list[ChatMessage] = [ChatMessage(role="system", content=system_prompt(workdir, cfg))]
     agents = load_agents_md(workdir, cfg)

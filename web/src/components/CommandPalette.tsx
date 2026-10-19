@@ -107,6 +107,17 @@ export const CommandPalette = memo(function CommandPalette() {
         },
       },
       {
+        id: "replay",
+        group: t("palette.groupGeneral", lang),
+        title: t("palette.openReplay", lang),
+        hint: "",
+        icon: <IconHistory size={15} />,
+        run: () => {
+          useUiStore.getState().openReplay()
+          setOpen(false)
+        },
+      },
+      {
         id: "files",
         group: t("palette.groupGeneral", lang),
         title: t("files.title", lang),

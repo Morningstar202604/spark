@@ -52,10 +52,16 @@ def test_apply_patch_zero_and_many(tmp_path: Path) -> None:
 
 
 def test_shell_timeout(tmp_path: Path) -> None:
+    import os
     import sys
 
     box = WorkdirSandbox(tmp_path)
-    command = f'"{sys.executable}" -c "import time; time.sleep(2)"'
+    if os.name == "nt":
+        command = f'"{sys.executable}" -c "import time; time.sleep(2)"'
+    else:
+        # POSIX：裸 "python3" 走 PATH 解析；系统解释器常在 /usr/bin，
+        # 绝对路径会触发 workspace 沙箱的保护路径拦截（设计行为）。
+        command = 'python3 -c "import time; time.sleep(2)"'
     result = run_shell(
         box, RunShellArgs(command=command), timeout_sec=1, max_output_chars=100
     )

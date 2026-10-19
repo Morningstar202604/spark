@@ -10,6 +10,7 @@ import { FileViewer } from "./components/FileViewer"
 import { BrowserModal } from "./components/BrowserModal"
 import { Terminal } from "./components/Terminal"
 import { ExecutionGraph } from "./components/ExecutionGraph"
+import { ReplayModal } from "./components/ReplayModal"
 import Toast from "./components/Toast"
 import { fetchStatus } from "./api"
 import type { Status } from "./types"
@@ -80,8 +81,9 @@ export default function App() {
       <CheckpointModal />
       <FileViewer />
       <BrowserModal />
-      <Terminal />
-      <ExecutionGraph />
+        <Terminal />
+        <ExecutionGraph />
+        <ReplayModal />
       {settingsOpen && (
         <Suspense fallback={null}>
           <SettingsModal onClose={closeSettings} onSaved={handleSaved} />

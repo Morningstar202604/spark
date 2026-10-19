@@ -111,10 +111,13 @@ def test_auto_checkpoint_and_rollback_e2e(tmp_path: Path) -> None:
 
 
 def test_bg_start_output_kill(tmp_path: Path) -> None:
+    import os
     import sys
 
     sandbox = WorkdirSandbox(tmp_path, _cfg())
-    command = f'echo started && "{sys.executable}" -c "import time; time.sleep(30)"'
+    # POSIX 裸 "python3" 走 PATH（/usr/bin 绝对路径触发沙箱保护路径拦截）
+    exe = sys.executable if os.name == "nt" else "python3"
+    command = f'echo started && "{exe}" -c "import time; time.sleep(30)"'
     r = bg.bg_start_tool(sandbox, {"command": command})
     assert r.ok, r.payload
     job_id = r.payload["job_id"]

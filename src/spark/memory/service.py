@@ -260,7 +260,7 @@ class MemoryService:
                     conflict: dict | None = None
                     if op.action == "UPDATE" and op.target_id:
                         target = target_versions.get(op.target_id)
-                        if target is not None and self.store._update_content_if_version(
+                        if target is not None and self.store.update_content_if_version(
                             op.target_id,
                             safe_content,
                             target.version,

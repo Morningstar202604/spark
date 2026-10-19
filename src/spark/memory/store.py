@@ -517,7 +517,7 @@ class MemoryStore:
         )
         return new_id
 
-    def _update_content_if_version(
+    def update_content_if_version(
         self,
         memory_id: int,
         content: str,
@@ -527,6 +527,11 @@ class MemoryStore:
         embedding: list[float] | None = None,
         embedding_model: str | None = None,
     ) -> bool:
+        """乐观锁更新：版本号匹配且状态 active 时才写入，返回是否成功。
+
+        公开 API——供 MemoryService.record_turn 以捕获的版本做并发安全的
+        UPDATE（冲突时调用方回退为 ADD 并记入 conflicts）。
+        """
         raw = self._get_raw(memory_id)
         if raw is None:
             return False
@@ -570,7 +575,7 @@ class MemoryStore:
         row = self.get(memory_id)
         if row is None or row.status != "active":
             return
-        self._update_content_if_version(
+        self.update_content_if_version(
             memory_id,
             content,
             row.version,
@@ -752,10 +757,15 @@ class MemoryStore:
     ) -> list[tuple[MemoryRow, float]]:
         """Hybrid keyword + vector search over active memories.
 
-        ``hybrid=True``（默认）时采用 **RRF 融合**：向量余弦排序与 BM25
-        词法排序各自独立，再按 reciprocal rank 融合——对中文同义/近义表达
-        与精确术语命中都不漏检。``hybrid=False`` 保持旧的线性加权打分
-        （兼容既有调用与测试）。
+        双路径均为一等公民，按 embedding 可用性分流（embedding 默认关闭，
+        关键词路径是多数部署的默认主路径）：
+
+        * 有 query_embedding 且 ``hybrid=True``（默认）→ **RRF 融合**：向量
+          余弦排序与 BM25 词法排序各自独立，再按 reciprocal rank 融合——
+          对中文同义/近义表达与精确术语命中都不漏检。
+        * 无 embedding 或 ``hybrid=False`` → 线性加权打分（kw 0.75 / recency
+          0.15 / importance 0.10，有向量时叠加余弦项），作为关键词-only
+          模式的排序基准。
         """
         top_k = top_k or self.cfg.top_k
         q_tokens: list[str] = []

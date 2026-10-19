@@ -144,14 +144,6 @@ def pick_free_port(host: str, preferred: int, attempts: int = 64) -> int:
     )
 
 
-def _extract_text(payload: dict) -> str:
-    choices = payload.get("choices") or []
-    if not choices:
-        return ""
-    msg = choices[0].get("message") or {}
-    return str(msg.get("content") or "").strip()
-
-
 def _event_payload(event) -> dict:
     payload: dict = {"type": event.type}
     if event.text:

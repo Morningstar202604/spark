@@ -122,6 +122,7 @@ def _launch_tui(
     bridge = asyncio.run(_boot_mcp(cfg, registry))
     tool_ctx.mcp_call = bridge.call
     tool_ctx.mcp_bridge = bridge
+    bridge.set_sampling_handler(prov)
     SparkApp(
         workdir=workdir,
         cfg=cfg,
@@ -215,6 +216,7 @@ async def _exec_async(
     bridge = await _boot_mcp(cfg, registry)
     tool_ctx.mcp_call = bridge.call
     tool_ctx.mcp_bridge = bridge
+    bridge.set_sampling_handler(prov)
     loop = AgentLoop(
         workdir=workdir,
         cfg=cfg,
@@ -247,7 +249,14 @@ async def _exec_async(
                 typer.echo(final)
             raise typer.Exit(1)
 
-        events = await loop.run(prompt)
+        # H5：自定义命令展开（.spark/commands/*.md）
+        from spark.slash import expand_command
+
+        try:
+            expanded = expand_command(str(workdir), prompt)
+        except Exception:
+            expanded = None
+        events = await loop.run(expanded or prompt)
         final = ""
         for event in events:
             if event.type == "turn_end" and event.text:
@@ -575,6 +584,74 @@ def models_cmd(
         typer.echo(f"{r['provider'][:16]:<16} {r['model'][:34]:<34} {ctx_s:<10} {price_s}")
 
 
+@app.command("replay", help="查看 turn 级重放记录（上下文合同 spark.replay/1）")
+def replay_cmd(
+    session: str = typer.Argument("", help="会话 id（留空 = 列出全部有记录的会话）"),
+    turn: int = typer.Option(-1, "--turn", "-t", help="查看第 N 个 turn（0 起）"),
+    as_json: bool = typer.Option(False, "--json", help="输出原始 JSON 记录"),
+) -> None:
+    import json as _json
+
+    from spark.core.replay import list_replay_sessions, load_replays
+
+    if not session:
+        sessions = list_replay_sessions()
+        if not sessions:
+            typer.echo("（还没有任何重放记录——先对话一轮）")
+            raise typer.Exit(0)
+        typer.echo(f"{'会话':<16} {'更新时间':<12} 大小")
+        for row in sessions[:30]:
+            import datetime as _dt
+
+            stamp = _dt.datetime.fromtimestamp(row["updated_at"]).strftime("%m-%d %H:%M")
+            typer.echo(f"{row['session_id']:<16} {stamp:<12} {row['bytes']}")
+        typer.echo("\n查看明细：spark replay <会话id> [-t N]")
+        return
+
+    records = load_replays(session)
+    if not records:
+        typer.echo(f"（会话 {session} 没有重放记录）", err=True)
+        raise typer.Exit(1)
+    if turn >= 0:
+        if turn >= len(records):
+            typer.echo(f"（turn 越界：共 {len(records)} 条，0..{len(records) - 1}）", err=True)
+            raise typer.Exit(1)
+        record = records[turn]
+        if as_json:
+            typer.echo(_json.dumps(record, ensure_ascii=False, indent=2))
+            return
+        t = record["turn"]
+        status = t.get("status", "?")
+        typer.echo(f"◆ turn #{t.get('index')}  status={status}  {t.get('duration_ms')}ms  model={record.get('model')}")
+        usage = t.get("usage") or {}
+        typer.echo(
+            f"  tokens: in={usage.get('input_tokens', 0)} out={usage.get('output_tokens', 0)}"
+            f" reasoning={usage.get('reasoning_tokens', 0)} ({usage.get('source')})"
+        )
+        typer.echo(f"  prompt: {(t.get('prompt') or '')[:120]}")
+        if t.get("compaction"):
+            typer.echo(f"  compaction: {t['compaction']}")
+        for call in t.get("tool_calls") or []:
+            mark = "ok" if call.get("ok") else ("fail" if call.get("ok") is False else "??")
+            typer.echo(f"  [{mark}] {call.get('name')} {_json.dumps(call.get('arguments') or {}, ensure_ascii=False)[:100]}")
+        for ap in t.get("approvals") or []:
+            typer.echo(f"  审批 {ap.get('tool')}: {ap.get('decision')}")
+        text = (t.get("text") or "").strip()
+        if text:
+            typer.echo("  ── 回复 ──")
+            for line in text.splitlines()[:20]:
+                typer.echo(f"  {line}")
+        return
+    typer.echo(f"{'#':<4} {'状态':<10} {'耗时ms':<8} {'工具':<6} {'prompt'}")
+    for i, record in enumerate(records):
+        t = record.get("turn") or {}
+        typer.echo(
+            f"{i:<4} {str(t.get('status', '?')):<10} {str(t.get('duration_ms', 0)):<8} "
+            f"{len(t.get('tool_calls') or []):<6} {(t.get('prompt') or '')[:60]}"
+        )
+    typer.echo("\n查看明细：spark replay <会话id> -t <N>（--json 输出原始记录）")
+
+
 @app.command("context-profile", help="上下文火焰图——这轮请求的上下文都被谁吃了")
 def context_profile_cmd(
     session: str = typer.Option("", "--session", "-s", help="会话 id（留空 = 最近一个）"),
@@ -596,6 +673,67 @@ def context_profile_cmd(
         typer.echo(f"（最近会话 {sid}）")
     profile = profile_context(store, sid, workdir.resolve(), cfg)
     typer.echo(profile.render())
+
+
+profile_app = typer.Typer(help="审批/行为档案（H4）——approval+工具白名单+system prompt 组合")
+app.add_typer(profile_app, name="profile")
+
+
+@profile_app.command("list")
+def profile_list_cmd(
+    config: Path | None = typer.Option(None, "--config"),
+) -> None:
+    """列出全部审批档案，标记当前激活项。"""
+    cfg = read_config(config, Path(".").resolve())
+    if not cfg.approval_profiles:
+        typer.echo(
+            "（尚无档案——在 config.toml 添加 [[approval_profiles]]，"
+            "字段：id/name/approval/tools/system_prompt/model_profile_id）"
+        )
+        return
+    for p in cfg.approval_profiles:
+        mark = "●" if p.id == cfg.active_approval_profile_id else " "
+        tools = ",".join(p.tools) if p.tools else "all"
+        typer.echo(
+            f" {mark} {p.id:<18} {p.name:<16} {p.approval:<12} tools={tools}"
+        )
+
+
+@profile_app.command("use")
+def profile_use_cmd(
+    profile: str = typer.Argument(..., help="档案 id 或名称"),
+    config: Path | None = typer.Option(None, "--config"),
+) -> None:
+    """激活一个审批档案（联动其 model_profile_id 指定的模型档案）。"""
+    cfg = read_config(config, Path(".").resolve())
+    if not cfg.approval_profiles:
+        typer.echo("（尚无档案可切换）", err=True)
+        raise typer.Exit(1)
+    hit = next(
+        (p for p in cfg.approval_profiles if p.id == profile or p.name == profile),
+        None,
+    )
+    if hit is None:
+        typer.echo(f"档案不存在: {profile}（用 `spark profile list` 查看）", err=True)
+        raise typer.Exit(1)
+    cfg.active_approval_profile_id = hit.id
+    if hit.model_profile_id:
+        mp = next(
+            (m for m in cfg.model_profiles if m.id == hit.model_profile_id), None
+        )
+        if mp is not None:
+            cfg.active_profile_id = mp.id
+            if mp.api_key:
+                cfg.provider.api_key = mp.api_key
+                cfg.provider.name = mp.provider
+                cfg.provider.base_url = mp.base_url or cfg.provider.base_url
+                cfg.provider.model = mp.model
+    path = save_config(cfg, config)
+    typer.echo(
+        f"● 档案已激活: {hit.name or hit.id} "
+        f"(approval={hit.approval}, tools={'all' if not hit.tools else ','.join(hit.tools)})"
+    )
+    typer.echo(f"  配置已写入 {path}")
 
 
 agent_app = typer.Typer(help="大脑档案管理——一键切换模型/供应商组合（P2：agent profiles）")

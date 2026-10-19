@@ -78,7 +78,7 @@ DisplayConfigKey = Literal[
     "show_keywords",
     "show_notices",
 ]
-"""Tool-call approval policy and wildcard permission rules."""
+
 PermissionAction = Literal["allow", "prompt", "deny"]
 
 
@@ -202,6 +202,35 @@ class HookConfig(BaseModel):
     on_deny: Literal["warn", "block"] = "block"
 
 
+class ReplayConfig(BaseModel):
+    """P2 上下文合同：turn 级重放记录（replay.jsonl）。
+
+    逐会话追加写 ``$SPARK_HOME/replays/<session_id>.jsonl``，每 turn 一行，
+    schema 见 :mod:`spark.core.replay`（``spark.replay/1``）。默认开启；
+    与 OTel/Langfuse 观测双轨（OTel 面向指标，replay 面向可回放合同）。
+    """
+
+    enabled: bool = True
+
+
+class ApprovalProfile(BaseModel):
+    """H4：自定义审批/行为档案 = 审批模式 + 工具白名单 + system prompt 组合。
+
+    * ``approval``：六档审批模式之一（激活时覆盖 ``agent.approval``）；
+    * ``tools``：工具名 glob 白名单（空 = 全部工具；激活时收敛
+      ``ToolRegistry.tool_allowlist``）；
+    * ``system_prompt``：追加进 system 槽（空 = 不追加）；
+    * ``model_profile_id``：``spark profile use`` 时联动切换的模型档案。
+    """
+
+    id: str = ""
+    name: str = ""
+    approval: ApprovalMode = "suggest"
+    tools: list[str] = Field(default_factory=list)
+    system_prompt: str = ""
+    model_profile_id: str = ""
+
+
 class SparkConfig(BaseSettings):
     """Root configuration — native ``SPARK_*`` env-var support via pydantic-settings.
 
@@ -270,6 +299,14 @@ class SparkConfig(BaseSettings):
     model_profiles: list[ModelProfile] = Field(default_factory=list)
     hooks: list[HookConfig] = Field(default_factory=list)
     permission_rules: list[PermissionRule] = Field(default_factory=list)
+    replay: ReplayConfig = Field(default_factory=ReplayConfig)
+    approval_profiles: list[ApprovalProfile] = Field(default_factory=list)
+    active_approval_profile_id: str = ""
+    # H3 三层权限作用域：{"user": [...], "project": [...], "local": [...]}。
+    # 由 load_config 从 global config.toml / .spark/settings.toml（仅 deny）/
+    # .spark/settings.local.toml（全量）装配；评估语义见 policy.decide
+    # （deny 跨层优先——任何一层 deny 即拒绝，克隆仓库无法给自己授权）。
+    permission_scopes: dict[str, list[PermissionRule]] = Field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------
@@ -492,6 +529,66 @@ def _is_repo_local(path: Path, workdir: Path) -> bool:
         return path.parent == workdir
 
 
+def _parse_permission_rules(raw: Any) -> list[PermissionRule]:
+    """容错解析 permission_rules 列表（非法/缺 resource 条目跳过）。"""
+    out: list[PermissionRule] = []
+    for item in raw or []:
+        if not isinstance(item, dict):
+            continue
+        action = str(item.get("action") or "").strip()
+        resource = str(item.get("resource") or "").strip()
+        if action not in ("allow", "prompt", "deny") or not resource:
+            continue
+        out.append(
+            PermissionRule(
+                action=cast(PermissionAction, action),
+                resource=resource,
+                tool=str(item.get("tool") or "").strip(),
+            )
+        )
+    return out
+
+
+def _load_scoped_permission_rules(
+    workdir: Path, user_rules: list[PermissionRule]
+) -> dict[str, list[PermissionRule]]:
+    """H3 三层权限作用域装配。
+
+    * ``user``：全局 config.toml 的 permission_rules（已随主配置加载，受信任）；
+    * ``project``：``workdir/.spark/settings.toml`` —— 仓库自带、**不可信**：
+      仅 deny 规则被采纳（allow/prompt 一律剥离），克隆仓库只能收紧权限，
+      永远无法给自己授权（与 _sanitize_project_config 同一威胁模型）；
+    * ``local``：``workdir/.spark/settings.local.toml`` —— 用户本地创建
+      （建议加入 .gitignore），视为受信任：全量 permission_rules 采纳。
+
+    评估语义见 :func:`spark.policy.decide`：deny 跨层优先。
+    """
+    scopes: dict[str, list[PermissionRule]] = {
+        "user": list(user_rules),
+        "project": [],
+        "local": [],
+    }
+    project_path = workdir / ".spark" / "settings.toml"
+    if project_path.is_file():
+        try:
+            data = _load_toml(project_path)
+        except ConfigError:
+            data = {}
+        scopes["project"] = [
+            rule
+            for rule in _parse_permission_rules(data.get("permission_rules"))
+            if rule.action == "deny"
+        ]
+    local_path = workdir / ".spark" / "settings.local.toml"
+    if local_path.is_file():
+        try:
+            data = _load_toml(local_path)
+        except ConfigError:
+            data = {}
+        scopes["local"] = _parse_permission_rules(data.get("permission_rules"))
+    return scopes
+
+
 def load_config(
     *,
     config_path: Path | None = None,
@@ -544,6 +641,8 @@ def load_config(
         )
     if os.environ.get("SPARK_BASE_URL"):
         cfg.provider.base_url = os.environ["SPARK_BASE_URL"]
+
+    cfg.permission_scopes = _load_scoped_permission_rules(workdir, cfg.permission_rules)
     return cfg
 
 
@@ -714,6 +813,24 @@ def save_config(cfg: SparkConfig, path: Path | None = None) -> Path:
                 rt.add("tool", rule.tool)
             pr_aot.append(rt)
         doc.add("permission_rules", pr_aot)
+
+    # [replay]
+    doc.add("replay", tomlkit.table().add("enabled", bool(cfg.replay.enabled)))
+
+    # [[approval_profiles]] + active id（H4 审批/行为档案）
+    if cfg.approval_profiles:
+        ap_aot = tomlkit.aot()
+        for profile in cfg.approval_profiles:
+            pt = tomlkit.table()
+            pt.add("id", profile.id)
+            pt.add("name", profile.name)
+            pt.add("approval", profile.approval)
+            pt.add("tools", list(profile.tools))
+            pt.add("system_prompt", profile.system_prompt or "")
+            pt.add("model_profile_id", profile.model_profile_id or "")
+            ap_aot.append(pt)
+        doc.add("approval_profiles", ap_aot)
+    doc.add("active_approval_profile_id", cfg.active_approval_profile_id or "")
 
     output = tomlkit.dumps(doc)
     tmp = path.with_suffix(path.suffix + ".tmp")

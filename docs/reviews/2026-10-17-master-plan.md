@@ -155,7 +155,7 @@ plugins/             # 官方插件（audit-proxy、im-gateway、skill-market…
 
 | 协议/框架 | 范围 | 阶段 |
 |---|---|---|
-| **MCP** | tools → **全能力**：resources+templates、prompts、sampling、elicitation、roots、notifications、OAuth 2.1、streamable HTTP（client+server 双侧）；registry 可达性标注扩展 | P2 |
+| **MCP** | tools → **全能力**：resources+templates ✅(0.9.11)、prompts ✅、sampling ✅(0.9.11)、elicitation 🚧(0.9.11 策略性 decline，hook 点就位)、roots、notifications 🚧(0.9.11 tools/list_changed 动态重注册)、OAuth 2.1（待做：token 存储设计）、streamable HTTP（client+server 双侧 ✅）；registry 可达性标注扩展 | P2 |
 | **ACP** | spark-server 内置 ACP server → Zed 及一切 ACP 客户端；反向：Hermes 式接 ACP agent 当大脑（agent profiles） | P2 |
 | **LangGraph** | interrupt=审批、SqliteSaver=turn 级恢复、子图=子代理、plan/verify 节点；68 个既有测试做行为等价安全网；graph.py 删除 | P1 |
 | **litellm** | fallback 链、凭据池、`prompt caching` 编排（ProviderTransform 思路）、usage 全回填；**tag/budget 成本归账内嵌化**（litellm proxy 已有 spend tracking，我们做成引擎内置免部署） | P1 |
@@ -176,9 +176,9 @@ plugins/             # 官方插件（audit-proxy、im-gateway、skill-market…
 |---|---|---|---|---|---|
 | H1 | 内置 33 工具 | 自定义工具 SDK：entry-points 注册 + 参数预设/别名 | opencode plugins、MCP 自定义工具 | pydantic 类型化规范 + 工具级成本标注进 AEF | P4 |
 | H2 | hooks（6 shell 事件） | 事件面扩到 ~20；Command/HTTP/Prompt/Agent 四类 hook | Claude Code hooks（30 事件，四类） | hook 输出即 AEF 证据源，审计内联 | P2 |
-| H3 | permission_rules | 多作用域设置 user/project/local（deny 跨层优先）+ 时段/分支条件 | Claude Code 四层 settings | 策略可导出 AEF；按任务类型模板化 | P2 |
-| H4 | 6 档审批模式 | 自定义模式档案（=提示+工具白名单+模型档组合） | Cline/Roo custom modes、opencode modes | 档案可入库分享；与分支/任务类型联动 | P2 |
-| H5 | slash 命令（内置） | 自定义命令目录 `.spark/commands/*.md`（参数占位） | CC custom slash、opencode commands、codex prompts | 命令=技能组合糖 + 内嵌证据视图 | P2 |
+| H3 | permission_rules | ~~多作用域设置 user/project/local（deny 跨层优先）~~ ✅ 已完成（0.9.11：user/global + project 仅 deny + local 三层，deny 跨层优先压过 allow_always）+ 时段/分支条件（待做） | Claude Code 四层 settings | 策略可导出 AEF；按任务类型模板化 | P2 |
+| H4 | 6 档审批模式 | ~~自定义模式档案（=提示+工具白名单+模型档组合）~~ ✅ 已完成（0.9.11：[[approval_profiles]] + spark profile use） | Cline/Roo custom modes、opencode modes | 档案可入库分享；与分支/任务类型联动 | P2 |
+| H5 | slash 命令（内置） | ~~自定义命令目录 `.spark/commands/*.md`（参数占位）~~ ✅ 已完成（0.9.11：$ARGUMENTS 占位，内建优先，三入口接线 + /api/commands） | CC custom slash、opencode commands、codex prompts | 命令=技能组合糖 + 内嵌证据视图 | P2 |
 | H6 | 声明式子代理 | 团队编排模板（多代理流水线 YAML） | CC subagents、Gemini extensions 打包 | 父子链写进 AEF（可回放谁干的） | P4 |
 | H7 | skills 目录 | lockfile + 签名 + 注册表 | agentskills RFC（skills-lock）、tech-leads-club registry | 注册表带质量画像（该技能历史成本/成功率） | P4 |
 | H8 | MCP client/server | per-server 沙箱+配额+健康检查+信任分（运行时） | **空白（无成熟先例）** | "MCP 的 systemd"——独立引流件 | P4 |
@@ -206,12 +206,12 @@ plugins/             # 官方插件（audit-proxy、im-gateway、skill-market…
 
 | # | 能力（原"差异化"） | 落点 | 阶段 |
 |---|---|---|---|
-| 1 | 上下文合同 | replay.jsonl（schema 公开）+ Web 回放视图 + `spark replay <turn>` | P2 |
+| 1 | ~~上下文合同~~ ✅ 已完成（0.9.11） | replay.jsonl（schema `spark.replay/1` 公开）+ Web 回放视图（ReplayModal）+ `spark replay <turn>` | P2 |
 | 2 | 出网黑匣子 | plugins/audit-proxy（本地正向代理，策略=allow/deny/ask，报告导出） | P3 |
-| 3 | 双粒度时间机器 | 检查点(有)+消息级 undo(接 store 已有能力)+任务级 git_memory(有)→统一时间轴 UI | P2 |
+| 3 | ~~双粒度时间机器~~ ✅ 已完成（0.9.11） | 检查点(有)+消息级 undo(接 store 已有能力)+任务级 git_memory(有)→统一时间轴 UI | P2 |
 | 4 | 自进化技能库 | 任务后产 SKILL.md + 使用中自改进 + nudge 调度器 + FTS 跨会话回忆（学 hermes） | P3 |
 | 5 | 中国网络原生 | 安装脚本双镜像 + 模型路由含可达性维度 + 插件目录可达性标注 | P1 |
-| 6 | Harness 可换内核 | agent profiles：spark-native/claude-code(ACP)/codex-exec 子进程驱动 | P2 |
+| 6 | Harness 可换内核 | agent profiles：spark-native/claude-code(ACP)/codex-exec 子进程驱动——🚧 **部分完成（0.9.11）**：审批/行为档案（approval+工具白名单+system_prompt）已落；多内核子进程驱动未动 | P2 |
 | 7 | Creator mode | 对话生成 skill/hook/插件 + 热加载 + 双轨目录 | P3 |
 | 8 | 分数卡 | evals.yml 产出 JSON → 渲染进 README/docs/release | P1 |
 | 9 | IM 即 IDE | plugins/im-gateway：飞书优先→微信→Telegram；审批/派活/diff 卡片 | P3 |
@@ -277,7 +277,7 @@ tag  ──► release.yml：wheel+sdist（PyPI trusted publishing）+ EXE×win 
 |---|---|---|---|
 | **P0 卫生周** | v0.9.3 | 3 个 P0 修复 + P1 快修（usage 回填/registry 缓存/ Compactor 走 provider）+ 五平台镜像 CI + conventional commits 启用 | 全绿 CI；镜像同步 <60s；P0 关闭 |
 | **P1 模块化+分发** | v0.10 | 拆包+import-linter；FastAPI/OpenAPI+前端 codegen；litellm fallback/凭据池/usage 全回填+tag 成本归账；模型目录；LSP 诊断闭环（py/ts）；repo map PageRank；small_model 全局配置；rich CLI+补全；文档站 v1（Diátaxis+自动配置参考）；uvx 发布 | 冷启动/首屏预算达标；pip 一行可用；docs 死链 0 |
-| **P2 座舱+协议** | v0.11 | LangGraph 迁入；MCP 全能力；ACP server；agent profiles（IDE/Agent 一键切换）；上下文合同回放（OTel→Langfuse 兼容）；双粒度时间轴 UI；多作用域设置（user/project/local，deny 优先）；自定义 slash 命令；hook 事件面扩容（~20 事件，四类 hook）；模式档案（Plan/Act/Review 自定义）；Web 前端造轮子替换完成；**上下文火焰图 v1** | 行为等价测试全过；Zed 可用；回放 100% 覆盖；火焰图能定位单 turn 上下文浪费 |
+| **P2 座舱+协议** | v0.11 | LangGraph 迁入 ✅(0.9.8)；MCP 全能力 🚧(0.9.11: sampling/templates/list_changed/elicitation-decline，余 roots/OAuth 2.1)；ACP server ✅(0.9.7)；agent profiles（IDE/Agent 一键切换）🚧(0.9.11: 审批档案已落，多内核驱动待做)；~~上下文合同回放~~ ✅(0.9.11，OTel→Langfuse 兼容双轨已通)；~~双粒度时间轴 UI~~ ✅(0.9.11)；~~多作用域设置（user/project/local，deny 优先）~~ ✅(0.9.11)；~~自定义 slash 命令~~ ✅(0.9.11)；hook 事件面扩容（~20 事件，四类 hook）（待做）；~~模式档案（Plan/Act/Review 自定义）~~ ✅(0.9.11 审批档案)；Web 前端造轮子替换完成（进行中）；**上下文火焰图 v1** ✅(spark context-profile 已落) | 行为等价测试全过；Zed 可用；回放 100% 覆盖；火焰图能定位单 turn 上下文浪费 |
 | **P3 信任链+AEF** | v0.12 | **AEF v0.1 规范发布**（任务证据文件：审批/egress/上下文/成本/回滚五件套 JSON Schema）+ 出网黑匣子（首个 AEF 完整实现）+ PR 证据包（MR 模板渲染 AEF）+ provenance blame（代码行级溯源查询）+ 夜间无人值守安全包（队列+熔断+早报）+ EXE 更新器+安装器 | AEF 规范+参考实现发布；黑匣子报告样例；夜间模式 7×24 试点无事故 |
 | **P4 横向扩展全量** | v0.13 | 自定义工具 SDK（entry-points）；团队记忆 MR 化（记忆变更=可 review 的 git 提交）；工作流影子重放（升级回归）；任务质量画像；预算即代码（超限降级链）；MCP 沙箱运行时（per-server 沙箱+配额+健康检查）；skills lockfile+签名注册表；主题市场+statusline+keybinds（三端同源配置）；spark-action（GitHub Action，PR 自带证据包）；IM 网关（飞书审批卡先行）；Creator mode+插件目录 | 每项独立 DoD 清单；外部用户完成一次"自定义工具→市场安装技能→IM 审批"闭环 |
 | **P5 标准与生态** | v0.14–v0.15 | AEF 推广（aef-export 兼容转换器：dsh/opencode/Claude Code 存储互转）；评分卡渲染 AEF；合规包（等保向证据导出）；A2A 留位；企业版预留（SSO/集中策略下发） | ≥2 个外部项目采用 AEF 导出；合规包样例通过一次真实内网评审 |

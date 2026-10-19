@@ -1,17 +1,15 @@
-"""Shared LLM helpers: chat completion, embeddings, JSON parsing."""
+"""Shared memory-side LLM helpers: chat completion, embeddings, JSON parsing.
+
+传输统一走 :mod:`spark.providers.aux`（LiteLLM 单一通道）；本模块保留
+原函数签名与返回契约（``embed_texts`` 失败返回 None、``chat_complete``
+无 choices 返回空串），供 extractor/service 按旧语义调用。
+"""
 from __future__ import annotations
 
 import json
 import logging
-from typing import Any
-
-import httpx
 
 logger = logging.getLogger(__name__)
-
-
-def _headers(api_key: str) -> dict[str, str]:
-    return {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
 
 
 async def chat_complete(
@@ -24,36 +22,17 @@ async def chat_complete(
     temperature: float = 0.0,
     max_tokens: int = 1000,
 ) -> str:
-    url = f"{base_url.rstrip('/')}/chat/completions"
-    body: dict[str, Any] = {
-        "model": model,
-        "messages": [
-            {"role": "system", "content": system},
-            {"role": "user", "content": user},
-        ],
-        "temperature": temperature,
-        "max_tokens": max_tokens,
-    }
-    async with httpx.AsyncClient(timeout=httpx.Timeout(60.0, connect=10.0)) as client:
-        resp = await client.post(url, headers=_headers(api_key), json=body)
-        resp.raise_for_status()
-        data = resp.json()
-    choices = data.get("choices") or []
-    if not choices:
-        return ""
-    message = choices[0].get("message") or {}
-    content = message.get("content")
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        parts = []
-        for item in content:
-            if isinstance(item, dict):
-                parts.append(str(item.get("text") or item.get("content") or ""))
-            elif isinstance(item, str):
-                parts.append(item)
-        return "".join(parts)
-    return ""
+    from spark.providers.aux import chat_once
+
+    return await chat_once(
+        base_url=base_url,
+        api_key=api_key,
+        model=model,
+        system=system,
+        user=user,
+        temperature=temperature,
+        max_tokens=max_tokens,
+    )
 
 
 async def embed_texts(
@@ -63,25 +42,9 @@ async def embed_texts(
     model: str,
     texts: list[str],
 ) -> list[list[float]] | None:
-    url = f"{base_url.rstrip('/')}/embeddings"
-    body = {"model": model, "input": texts}
-    try:
-        async with httpx.AsyncClient(timeout=httpx.Timeout(30.0, connect=10.0)) as client:
-            resp = await client.post(url, headers=_headers(api_key), json=body)
-            resp.raise_for_status()
-            data = resp.json()
-    except Exception as exc:
-        logger.warning("Embedding request failed: %s", exc)
-        return None
-    out: list[list[float]] = []
-    items = data.get("data") or []
-    for item in items:
-        vec = item.get("embedding")
-        if isinstance(vec, list) and vec:
-            out.append([float(x) for x in vec])
-    if len(out) != len(texts):
-        return None
-    return out
+    from spark.providers.aux import embed_once
+
+    return await embed_once(base_url=base_url, api_key=api_key, model=model, texts=texts)
 
 
 def parse_json_object(text: str) -> dict | None:

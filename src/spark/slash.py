@@ -15,12 +15,16 @@ loop」，所有判定与文案都收敛在本模块，便于单测。
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Callable
 
 from spark.models import ToolResult
 from spark.sandbox import WorkdirSandbox
 from spark.tools.gitops import RunTestsArgs, run_tests
+
+logger = logging.getLogger(__name__)
 
 #: 已实现的 slash 命令名（小写）。未知 ``/xxx`` 一律按普通 prompt 透传给模型。
 KNOWN_COMMANDS = {"test"}
@@ -149,11 +153,110 @@ def handle_test(
     return build_test_result(tool_result)
 
 
+# ---------------------------------------------------------------------------
+# H5：自定义命令目录（.spark/commands/*.md，文件即命令）
+# ---------------------------------------------------------------------------
+
+COMMANDS_DIR = Path(".spark") / "commands"
+
+
+@dataclass(frozen=True)
+class CommandInfo:
+    """一条自定义命令：``<name>.md`` 的 frontmatter + 模板正文。"""
+
+    name: str
+    description: str
+    body: str
+    path: Path
+
+
+def discover_commands(workdir: str | Path) -> list[CommandInfo]:
+    """扫描 ``.spark/commands/*.md``；frontmatter 可选（description 提示用）。
+
+    目录缺失/文件不可读 → 空列表（调用方可安全迭代）。内建命令
+    （目前 ``/test``）优先——同名自定义命令永远不会遮蔽内建行为。
+    """
+    from spark.skills import _parse_frontmatter
+
+    base = Path(workdir)
+    commands_dir = base / COMMANDS_DIR
+    if not commands_dir.is_dir():
+        return []
+    commands: list[CommandInfo] = []
+    for md in sorted(commands_dir.glob("*.md")):
+        if md.name.startswith("."):
+            continue
+        try:
+            text = md.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        parsed = _parse_frontmatter(text)
+        if parsed is None:
+            meta: dict[str, str] = {}
+            body = text
+        else:
+            meta, body = parsed
+        name = (meta.get("name") or md.stem).strip().lower()
+        if not name:
+            continue
+        if name in KNOWN_COMMANDS:
+            logger.debug("自定义命令 %s 与内建同名，已跳过（内建优先）", name)
+            continue
+        commands.append(
+            CommandInfo(
+                name=name,
+                description=(meta.get("description") or "").strip(),
+                body=body.strip(),
+                path=md,
+            )
+        )
+    return commands
+
+
+def expand_command(workdir: str | Path, text: str) -> str | None:
+    """把 ``/name args`` 展开为命令模板（``$ARGUMENTS`` 替换为参数尾巴）。
+
+    返回 None 的情况（调用方回退原有行为——内建 slash 或普通 prompt）：
+    非 ``/`` 开头、无匹配命令文件、模板为空。展开产物是一段**用户消息
+    文本**（含模型指令），后续照常走 agent loop，不绕过任何审批/沙箱。
+    """
+    from spark.skills import _parse_frontmatter
+
+    stripped = (text or "").strip()
+    if not stripped.startswith("/"):
+        return None
+    after_slash = stripped[1:]
+    token, _, rest = after_slash.partition(" ")
+    name = token.strip().lower()
+    if not name:
+        return None
+    if name in KNOWN_COMMANDS:
+        # 内建命令优先：自定义文件永不遮蔽内建行为
+        return None
+    base = Path(workdir)
+    candidate = base / COMMANDS_DIR / f"{name}.md"
+    if not candidate.is_file():
+        return None
+    try:
+        raw = candidate.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+    parsed = _parse_frontmatter(raw)
+    body = (parsed[1] if parsed else raw).strip()
+    if not body:
+        return None
+    return body.replace("$ARGUMENTS", rest.strip()).strip()
+
+
 __all__ = [
+    "COMMANDS_DIR",
     "KNOWN_COMMANDS",
+    "CommandInfo",
     "SlashCommand",
     "SlashTestResult",
-    "parse_slash",
     "build_test_result",
+    "discover_commands",
+    "expand_command",
     "handle_test",
+    "parse_slash",
 ]

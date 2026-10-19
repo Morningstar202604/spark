@@ -192,6 +192,9 @@ def build_session(
         session_id=session_id,
         approver=approver if cfg.agent.approval != "full-auto" else None,
     )
+    if mcp_bridge is not None:
+        # P2：server 反向 sampling 以当前 Provider 为大脑
+        mcp_bridge.set_sampling_handler(provider)
     return SparkAcpSession(
         session_id=session_id,
         workdir=workdir,

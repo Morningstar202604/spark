@@ -478,10 +478,13 @@ class Compactor:
         recent: list[SparkChatMessage],
         budget_chars: int,
     ) -> list[SparkChatMessage]:
-        """Token-aware budget trimming — replaces the char-only logic in ``_trim_recent_chars``.
+        """Char-budget trimming from the newest message backwards.
 
-        Falls back to the original char-based trimming so that callers without
-        a full Compactor instance still get deterministic results.
+        预算口径是字符（对应 ``context.history_budget_chars`` 配置项），
+        按角色独立计费：正文长度 + tool_calls 参数长度。从最新消息向旧
+        保留，至少保留一条（保证有上下文可用）。早年的"token-aware"
+        描述与实现不符，已更正——token 层面的上限由 AgentLoop 的
+        compact 阈值与 max_context_tokens 把关。
         """
         kept: list[SparkChatMessage] = []
         used = 0

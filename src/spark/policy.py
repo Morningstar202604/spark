@@ -224,7 +224,29 @@ def decide(
     readonly_mcp: set[str],
     rules: list[PermissionRule] | None = None,
     plan_approved: bool = False,
+    scopes: dict[str, list[PermissionRule]] | None = None,
 ) -> DecisionKind:
+    # H3 多作用域（deny 跨层优先）：任何一层（user/project/local）的 deny
+    # 规则都拒绝——包括压过 allow_always（防过期授权被仓库层 deny 打穿）；
+    # 无 deny 时任何一层的 allow 都放行。空 resource 不参与规则匹配
+    # （防 "allow **" 变成全局放行，见 evaluate_permission 同款约束）。
+    if scopes:
+        resource = _extract_resource(tool)
+        if resource:
+            scoped_allow = False
+            for layer in ("user", "project", "local"):
+                for rule in scopes.get(layer) or []:
+                    if rule.tool and not _wildcard_match(rule.tool, tool.name):
+                        continue
+                    if not _wildcard_match(rule.resource, resource):
+                        continue
+                    if rule.action == "deny":
+                        return "deny"
+                    if rule.action == "allow":
+                        scoped_allow = True
+            if scoped_allow:
+                return "allow"
+
     # Approvals are bound to the exact (tool, arguments) pair, so approving one
     # command can never silently authorize a different one later.
     if call_signature(tool) in allow_always:

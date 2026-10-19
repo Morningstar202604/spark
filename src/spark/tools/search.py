@@ -1,13 +1,10 @@
 from __future__ import annotations
 
 import fnmatch
-import logging
 import os
 import re
 import time
 from pathlib import Path
-
-logger = logging.getLogger(__name__)
 
 
 def _glob_to_regex(pattern: str) -> re.Pattern[str]:  # noqa: E302
@@ -171,11 +168,8 @@ def grep_tool(sandbox: WorkdirSandbox, args: GrepArgs) -> ToolResult:
                 resolved.relative_to(root)
             except (OSError, ValueError):
                 continue
-            try:
-                sandbox._check_protected(resolved)
-            except Exception:
-                # 路径安全检查失败时跳过该文件（不阻塞搜索结果）
-                logger.debug("文件安全检查失败，跳过: %s", resolved, exc_info=True)
+            if not sandbox.is_path_allowed(resolved):
+                # 命中保护路径清单（凭据/系统路径等）：跳过该文件
                 continue
             try:
                 size = file.stat().st_size
@@ -219,7 +213,10 @@ def glob_tool(sandbox: WorkdirSandbox, args: GlobArgs) -> ToolResult:
     pattern = args.pattern.strip().lstrip("/")
     max_results = max(1, min(500, args.max_results))
     budget = SearchBudget(args.max_files or MAX_GLOB_FILES, args.deadline_sec)
-    rx = _glob_to_regex(pattern) if "**" in pattern else None
+    # 统一走 _glob_to_regex：'*' 单段、'**' 跨段，非 '**' 模式与 '**' 模式
+    # 语义一致（旧实现 fnmatch 兜底的 '*' 会跨段，两路行为不一致）；
+    # rel 与裸文件名双重匹配兜底"目录前缀"类 pattern（如 'src/*.py'）。
+    rx = _glob_to_regex(pattern)
     out: list[str] = []
     truncated = False
     base_resolved = base.resolve()
@@ -242,14 +239,7 @@ def glob_tool(sandbox: WorkdirSandbox, args: GlobArgs) -> ToolResult:
             except (OSError, ValueError):
                 continue
             rel = file.relative_to(base).as_posix()
-            matched = False
-            if rx is not None:
-                matched = bool(rx.match(rel)) or bool(rx.match(name))
-            else:
-                matched = fnmatch.fnmatch(rel, pattern) or fnmatch.fnmatch(
-                    name, pattern
-                )
-            if matched:
+            if rx.match(rel) or rx.match(name):
                 out.append(file.relative_to(sandbox.root).as_posix())
                 if len(out) >= max_results:
                     truncated = True
