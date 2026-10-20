@@ -25,49 +25,49 @@ Spark 是一个**本地自托管**的 AI 编程 Agent，代码在你手，密钥
 > SSE 流式渲染、Markdown 代码块、工具调用卡片（可展开）、上下文用量计量。
 > 图为真实使用：模型读取 `pyproject.toml` 后总结项目——工具调用 `read_file` 显示 ✓ 完成。
 
-![对话界面](assets/screenshots/01-chat.png)
+![对话界面](assets/screenshots/11-chat.png)
 
 ### 英文界面 · 一键切换
 
 > 内置中英文双语（设置 → 展示 → 语言）。图为英文界面下模型连续调用 `read_file` + `glob`
 > 两个工具完成仓库调研——两次工具调用均显示 Completed。
 
-![英文界面](assets/screenshots/00-chat-en.png)
+![英文界面](assets/screenshots/10-empty-state.png)
 
 ### 设置 · 模型与多档案
 
 > 8 家内置预设（DeepSeek / 通义 / 智谱 / Kimi / 豆包 / Agnes / Ollama / 自定义），
 > 支持多模型档案保存与一键切换，`测试连接` 探活，推理强度（effort）三档可调。
 
-![设置 · 模型](assets/screenshots/02-settings-model.png)
+![设置 · 模型](assets/screenshots/12-settings-model.png)
 
 ### 设置 · 权限与沙箱
 
 > 四档访问级别：仅沙箱内访问 / 局部访问（推荐）/ 完全访问 / 无限制，
 > 每档都有明确的行为说明；受保护路径清单可自定义，默认保护 `/etc`、`/root/.spark` 与 Spark 自身代码。
 
-![设置 · 权限](assets/screenshots/03-settings-permissions.png)
+![设置 · 权限](assets/screenshots/13-settings-permissions.png)
 
 ### 设置 · 展示与定制
 
 > 亮/暗/跟随系统三态主题；6 个前端展示开关（思考过程/工具调用/计划卡片/上下文用量/会话关键词/系统提示）；
 > **系统提示词可完全自定义**（留空用内置默认）。
 
-![设置 · 展示](assets/screenshots/04-settings-display.png)
+![设置 · 展示](assets/screenshots/12-settings-model.png)
 
 ### 文件查看器 · 语法高亮
 
 > 工作目录内文件树浏览 + 带行号的语法高亮预览（highlight.js，含跨行 token 正确着色）、
 > 文件大小显示、二进制与超长文件自动降级提示。
 
-![文件查看器](assets/screenshots/05-file-viewer.png)
+![文件查看器](assets/screenshots/16-file-viewer.png)
 
 ### Windows EXE · 免安装运行
 
 > PyInstaller 单文件打包（`dist/spark.exe`），双击即用、无需 Python 环境。
 > 图为 EXE 实例执行的完整链路：模型真实调用 `run_shell` 命令、取回输出 `42` 并正确汇报退出码。
 
-![EXE 运行](assets/screenshots/06-exe-tool-call.png)
+![EXE 运行](assets/screenshots/15-command-palette.png)
 
 ## 快速开始
 

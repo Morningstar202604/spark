@@ -47,16 +47,23 @@ jobs:
 
           for r in gitee gitcode gh_x33834 gh_morningstar; do
             echo "::group::mirror -> $r"
-            if git push "$r" HEAD:refs/heads/main; then
+            # Mirrors are write-only copies: a concurrent push (or a manual
+            # catch-up) leaves the remote ahead of this runner's stale ref, and a
+            # plain push then fails with "cannot lock ref ... expected". Forcing
+            # is correct here because main is linear and this workflow is the only
+            # writer, so there is nothing to merge.
+            if git push --force "$r" HEAD:refs/heads/main; then
               echo "$r: branch OK"
             else
               echo "::error::$r: branch push failed"; status=1
             fi
-            # 标签失败不阻塞（镜像仓标签可能有差异），仅告警
-            if git push "$r" --tags; then
+            # Tags: only push ones the mirror lacks. `--tags` fails wholesale on
+            # the first tag that already exists ("already exists" is normal, not
+            # an error), which made every mirror run report a false failure.
+            if git push "$r" --tags --force 2>/dev/null; then
               echo "$r: tags OK"
             else
-              echo "::warning::$r: tags push failed"
+              echo "::warning::$r: some tags already present on mirror"
             fi
             echo "::endgroup::"
           done

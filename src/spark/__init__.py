@@ -12,6 +12,34 @@ import os
 os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")
 
 
+def _force_utf8_stdio() -> None:
+    """Make console output survive a non-UTF-8 Windows code page.
+
+    Legacy Windows consoles default to cp1252/cp936, where ``print("◆ …")``
+    raises UnicodeEncodeError and kills the process. The frozen EXE hit exactly
+    that on `spark.exe --version` (smoke test caught it); the same would happen
+    to any Windows user typing the command in cmd.exe.
+
+    ``errors="replace"`` is the key part: a console that cannot render a glyph
+    must degrade to '?', never crash the CLI.
+    """
+    import sys
+
+    for stream_name in ("stdout", "stderr"):
+        stream = getattr(sys, stream_name, None)
+        if stream is None:
+            continue
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
+        except (AttributeError, ValueError, OSError):
+            # Non-reconfigurable stream (redirected to a pipe wrapper, or an
+            # embedder's custom object): leave it alone.
+            continue
+
+
+_force_utf8_stdio()
+
+
 def _resolve_version() -> str:
     """Single source of truth: the installed distribution metadata.
 

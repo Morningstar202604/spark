@@ -18,55 +18,63 @@
 
 ## Preview
 
-### Chat · driven by a real model
+> Every screenshot below was captured from a **live session against a real
+> model** (`Qwen3.8-Flash-Next` via an OpenAI-compatible endpoint) running on a
+> real workdir — no mock, no mock-up.
 
-> SSE streaming, Markdown code blocks, expandable tool-call cards, live context-usage meter.
-> This is a real session: the model read `pyproject.toml` and summarized the project — the `read_file` card shows ✓ Completed.
+### Chat · reasoning, tool call, answer
 
-![Chat](assets/screenshots/01-chat.png)
+> The model read `greet.py`, reasoned about it, and answered in one sentence.
+> The `read_file` card shows **✓ Completed** — this is the actual tool round-trip,
+> streamed over SSE with a live context-usage meter in the header.
 
-### English UI · one-click switch
+![Chat](assets/screenshots/11-chat.png)
 
-> Built-in Chinese/English localization (Settings → Display → Language). Here the model chained
-> `read_file` + `glob` to survey the repo — both tool calls show Completed.
+### Landing · pick up where you left off
 
-![English UI](assets/screenshots/00-chat-en.png)
+> Session sidebar grouped by recency, one-click new session, searchable history,
+> and the model/approval/sandbox state always visible in the footer.
 
-### Settings · models and profiles
+![Empty state](assets/screenshots/10-empty-state.png)
 
-> 8 built-in presets (DeepSeek / Qwen / GLM / Kimi / Doubao / Agnes / Ollama / custom),
-> multiple saved model profiles with one-click switching, a `Test connection` probe, and three reasoning-effort levels.
+### Settings · models
 
-![Settings · Model](assets/screenshots/02-settings-model.png)
+> Any OpenAI-compatible endpoint (DeepSeek / Qwen / GLM / Kimi / Doubao / Ollama /
+> custom), saved model profiles with one-click switching, a `Test connection`
+> probe, and three reasoning-effort levels mapped to provider-native parameters.
+
+![Settings · Model](assets/screenshots/12-settings-model.png)
 
 ### Settings · permissions and sandbox
 
-> Four access levels: sandbox-only / workspace (recommended) / full-access / unrestricted,
-> each with an explicit behavior description. The protected-path list is user-editable and defaults to
-> `/etc`, `/root/.spark` and Spark's own source tree.
+> Four access levels — sandbox-only / workspace (recommended) / full-access /
+> unrestricted — each with an explicit behaviour description. The protected-path
+> list is user-editable; `.git/hooks`, `~/.spark` and Spark's own source are
+> always protected.
 
-![Settings · Permissions](assets/screenshots/03-settings-permissions.png)
+![Settings · Permissions](assets/screenshots/13-settings-permissions.png)
 
-### Settings · display and customization
+### Command palette · Ctrl+K
 
-> Light/dark/system theme, six display toggles (thinking / tools / plan card / context usage /
-> session keywords / notices), and a **fully customizable system prompt** (empty = built-in default).
+> Fuzzy-jump to every surface: new session, checkpoints, turn replay, file
+> viewer, web reader, theme, language.
 
-![Settings · Display](assets/screenshots/04-settings-display.png)
+![Command palette](assets/screenshots/15-command-palette.png)
 
 ### File viewer · syntax highlighting
 
-> Browse the workdir tree and preview files with line numbers and highlight.js syntax highlighting
-> (including correct coloring of multi-line tokens), file sizes, and graceful handling of binary/oversized files.
+> Browse the workdir and preview files with line numbers and highlight.js
+> colouring, plus graceful handling of binary and oversized files.
 
-![File viewer](assets/screenshots/05-file-viewer.png)
+![File viewer](assets/screenshots/16-file-viewer.png)
 
-### Windows EXE · no install required
+### Responsive · desktop and phone
 
-> Packaged with PyInstaller as a single executable (`dist/spark.exe`) — double-click to run, no Python needed.
-> Shown here: the model really invoked `run_shell`, read back the output `42`, and reported the exit code correctly.
+> The same UI at 390 px: the sidebar collapses to a drawer, settings tabs turn
+> into a horizontal scroller, and the composer stays reachable. On desktop the
+> sidebar width is drag-adjustable and persisted.
 
-![EXE run](assets/screenshots/06-exe-tool-call.png)
+![Mobile settings](assets/screenshots/18-mobile-settings.png)
 
 ## Quick Start
 

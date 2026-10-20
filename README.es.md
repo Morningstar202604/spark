@@ -25,27 +25,27 @@ servidores de terceros. Una **puerta de aprobación** (6 modos) y un **sandbox d
 > Sesión real con un modelo real (Agnes 3.0 Flash): el modelo llamó a la herramienta `read_file`,
 > leyó `pyproject.toml` y resumió el proyecto. La tarjeta de herramienta muestra ✓ Completado.
 
-![Chat](assets/screenshots/01-chat.png)
+![Chat](assets/screenshots/11-chat.png)
 
 > Visor de archivos con numeración de líneas y resaltado de sintaxis (los tokens multilínea también se colorean bien).
 
-![Visor de archivos](assets/screenshots/05-file-viewer.png)
+![Visor de archivos](assets/screenshots/16-file-viewer.png)
 
 > EXE de Windows (un solo archivo con PyInstaller, sin Python). El modelo ejecutó `run_shell`,
 > leyó la salida `42` e informó el código de salida.
 
-![EXE](assets/screenshots/06-exe-tool-call.png)
+![EXE](assets/screenshots/15-command-palette.png)
 
 <details>
 <summary>Más capturas (ajustes / interfaz en inglés)</summary>
 
-![Ajustes · Modelo](assets/screenshots/02-settings-model.png)
+![Ajustes · Modelo](assets/screenshots/12-settings-model.png)
 
-![Ajustes · Permisos](assets/screenshots/03-settings-permissions.png)
+![Ajustes · Permisos](assets/screenshots/13-settings-permissions.png)
 
-![Ajustes · Pantalla](assets/screenshots/04-settings-display.png)
+![Ajustes · Pantalla](assets/screenshots/12-settings-model.png)
 
-![Interfaz en inglés](assets/screenshots/00-chat-en.png)
+![Interfaz en inglés](assets/screenshots/10-empty-state.png)
 
 </details>
 

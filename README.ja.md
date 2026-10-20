@@ -24,27 +24,27 @@ DeepSeek / 通義 / 智譜 / Kimi / 豆包 / Agnes AI / Ollama / 任意の OpenA
 > 実際のモデル（Agnes 3.0 Flash）によるセッション。モデルが `read_file` ツールを呼び出し、
 > `pyproject.toml` を読んでプロジェクトを要約しています。ツールカードは ✓ 完了 表示。
 
-![チャット画面](assets/screenshots/01-chat.png)
+![チャット画面](assets/screenshots/11-chat.png)
 
 > ファイルビューア：行番号付きシンタックスハイライト（複数行トークンの着色も正しい）。
 
-![ファイルビューア](assets/screenshots/05-file-viewer.png)
+![ファイルビューア](assets/screenshots/16-file-viewer.png)
 
 > Windows EXE（PyInstaller 単一ファイル、Python 不要）。モデルが `run_shell` を実行し、
 > 出力 `42` を読み取って終了コードを報告。
 
-![EXE 実行](assets/screenshots/06-exe-tool-call.png)
+![EXE 実行](assets/screenshots/15-command-palette.png)
 
 <details>
 <summary>さらに表示（設定パネル / 英語 UI）</summary>
 
-![設定 · モデル](assets/screenshots/02-settings-model.png)
+![設定 · モデル](assets/screenshots/12-settings-model.png)
 
-![設定 · 権限](assets/screenshots/03-settings-permissions.png)
+![設定 · 権限](assets/screenshots/13-settings-permissions.png)
 
-![設定 · 表示](assets/screenshots/04-settings-display.png)
+![設定 · 表示](assets/screenshots/12-settings-model.png)
 
-![英語 UI](assets/screenshots/00-chat-en.png)
+![英語 UI](assets/screenshots/10-empty-state.png)
 
 </details>
 
