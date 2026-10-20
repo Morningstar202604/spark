@@ -247,6 +247,30 @@ def _build_system_prompt(workdir: Path, cfg: SparkConfig) -> str:
     return text
 
 
+def trim_recent(recent: list[ChatMessage], budget_chars: int) -> list[ChatMessage]:
+    """Char-budget trimming from the newest message backwards.
+
+    Budget is counted in characters (``context.history_budget_chars``), per
+    message: body length plus serialised tool-call arguments. The newest
+    message is always kept so a turn is never handed an empty history.
+
+    Lives here rather than in ``core.compact`` so building messages never
+    imports the summariser stack (litellm + llama_index cost ~1.7 s at import).
+    """
+    kept: list[ChatMessage] = []
+    used = 0
+    for msg in reversed(recent):
+        size = len(msg.content or "") + sum(
+            len(str(c.arguments)) for c in (msg.tool_calls or [])
+        )
+        if used + size > budget_chars and kept:
+            break
+        kept.append(msg)
+        used += size
+    kept.reverse()
+    return kept
+
+
 def build_messages(
     *,
     workdir: Path,
@@ -280,9 +304,7 @@ def build_messages(
     if _compactor is not None:
         kept = _compactor.trim_recent(recent, cfg.context.history_budget_chars)
     else:
-        from spark.core.compact import Compactor
-
-        kept = Compactor.trim_recent(recent, cfg.context.history_budget_chars)
+        kept = trim_recent(recent, cfg.context.history_budget_chars)
 
     kept = _collapse_old_images(kept)
     messages.extend(summaries)

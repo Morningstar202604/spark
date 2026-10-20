@@ -88,7 +88,7 @@ def _generate_session_meta_async(
         import re
 
         from spark.asyncutil import run_coroutine_sync
-        from spark.providers.aux import chat_once
+        from spark.providers.auxiliary import chat_once
 
         base_url = state.cfg.provider.base_url.rstrip("/")
         # Ensure the URL ends with /v1 for OpenAI-compatible APIs. Users may
@@ -188,6 +188,18 @@ class SparkWebState:
         self.mcp_bridge = bridge
         return list(bridge.errors)
 
+    def _ensure_checkpointer(self):
+        """One persistent turn checkpointer per process (A10 crash recovery).
+
+        Turns run on the process-wide runtime loop, so a single aiosqlite
+        connection can outlive a turn and survive a restart: approvals pending
+        at crash time are listed from ``$SPARK_HOME/checkpoints.db`` and can be
+        resumed. Falls back to in-memory state when the durable store fails.
+        """
+        from spark.core.turn_store import persistent_checkpointer
+
+        return persistent_checkpointer()
+
     def rebuild_loop(
         self, session_id: str | None = None, reuse_latest: bool = False
     ) -> None:
@@ -227,6 +239,7 @@ class SparkWebState:
             session_id=self.session_id,
             approver=approver,
             memory=self.memory,
+            checkpointer=self._ensure_checkpointer(),
         )
 
     def status(self) -> dict:
@@ -327,6 +340,10 @@ class SparkWebState:
                 "max_context_tokens": self.cfg.context.max_context_tokens,
                 "compact_threshold": self.cfg.context.compact_threshold,
                 "keep_recent_messages": self.cfg.context.keep_recent_messages,
+                # The Project tab edits these; without them in the response the
+                # inputs read undefined and the toggle silently never persisted.
+                "repo_map_enabled": self.cfg.context.repo_map_enabled,
+                "repo_map_max_chars": self.cfg.context.repo_map_max_chars,
             },
             "mcp_servers": [
                 {

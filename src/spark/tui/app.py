@@ -17,6 +17,7 @@ from textual.widgets import Button, Footer, Header, Input, RichLog, Static
 
 from spark.config import SparkConfig, require_api_key
 from spark.core.loop import AgentLoop
+from spark.core.turn_store import persistent_checkpointer
 from spark.models import ApprovalAction, ApprovalDecision, ApprovalRequest, TurnEvent
 from spark.providers.base import Provider
 from spark.providers.probe import probe_provider
@@ -298,6 +299,7 @@ class SparkApp(App):
             session_id=session_id,
             approver=self._approve,
             memory=memory,
+            checkpointer=persistent_checkpointer(),
         )
         self._running = False
         self._current_text = ""
@@ -434,7 +436,7 @@ class SparkApp(App):
         chat = self.query_one("#chat", RichLog)
         chat.write(f"[bold cyan]你[/bold cyan] {rich_escape(text)}")
         try:
-            async for event in self.loop_engine.iter_turn(turn_text):
+            async for event in self.loop_engine.iter_turn_managed(turn_text):
                 self._render(event, chat)
         finally:
             self._flush_text(chat)
@@ -467,7 +469,7 @@ class SparkApp(App):
         if not result.ok and result.feedback:
             chat.write("[yellow]→ 回灌失败输出，交由 agent 修正…[/yellow]")
             try:
-                async for event in self.loop_engine.iter_turn(result.feedback):
+                async for event in self.loop_engine.iter_turn_managed(result.feedback):
                     self._render(event, chat)
             finally:
                 self._flush_text(chat)

@@ -340,6 +340,9 @@ async def stream_turn(
     """运行一轮对话：TurnEvent → session/update；返回 PromptResponse 的 stopReason。"""
     sid = session.session_id
     stop_reason = "end_turn"
+    # ACP owns its own loop and its approver must call back into the connection
+    # on *that* loop, so the turn runs here directly instead of being marshalled
+    # through the shared runtime loop (which deadlocked request_permission).
     async for event in session.loop.iter_turn(user_text, images=images):
         if event.type == "text_delta" and event.text:
             await conn.session_update(sid, update_agent_message(text_block(event.text)))
