@@ -14,3 +14,6 @@
 # 语言统计（避免把内嵌前端产物计入源码占比）
 src/spark/web/dist/** linguist-generated=true
 uv.lock linguist-generated=true
+
+# build artifacts compared byte-for-byte
+src/spark/web/dist/** -text
