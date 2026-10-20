@@ -124,17 +124,30 @@ class AgentRuntime:
 
     def submit(self, coro: Coroutine[Any, Any, T]) -> concurrent.futures.Future[T]:
         """Run *coro* on the owned loop; returns a concurrent Future."""
-        loop = self.start()
+        loop = self.start()  # raises AgentRuntimeClosed when this runtime is dead
+        if loop.is_closed():  # pragma: no cover - defensive
+            raise AgentRuntimeClosed("AgentRuntime loop is closed")
         return asyncio.run_coroutine_threadsafe(coro, loop)
 
     def run(self, coro: Coroutine[Any, Any, T], timeout: float = _DEFAULT_TIMEOUT) -> T:
-        """Blocking run of *coro* on the owned loop."""
+        """Blocking run of *coro* on the owned loop.
+
+        Fails fast — never waits the full timeout — when the runtime is closed or
+        its owner thread has died. A dead runtime used to make every caller block
+        for the whole timeout; called once per test teardown that turned the suite
+        into a multi-hour hang.
+        """
+        if not self.running:
+            coro.close()  # avoid "coroutine was never awaited"
+            raise AgentRuntimeClosed("AgentRuntime is not running")
         future = self.submit(coro)
         try:
             return future.result(timeout=timeout)
         except concurrent.futures.TimeoutError:
             future.cancel()
             raise TimeoutError(f"agent runtime timed out after {timeout}s") from None
+        except concurrent.futures.CancelledError:
+            raise AgentRuntimeClosed("AgentRuntime task was cancelled") from None
 
     # -- driving an async generator on the owned loop ----------------------
 
@@ -291,7 +304,13 @@ _RUNTIME_LOCK = threading.Lock()
 
 
 def get_runtime() -> AgentRuntime:
-    """Process-wide runtime singleton (started on first use)."""
+    """Process-wide runtime singleton (started on first use).
+
+    Self-healing: if the previous runtime was closed (tests call
+    ``reset_persistent_checkpointer`` between cases) or its thread died, a fresh
+    one replaces it. Returning a dead instance made every caller block for its
+    full timeout.
+    """
     global _RUNTIME
     with _RUNTIME_LOCK:
         if _RUNTIME is None or not _RUNTIME.running:

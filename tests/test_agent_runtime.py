@@ -101,9 +101,13 @@ async def test_iter_turn_managed_runs_turn_on_shared_loop() -> None:
 
 def test_durable_checkpointer_survives_restart() -> None:
     """A turn parked on approval must be visible to a *new* checkpointer."""
+    from spark.core.runtime import get_runtime, shutdown_runtime
+
     work = Path(tempfile.mkdtemp())
     db = work / "checkpoints.db"
-    runtime = AgentRuntime("test-checkpoint")
+    # Use the shared singleton so the loop's lifetime matches the checkpointer's
+    # SQLite connection; shutting it down mid-test invalidates that connection.
+    runtime = get_runtime()
     cp = TurnCheckpointer(db)
     runtime.run(cp.start(), timeout=15)
     try:
@@ -134,7 +138,9 @@ def test_durable_checkpointer_survives_restart() -> None:
         runtime.run(drive_then_abandon(), timeout=60)
         assert runtime.run(cp.list_pending(), timeout=15), "pending turn not recorded"
     finally:
-        runtime.close()
+        # Close only the checkpointer; the runtime is process-wide and owned by
+        # conftest's reset hook.
+        shutdown_runtime()
 
     # Fresh checkpointer over the same file = simulated restart.
     cp2 = TurnCheckpointer(db)
@@ -262,3 +268,40 @@ def test_duplicate_tool_call_ids_cannot_share_a_verdict() -> None:
 
 def teardown_module(module) -> None:  # noqa: D103 - pytest hook
     reset_persistent_checkpointer()
+
+
+def test_closed_runtime_fails_fast() -> None:
+    """A dead runtime must raise immediately, not block for the full timeout.
+
+    Regression for the Windows CI hang: ``reset_persistent_checkpointer`` runs in
+    every test teardown and called ``get_runtime().run(..., timeout=10)``. When
+    the runtime had been closed, each of ~690 teardowns blocked 10 s — the job
+    looked hung for hours with no output.
+    """
+    import time as _time
+
+    from spark.core.runtime import AgentRuntime, AgentRuntimeClosed
+
+    rt = AgentRuntime("closed-fast")
+    rt.start()
+    rt.close()
+
+    started = _time.monotonic()
+    with pytest.raises(AgentRuntimeClosed):
+        rt.run(asyncio.sleep(0), timeout=10)
+    elapsed = _time.monotonic() - started
+    assert elapsed < 1.0, f"closed runtime blocked for {elapsed:.1f}s"
+
+
+def test_get_runtime_replaces_dead_singleton() -> None:
+    from spark.core.runtime import get_runtime, shutdown_runtime
+
+    first = get_runtime()
+    assert first.running
+    shutdown_runtime()
+    second = get_runtime()
+    try:
+        assert second.running
+        assert second is not first, "a dead runtime must be replaced, not reused"
+    finally:
+        shutdown_runtime()
