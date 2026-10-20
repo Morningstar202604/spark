@@ -287,6 +287,31 @@ tag  ──► release.yml：wheel+sdist（PyPI trusted publishing）+ EXE×win 
 
 ---
 
+## 10.5 执行现状回写（2026-10-20）
+
+> 规则：只标记**本地已验证**的项；未验证的一律写「未做」，不写「进行中」。
+
+| 阶段 | 状态 | 已验证完成 | 仍未做 |
+|---|---|---|---|
+| P0 卫生周 | 完成 | 3 个 P0 修复、usage 回填、registry 缓存、Compactor 走 provider、镜像 CI、conventional commits | — |
+| P1 模块化+分发 | 大部分完成 | 拆包 + import-linter（5 契约）、OpenAPI 合同 + 前端类型 codegen（CI 校验）、litellm fallback/凭据池/usage 全回填、**成本归账**、模型目录、LSP 诊断闭环（py/ts）、repo map、small_model、CLI 补全、文档站 | `uvx` 发布实测；PageRank 加权（现为三桶衰减） |
+| P2 座舱+协议 | 大部分完成 | LangGraph、ACP、agent profiles（审批档案）、上下文合同回放、双粒度时间轴、多作用域设置、自定义 slash、**hook 事件面 17 个且逐个验证触发**、上下文火焰图、Web 响应式/按需加载 | MCP roots、OAuth 2.1；「Web 前端造轮子替换」的剩余面板 |
+| P3 信任链+AEF | 未开始 | — | AEF 规范、出网黑匣子、PR 证据包、provenance blame、夜间无人值守、EXE 更新器 |
+| P4 横向扩展 | 未开始 | — | 自定义工具 SDK、团队记忆 MR 化、影子重放、质量画像、预算即代码、MCP 沙箱运行时、skills lockfile、主题市场、spark-action、IM 网关、Creator mode |
+| P5 标准与生态 | 未开始 | — | AEF 推广、评分卡、合规包、A2A、企业版 |
+
+**本轮新增的关键事实（避免重复踩坑）**
+
+1. **LiteLLM ≥1.100 与 mcp 1.x 不兼容**：请求带 `tools` 时会加载
+   `litellm.responses.mcp`，它要 mcp 2.x 的 `CacheableResult` / `mcp_types` 包。
+   已用 `_skip_mcp_handler=True` 绕开。升级 LiteLLM 或 mcp 时必须回归这条。
+2. **测试有效性必须用变异测试验证**：静态「有没有 assert」扫描抓不到
+   「断言恒真但测不到行为」。16 个定点变异中首轮有 5 个存活，对应 5 个真实覆盖缺口。
+3. **分层防护会让单元测试失去分辨力**：引号剥离与原始文本扫描同时存在时，
+   删掉任一层测试仍通过。需要针对每层单独断言，否则重构会静默削弱防御。
+4. **状态接口不能联网**：成本估算若走 `fetch_catalog()` 会给 /api/status 增加
+   最多 20 s 超时；只能用本地缓存或内置快照。
+
 ## 11. 度量（分数卡指标定义）
 
 - 能力：evals 场景通过率（分场景）、SWE-bench-lite 定期抽样
