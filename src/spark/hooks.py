@@ -70,19 +70,28 @@ class HookRegistry:
     """Registry of lifecycle hooks keyed by event name. Empty registry is a no-op."""
 
     EVENTS = (
-        # Original events
+        # Turn lifecycle
         "turn_start",
         "pre_tool",
         "post_tool",
         "turn_end",
-        # New events
+        # Application / session lifecycle
         "app_start",
+        "app_stop",
         "session_create",
         "session_load",
+        "session_switch",
+        # Context and memory
         "compaction",
         "memory_extract",
+        "context_threshold",
+        # Tooling
         "approval_needed",
         "tool_error",
+        "plan_update",
+        # Failures
+        "turn_error",
+        "provider_error",
     )
 
     def __init__(self) -> None:

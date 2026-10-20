@@ -542,8 +542,13 @@ class SessionStore:
             )
             self._conn.commit()
 
-    def session_token_usage(self, session_id: str) -> dict:
-        """Aggregated token spend for a session (all turns)."""
+    def session_token_usage(self, session_id: str, model: str | None = None) -> dict:
+        """Aggregated token spend for a session, plus estimated cost when known.
+
+        Cost is derived from the models.dev catalog; an unknown model (a local
+        Ollama model, a private deployment) yields ``cost_usd=None`` rather than
+        a misleading zero.
+        """
         with self._lock:
             row = self._conn.execute(
                 """SELECT COALESCE(SUM(input_tokens), 0) AS input_tokens,
@@ -554,7 +559,47 @@ class SessionStore:
                    FROM token_usage WHERE session_id = ?""",
                 (session_id,),
             ).fetchone()
-            return dict(row) if row else {"input_tokens": 0, "output_tokens": 0, "reasoning_tokens": 0, "total_tokens": 0, "calls": 0}
+            usage = dict(row) if row else {
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "reasoning_tokens": 0,
+                "total_tokens": 0,
+                "calls": 0,
+            }
+        usage["cost_usd"] = self._estimate_cost(model, usage) if model else None
+        return usage
+
+    @staticmethod
+    def _estimate_cost(model: str | None, usage: dict) -> float | None:
+        """Best-effort USD estimate; None when the catalog has no price."""
+        if not model:
+            return None
+        try:
+            from spark.config import default_home
+            from spark.model_catalog import _FALLBACK_SNAPSHOT, _load_cache, estimate_cost, lookup
+
+            # Never hit the network from a status read: prefer the on-disk cache,
+            # and fall back to the bundled snapshot. A missing price simply
+            # yields None; a status call must not add a 20 s HTTP timeout.
+            catalog = _load_cache(default_home()) or _FALLBACK_SNAPSHOT
+            provider = model.split("/", 1)[0] if "/" in model else ""
+            entry = lookup(catalog, provider, model) if provider else None
+            if entry is None:
+                # Bare model names (deepseek-chat) are listed under their vendor
+                # entry; search every provider for an exact model id.
+                for vendor, data in (catalog or {}).items():
+                    if model in (data.get("models") or {}):
+                        provider = vendor
+                        break
+            return estimate_cost(
+                catalog,
+                provider,
+                model,
+                int(usage.get("input_tokens") or 0),
+                int(usage.get("output_tokens") or 0),
+            )
+        except Exception:
+            return None
 
     # ---- fork / message ops / search ----
 

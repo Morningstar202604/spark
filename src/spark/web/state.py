@@ -200,6 +200,15 @@ class SparkWebState:
 
         return persistent_checkpointer()
 
+    def _notify_hook(self, event: str, payload: dict) -> None:
+        """Best-effort lifecycle notification (never breaks the request)."""
+        try:
+            loop = self.loop
+            if loop is not None:
+                loop._notify_safe(event, payload)
+        except Exception:
+            logger.debug("hook notify failed: %s", event, exc_info=True)
+
     def rebuild_loop(
         self, session_id: str | None = None, reuse_latest: bool = False
     ) -> None:
@@ -230,6 +239,7 @@ class SparkWebState:
         else:
             self.session_id = session_id
         approver = self.approver if self.cfg.agent.approval != "full-auto" else None
+        previous_session = getattr(self, "session_id", "")
         self.loop = AgentLoop(
             workdir=self.workdir,
             cfg=self.cfg,
@@ -241,6 +251,11 @@ class SparkWebState:
             memory=self.memory,
             checkpointer=self._ensure_checkpointer(),
         )
+        if previous_session and previous_session != self.session_id:
+            self._notify_hook(
+                "session_switch",
+                {"from": previous_session, "to": self.session_id},
+            )
 
     def status(self) -> dict:
         # 凭据可来自配置或环境变量（SPARK_* / DEEPSEEK_API_KEY 等）：只读配置字段
@@ -261,7 +276,9 @@ class SparkWebState:
             plan = list(self.loop.registry.plan)
         return {
             "session_id": self.session_id,
-            "session_tokens": self.store.session_token_usage(self.session_id),
+            "session_tokens": self.store.session_token_usage(
+                self.session_id, model=self.cfg.provider.model
+            ),
             "workdir": str(self.workdir),
             "sandbox_mode": self.cfg.agent.sandbox_mode,
             "display": {

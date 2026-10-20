@@ -131,4 +131,10 @@ def serve_web(
     try:
         server.serve_forever()
     finally:
+        # Lifecycle hook: lets operators run cleanup (flush a log shipper,
+        # deregister from a service registry) when the process stops normally.
+        try:
+            _state._notify_hook("app_stop", {"reason": "server_shutdown"})
+        except Exception:  # pragma: no cover - shutdown must not fail
+            logger.debug("app_stop hook failed", exc_info=True)
         store.close()

@@ -615,6 +615,17 @@ class AgentLoop:
             yield TurnEvent(type="compaction", data=compacted)
         usage = self._usage()
         yield TurnEvent(type="context", data={"usage": usage})
+        threshold = self.cfg.context.compact_threshold
+        if usage["percent"] >= threshold * 100:
+            self._notify_safe(
+                "context_threshold",
+                {
+                    "used": usage["used"],
+                    "limit": usage["limit"],
+                    "percent": usage["percent"],
+                    "threshold": threshold,
+                },
+            )
         memory_block = None
         if self.memory is not None:
             try:
@@ -842,6 +853,17 @@ class AgentLoop:
                     # P1：provider 上报的真实 usage，覆盖估算口径
                     self._reported_usage = delta.usage
         except Exception as exc:
+            # Distinguish a provider/transport failure from a logic error: the
+            # former can be retried with a different model, the latter cannot.
+            self._notify_safe(
+                "provider_error",
+                {
+                    "model": self.cfg.provider.model,
+                    "provider": str(self.cfg.provider.name),
+                    "error": str(exc)[:500],
+                },
+            )
+            self._notify_safe("turn_error", {"error": str(exc)[:500], "stage": "llm"})
             yield TurnEvent(type="turn_error", text=str(exc))
             self._last_round["error"] = str(exc)
             return
@@ -1040,6 +1062,7 @@ class AgentLoop:
             async for event in self._run_tool(call, msg_id, verdict=verdict):
                 yield event
             if call.name == "update_plan" and self.registry.plan:
+                self._notify_safe("plan_update", {"steps": self.registry.plan})
                 yield TurnEvent(type="plan", data={"steps": self.registry.plan})
                 # approve-plan：计划一经产出即进入计划审批门
                 async for event in self._maybe_approve_plan(call):
