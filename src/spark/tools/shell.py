@@ -226,12 +226,23 @@ def _kill_process_tree(process: subprocess.Popen) -> None:
     kill_process_tree(process.pid, process)
 
 
+_ENV_PROBE_CACHE: dict[str, dict] = {}
+
+
 def detect_env(workdir) -> dict:
     """Probe the default runtime environment so it can be stated in the system prompt.
 
     各运行时探测并行执行：Windows 上每个子进程启动约 2-3 秒，串行 6 个会让
     每个进程的首次 system prompt 构建多付 ~12 秒。
+
+    Cached per process: the result depends only on PATH, which does not change
+    while the process runs. Without the cache, every ``build_web_server()`` (each
+    web test fixture) respawned six subprocesses — that alone pushed the CI
+    matrix from 3 to 20+ minutes on Windows runners.
     """
+    cached = _ENV_PROBE_CACHE.get("value")
+    if cached is not None:
+        return dict(cached)
     probes = {
         "python3": ["python3", "--version"],
         "python": ["python", "--version"],
@@ -258,11 +269,12 @@ def detect_env(workdir) -> dict:
             return name, "installed"
 
     result: dict[str, str] = {}
-    with ThreadPoolExecutor(max_workers=len(probes)) as pool:
+    with ThreadPoolExecutor(max_workers=len(probes), thread_name_prefix="spark-envprobe") as pool:
         for outcome in pool.map(_probe, probes.items()):
             if outcome is not None:
                 result[outcome[0]] = outcome[1]
     result["path"] = str(workdir)
+    _ENV_PROBE_CACHE["value"] = dict(result)
     return result
 
 
