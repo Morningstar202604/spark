@@ -304,10 +304,17 @@ def test_map_error_stop_reason() -> None:
 
 
 async def test_e2e_subprocess(tmp_path: Path) -> None:
-    """真实子进程全链路：spawn ``python -m spark acp``，走 initialize/new/prompt。"""
+    """真实子进程全链路：spawn ``python -m spark acp``，走 initialize/new/prompt。
+
+    真实子进程包含 Python 冷启动 + 完整 import（litellm/langgraph），在 CI 的
+    冷 runner 上可能比本地慢一个数量级。加 90s 硬上限：环境异常时快速失败并
+    指明是哪一步，而不是让 job 挂到超时。
+    """
     import sys
 
     from acp import spawn_agent_process
+
+    TIMEOUT = 90.0
 
     (tmp_path / "marker.txt").write_text("seed", encoding="utf-8")
     client = FakeClient()
@@ -326,10 +333,14 @@ async def test_e2e_subprocess(tmp_path: Path) -> None:
         "full-auto",
         cwd=str(tmp_path),
     ) as (conn, process):
-        init = await conn.initialize(protocol_version=1)
+        import asyncio as _aio
+
+        init = await _aio.wait_for(conn.initialize(protocol_version=1), TIMEOUT)
         assert init.agent_info is not None and init.agent_info.name == "spark"
-        session = await conn.new_session(cwd=str(tmp_path))
-        result = await conn.prompt(session.session_id, [{"type": "text", "text": "hello"}])
+        session = await _aio.wait_for(conn.new_session(cwd=str(tmp_path)), TIMEOUT)
+        result = await _aio.wait_for(
+            conn.prompt(session.session_id, [{"type": "text", "text": "hello"}]), TIMEOUT
+        )
         assert result.stop_reason == "end_turn"
         assert "mock provider" in client.message_text()
         process.terminate()
