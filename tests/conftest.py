@@ -15,6 +15,36 @@ def _reset_checkpointer() -> None:
         pass
 
 
+@pytest.fixture(autouse=True, scope="session")
+def _no_proxy_for_localhost():
+    """Never route loopback traffic through an HTTP proxy.
+
+    Tests start a real server on 127.0.0.1 and talk to it with urllib / httpx.
+    Both honour ``HTTP_PROXY`` when it is set, which on a CI runner sends
+    loopback requests to an unreachable proxy and blocks until a socket timeout —
+    one plausible source of the Windows job stall.
+    """
+    keys = ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy")
+    saved = {k: os.environ.get(k) for k in keys}
+    no_proxy_saved = os.environ.get("NO_PROXY")
+    for k in keys:
+        os.environ.pop(k, None)
+    os.environ["NO_PROXY"] = "127.0.0.1,localhost,::1"
+    os.environ["no_proxy"] = "127.0.0.1,localhost,::1"
+    yield
+    for k, v in saved.items():
+        if v is None:
+            os.environ.pop(k, None)
+        else:
+            os.environ[k] = v
+    if no_proxy_saved is None:
+        os.environ.pop("NO_PROXY", None)
+        os.environ.pop("no_proxy", None)
+    else:
+        os.environ["NO_PROXY"] = no_proxy_saved
+        os.environ["no_proxy"] = no_proxy_saved
+
+
 @pytest.fixture(autouse=True)
 def _isolate_config(tmp_path):
     old = os.environ.get("SPARK_HOME")
