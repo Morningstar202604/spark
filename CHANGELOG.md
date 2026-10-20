@@ -4,6 +4,70 @@
 
 ## [Unreleased]
 
+### 修复（Windows 上会真实崩溃的问题）
+
+- **控制台编码崩溃**：`typer.echo("◆ …")` 在 cp1252/cp936 控制台抛
+  `UnicodeEncodeError` 并杀死进程——打包出的 EXE 跑 `--version` 即崩。
+  包入口统一把 stdout/stderr 重配为 UTF-8 + `errors="replace"`，
+  渲染不了的字符降级为 `?` 而不是 crash。
+- **Windows 直接 clone 失败**：`providers/aux.py` 是系统保留名，已改名
+  `auxiliary.py`；CI 增加 `windows-checkout` 作业永久防回归。
+
+### 修复（测试套件在 CI 上的挂起与假失败）
+
+- **已关闭的 runtime 阻塞满超时**：`get_runtime().run(...)` 在 runtime 已
+  close 时不会立刻报错，而是等满 10 秒。conftest 每个用例前后各调一次，
+  约 690 个用例 × 2 × 10s = 数小时静默等待。改为立刻抛
+  `AgentRuntimeClosed`，并让 `get_runtime()` 自愈替换死实例。
+- **后台任务输出只在结束时落盘**：运行中的 job 在 store 里 output 恒为空，
+  「重启后仍能看到最后输出」对运行中的任务不成立。改为运行期每 0.5s
+  增量落盘。
+- **`list_bg_jobs` 不返回 output 列**：与 `get_bg_job` 行为不一致。
+- **`detect_env` 每次 spawn 6 个子进程**：每个 Web 测试夹具都触发一次，
+  是 CI 变慢的主因。按进程缓存后完整套件 213s → 131s。
+- **HTTP 服务非 daemon 线程 + `block_on_close`**：一个卡住的 SSE 连接会让
+  `server_close()` 无限 join，进程无法退出。
+- **ACP 子进程冒烟在 CI 超时**：冷启动要 import litellm + langgraph +
+  textual，Windows runner 上超过 90s。改为 CI 跳过、本地运行。
+- **测试会走 HTTP 代理**：会话级 fixture 清空 `*_PROXY` 并固定 `NO_PROXY`
+  为回环地址，避免 loopback 请求被转发到不可达代理。
+- CI 增加 `timeout-minutes`（quality 20 / test 25 / windows-checkout 10）
+  与 pytest `faulthandler_timeout = 600`：死锁会转储线程栈而不是静默烧时间。
+
+### 修复（CI 假红）
+
+- **mirror**：`git push --tags` 遇到已存在的标签会整体失败（"already exists"
+  是正常状态），且并发/手动补推后远程 ref 领先 runner 的陈旧 ref。改为
+  `--force` 并对标签失败降级为 warning。
+
+### 安全
+
+- **js-yaml 4.1.1 → 4.3.2**：命中多条 advisory，用 npm `overrides` 强制全树
+  统一（orval 及其传递依赖都受影响）。
+
+### 测试有效性（本轮重点）
+
+- 引入**变异测试**（`scripts/mutation_check.py`，16 个定点变异）验证断言是否
+  真能抓到缺陷。首轮只有 11/16 被抓到，暴露 5 个「测试写了但没测到行为」的
+  缺口：引号剥离与 IFS 清洗的分层防护、`git -calias.x=` 紧贴写法、上下文设置
+  校验。补齐后 16/16 全部被杀死。
+- 修掉一个**真·假测试**：`test_e2e_permission_blocks_write_outside_workdir`
+  的断言是 `if tool_end: pass`，拦不拦都通过。
+- 新增**真实进程集成测试**：spawn 真实 MCP stdio server，验证握手、工具发现、
+  调用返回、untrusted 围栏。
+- 新增**真机编码闭环**（`scripts/live_coding_e2e.py`）：真实模型读文件 →
+  apply_patch → run_tests，断言测试从 fail 变 pass 且测试文件未被改动。
+
+### 工程
+
+- 成本归账接线：`/api/status` 的 `session_tokens` 返回 `cost_usd`（本地缓存
+  或内置快照，绝不联网）。
+- hook 事件面从「声明 11 个、实际触发 4 个」补到 17 个且逐个验证触发。
+- OpenAPI → 前端 TypeScript 类型（`scripts/export_openapi.py` + orval），
+  CI 校验快照不漂移。
+- CLI 打开 `--install-completion`。
+- README 换成真实模型下的实拍截图（8 张，含 390px 响应式）。
+
 ### 安全（受保护路径与只读工具越权通道，2026-10-20）
 
 全量审查 + 三路专家审计共同复现并修复；每条都有对应回归测试
