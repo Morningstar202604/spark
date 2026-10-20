@@ -309,10 +309,15 @@ async def test_e2e_permission_blocks_write_outside_workdir(tmp_path: Path) -> No
     loop = _make_loop(tmp_path, provider)
     events = await loop.run("try to escape sandbox")
     tool_end = [e for e in events if e.type == "tool_end"]
-    # Sandbox should block or shell should fail
-    if tool_end:
-        # Either blocked by policy or by OS — both are acceptable
-        pass  # test passes if no exception crashes the loop
+    # The point is that the command never reached the OS. The previous form only
+    # asserted "the loop survived", which passed even when the write went
+    # through — the security claim was untested.
+    assert tool_end, "run_shell should have produced a tool_end event"
+    result = tool_end[0].result
+    assert result is not None
+    assert result.ok is False, f"shell command unexpectedly ran: {result.payload}"
+    message = str(result.payload.get("error", "")).lower()
+    assert "blocked" in message or "denied" in message, result.payload
 
 
 # ---------------------------------------------------------------------------

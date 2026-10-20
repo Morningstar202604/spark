@@ -358,3 +358,144 @@ def test_diagnostics_never_runs_repo_supplied_tsc() -> None:
 
     source = inspect.getsource(mod._tsc_diagnostics)
     assert "npx" not in source, "npx would run node_modules/.bin/tsc from the cloned repo"
+
+
+# ---------------------------------------------------------------------------
+# Mutation-verified coverage: these lock the *specific* guard, not just "blocked"
+# ---------------------------------------------------------------------------
+
+
+def test_git_option_guard_is_what_blocks_aliases(tmp_path: Path) -> None:
+    """The alias guard must fire on its own, not ride on another deny rule.
+
+    ``git -c alias.x='ls' x`` has no dangerous verb; only _git_option_guard
+    rejects it. (A mutation that disabled the guard survived the earlier test
+    because ``!echo pwned`` also matched a deny pattern.)
+    """
+    from spark.sandbox import _git_option_guard
+
+    assert _git_option_guard(["git", "-c", "alias.x=ls", "x"]) is not None
+    assert _git_option_guard(["git", "--git-dir=/tmp/o", "status"]) is not None
+    assert _git_option_guard(["git", "--work-tree=/tmp/o", "status"]) is not None
+    # Ordinary git usage must pass.
+    assert _git_option_guard(["git", "status"]) is None
+    assert _git_option_guard(["git", "-C", ".", "log", "-1"]) is None
+
+
+def test_quote_stripping_layer_is_load_bearing(tmp_path: Path) -> None:
+    """Guard the token-level layer independently of the raw-text scan.
+
+    Two mechanisms catch quoted paths: token normalisation and a raw-text path
+    scan. A mutation removing the token layer survived because the raw scan
+    still blocked the command, so this pins the token layer's own contract.
+    """
+    from spark.sandbox import _strip_quotes
+
+    assert _strip_quotes('"/etc/hosts"') == "/etc/hosts"
+    assert _strip_quotes("'/etc/hosts'") == "/etc/hosts"
+    # cmd.exe removes mid-token quotes before opening the file.
+    assert _strip_quotes('"C:\Win"dows\win.ini') == "C:\Windows\win.ini"
+
+
+def test_ifs_cleanup_layer_is_load_bearing() -> None:
+    """${IFS} must be neutralised at token level, not only by the raw scan."""
+    import tempfile
+    from pathlib import Path as _P
+
+    sb = _sb(_P(tempfile.mkdtemp()))
+    tokens = sb._command_tokens("cat ${IFS}/etc/hosts")
+    assert not any("IFS" in tok for tok in tokens), tokens
+    assert "${IFS}" not in " ".join(tokens)
+
+
+def test_context_setting_validation_rejects_bad_values(tmp_path: Path) -> None:
+    """Out-of-range context values must be refused, not silently applied."""
+    import json
+    import threading
+    import urllib.request
+
+    from spark.config import SparkConfig
+    from spark.store import SessionStore as _Store
+    from spark.web.server import build_web_server
+
+    cfg = SparkConfig()
+    cfg.provider.name = "mock"
+    cfg.provider.base_url = "http://localhost:9/v1"
+    cfg.provider.model = "mock"
+    cfg.agent.approval = "full-auto"
+    store = _Store(tmp_path / "ctx.db")
+    server, state = build_web_server(workdir=tmp_path, cfg=cfg, store=store, host="127.0.0.1", port=0)
+    port = server.server_address[1]
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        before = state.cfg.context.compact_threshold
+
+        def post(body: dict) -> int:
+            req = urllib.request.Request(
+                f"http://127.0.0.1:{port}/api/settings",
+                data=json.dumps(body).encode(),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            try:
+                with urllib.request.urlopen(req, timeout=5) as resp:
+                    return resp.status
+            except urllib.error.HTTPError as exc:
+                return exc.code
+
+        status = post({"context": {"compact_threshold": 5.0}})
+        assert status == 400, f"out-of-range threshold accepted: {status}"
+        assert state.cfg.context.compact_threshold == before, "rejected value was applied anyway"
+
+        status = post({"context": {"keep_recent_messages": 0}})
+        assert status == 400
+        status = post({"context": {"compact_threshold": 0.7}})
+        assert status == 200
+        assert abs(state.cfg.context.compact_threshold - 0.7) < 1e-9
+    finally:
+        server.shutdown()
+        server.server_close()
+        store.close()
+
+
+def test_git_alias_attached_form_is_blocked(tmp_path: Path) -> None:
+    """`-calias.x=...` (attached) takes a different branch than `-c alias.x=...`.
+
+    The earlier test used `!echo`, which the separated-argument branch also
+    catches; a mutation that disabled only the attached form survived it. This
+    pins the attached spelling, using a harmless alias body so no other deny rule
+    can mask the result.
+    """
+    sb = _sb(tmp_path)
+    reason = sb.check_shell("git -calias.x=ls x")
+    assert reason is not None
+    assert "alias" in reason.lower()
+
+
+def test_run_tests_detects_plain_pytest_layout(tmp_path: Path) -> None:
+    """A repo with test_*.py but no tests/ dir or ini file must still be runnable.
+
+    The original detection required ``pyproject.toml`` + ``tests/`` or an ini
+    file, so small projects (the common case for a coding agent's user) got
+    "no test command detected" and the test loop was unusable.
+    """
+    from spark.tools import gitops
+
+    (tmp_path / "test_solo.py").write_text(
+        "def test_ok():\n    assert 1 + 1 == 2\n", encoding="utf-8"
+    )
+    assert gitops.detect_test_command(tmp_path) == "python -m pytest -q"
+
+    result = gitops.run_tests(_sb(tmp_path), gitops.RunTestsArgs(path="."))
+    assert result.ok is True, result.payload
+    assert result.payload.get("exit_code") == 0
+
+
+def test_run_tests_still_rejects_repo_without_tests(tmp_path: Path) -> None:
+    from spark.tools import gitops
+
+    (tmp_path / "main.py").write_text("print(1)\n", encoding="utf-8")
+    assert gitops.detect_test_command(tmp_path) is None
+    result = gitops.run_tests(_sb(tmp_path), gitops.RunTestsArgs(path="."))
+    assert result.ok is False

@@ -97,11 +97,29 @@ _TEST_TIMEOUT = 600
 MAX_TEST_TIMEOUT_SEC = 1800
 
 
+def _has_pytest_files(root: Path) -> bool:
+    """True when the tree contains pytest-style test modules.
+
+    A plain layout (``test_calc.py`` next to the code, no ``tests/`` dir, no
+    ini file) is extremely common — a single-file script or a small project —
+    and previously went undetected, so ``run_tests`` refused to run at all.
+    """
+    for path in root.rglob("test_*.py"):
+        if any(part in {".git", "node_modules", ".venv", "venv", "__pycache__"} for part in path.parts):
+            continue
+        return True
+    return (root / "conftest.py").is_file()
+
+
 def detect_test_command(root: Path) -> str | None:
     """Best-effort test command for a repo; None when no signal exists."""
     if (root / "pyproject.toml").is_file() and (root / "tests").is_dir():
         return "python -m pytest -q"
     if (root / "pytest.ini").is_file() or (root / "tox.ini").is_file():
+        return "python -m pytest -q"
+    if (root / "setup.cfg").is_file() and _has_pytest_files(root):
+        return "python -m pytest -q"
+    if _has_pytest_files(root):
         return "python -m pytest -q"
     package = root / "package.json"
     if package.is_file():

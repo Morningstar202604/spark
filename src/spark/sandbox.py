@@ -438,20 +438,19 @@ class WorkdirSandbox:
         boundary; the real boundary is ``check_shell`` which decides allow/deny.
         """
         cleaned = command
+        # IFS must be neutralised *before* the generic "${" / "$" rules below,
+        # otherwise "${IFS}" collapses to "IFS}" and the leftover token no longer
+        # looks like a variable at all. ${IFS} is the standard way to smuggle a
+        # space or a separator past token-based checks (`cat${IFS}/etc/passwd`).
+        cleaned = cleaned.replace("${IFS}", " ").replace("$IFS", " ")
         # Block-process substitution: <(cmd) and >(cmd)
         for pat in ("<(", ">(", "$(", "${", "$["):
             cleaned = cleaned.replace(pat, " ")
         # Command chaining and redirection
         for ch in ("|", ";", "&&", "||", "\n", "\r", "\t"):
             cleaned = cleaned.replace(ch, " ")
-        # Backticks and bare $; IFS is the standard way to smuggle a space or a
-        # path separator past token-based checks (`cat${IFS}/etc/passwd`).
-        cleaned = (
-            cleaned.replace("`", " ")
-            .replace("$", " ")
-            .replace("${IFS}", " ")
-            .replace("$IFS", " ")
-        )
+        # Backticks and any remaining bare $
+        cleaned = cleaned.replace("`", " ").replace("$", " ")
         try:
             tokens = shlex.split(cleaned, posix=os.name != "nt")
         except ValueError:
