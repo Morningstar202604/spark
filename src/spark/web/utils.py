@@ -161,6 +161,11 @@ def _event_payload(event) -> dict:
         payload["approval"] = {
             "summary": event.approval.summary,
             "diff": event.approval.diff,
+            # The full arguments travel with the request so the approval card can
+            # show what will actually run. A truncated summary is not enough to
+            # judge a shell command.
+            "tool": event.approval.tool_call.name,
+            "arguments": event.approval.tool_call.arguments,
         }
     if event.data:
         payload["data"] = event.data

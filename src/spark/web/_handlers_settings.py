@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 import asyncio as _asyncio
-from typing import Literal, cast
+from typing import Any, Literal, cast
 
 from spark.config import (
     ApprovalMode,
@@ -116,15 +116,14 @@ def _handle_settings(handler: HandlerBase, body: dict) -> None:
         )
         if k in agent_in
     }
-    for key, value in display_flags.items():
-        setattr(state.cfg.agent, key, value)
-
+    # Deferred until every validator below passes: applying early meant a request
+    # that later returned 400 had already cleared `protected_paths` and flipped
+    # display flags. A rejected save must change nothing.
+    protected_paths_update: list[str] | None = None
     if "protected_paths" in agent_in:
         pp = agent_in.get("protected_paths")
         if isinstance(pp, list):
-            state.cfg.agent.protected_paths = [
-                str(x).strip() for x in pp if str(x).strip()
-            ]
+            protected_paths_update = [str(x).strip() for x in pp if str(x).strip()]
 
     try:
         workdir_only = bool(
@@ -173,6 +172,37 @@ def _handle_settings(handler: HandlerBase, body: dict) -> None:
     else:
         system_prompt = state.cfg.agent.system_prompt
 
+    # ── 上下文管理（Project 页）：此前前端编辑了却从不提交，改完刷新即丢 ──
+    context_in = body.get("context")
+    context_updates: dict[str, Any] = {}
+    if isinstance(context_in, dict):
+        try:
+            if "compact_threshold" in context_in:
+                threshold = float(context_in["compact_threshold"])
+                if not 0.1 <= threshold <= 0.99:
+                    raise ValueError("compact_threshold must be within 0.1-0.99")
+                context_updates["compact_threshold"] = threshold
+            if "max_context_tokens" in context_in:
+                tokens = int(context_in["max_context_tokens"])
+                if not 1024 <= tokens <= 10_000_000:
+                    raise ValueError("max_context_tokens out of range")
+                context_updates["max_context_tokens"] = tokens
+            if "keep_recent_messages" in context_in:
+                keep = int(context_in["keep_recent_messages"])
+                if not 2 <= keep <= 200:
+                    raise ValueError("keep_recent_messages out of range")
+                context_updates["keep_recent_messages"] = keep
+            if "history_budget_chars" in context_in:
+                budget = int(context_in["history_budget_chars"])
+                if not 1000 <= budget <= 100_000_000:
+                    raise ValueError("history_budget_chars out of range")
+                context_updates["history_budget_chars"] = budget
+            if "repo_map_enabled" in context_in:
+                context_updates["repo_map_enabled"] = bool(context_in["repo_map_enabled"])
+        except (TypeError, ValueError) as exc:
+            handler._json(400, {"error": f"invalid context setting: {exc}"})
+            return
+
     # ── 全部校验通过后统一提交：任何失败都不留下半改的内存状态 ──
     state.cfg.provider.name = cast(ProviderName, provider_name)
     state.cfg.provider.base_url = base_url
@@ -188,6 +218,14 @@ def _handle_settings(handler: HandlerBase, body: dict) -> None:
     state.cfg.agent.max_repeat_calls = repeat_in
     state.cfg.agent.max_turn_tokens = token_in
     state.cfg.agent.system_prompt = system_prompt
+    for key, value in display_flags.items():
+        setattr(state.cfg.agent, key, value)
+    if protected_paths_update is not None:
+        state.cfg.agent.protected_paths = protected_paths_update
+    for key, value in context_updates.items():
+        # Field types were validated above; setattr keeps this version-tolerant
+        # if a new context field is added to the model.
+        setattr(state.cfg.context, key, value)  # type: ignore[arg-type]
     state.sandbox = WorkdirSandbox(state.workdir, state.cfg)
 
     mcp_in = body.get("mcp_servers")

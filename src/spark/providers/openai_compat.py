@@ -146,7 +146,7 @@ def litellm_model_name(name: str) -> tuple[str, str | None]:
     LiteLLM 前缀语法（openai/xxx、deepseek/xxx），原样尊重。
 
     模块级函数：``OpenAICompatProvider._litellm_model`` 与
-    :mod:`spark.providers.aux` 共用同一规则（单一真相源）。
+    :mod:`spark.providers.auxiliary` 共用同一规则（单一真相源）。
     """
     if "/" in name:
         return name, None
@@ -299,6 +299,15 @@ class OpenAICompatProvider:
                         num_retries=0,  # we handle retries explicitly for fine-grained control
                         drop_params=True,  # pass through non-standard fields (e.g. reasoning_content)
                         timeout=120.0,  # httpx.Timeout(120.0) equivalent for LiteLLM
+                        # LiteLLM >=1.100 auto-routes any call carrying `tools`
+                        # through litellm.responses.mcp, which imports the mcp 2.x
+                        # API (mcp.types.CacheableResult / the `mcp_types`
+                        # package). Spark pins mcp 1.x for the official SDK, so
+                        # that import fails and *every* tool-carrying completion
+                        # dies with "cannot import name 'CacheableResult'".
+                        # Spark does its own MCP bridged through tool names, so
+                        # LiteLLM's MCP handler is never what we want here.
+                        _skip_mcp_handler=True,
                     )
                     if provider_hint:
                         completion_kwargs["custom_llm_provider"] = provider_hint

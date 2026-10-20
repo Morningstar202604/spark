@@ -11,4 +11,33 @@ import os
 # every entry point (cli/web/desktop) imports spark first.
 os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")
 
-__version__ = "0.9.10"
+
+def _resolve_version() -> str:
+    """Single source of truth: the installed distribution metadata.
+
+    A hardcoded literal drifts from pyproject.toml on every release (0.9.3 had
+    to patch exactly this), and the ACP surface reports this value to editors.
+    Falls back to the source tree's pyproject when the package is imported
+    without being installed.
+    """
+    try:
+        from importlib.metadata import PackageNotFoundError, version
+
+        try:
+            return version("spark-agent")
+        except PackageNotFoundError:
+            pass
+    except Exception:  # pragma: no cover - importlib always present on 3.11+
+        pass
+    try:
+        import tomllib
+        from pathlib import Path
+
+        pyproject = Path(__file__).resolve().parent.parent.parent / "pyproject.toml"
+        with pyproject.open("rb") as fh:
+            return str(tomllib.load(fh)["project"]["version"])
+    except Exception:  # pragma: no cover - frozen/source-less deployments
+        return "0.0.0"
+
+
+__version__ = _resolve_version()

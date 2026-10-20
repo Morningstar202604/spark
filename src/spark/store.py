@@ -222,6 +222,20 @@ class SessionStore:
     def delete_session(self, session_id: str) -> None:
         """Remove a session and its messages/tool-events permanently."""
         with self._lock:
+            # FTS rows must be deleted *before* the messages they index: the
+            # old order ran the subquery after the DELETE, so it always matched
+            # nothing and left orphan rows behind.
+            try:
+                self._conn.execute(
+                    "DELETE FROM messages_fts WHERE rowid IN "
+                    "(SELECT id FROM messages WHERE session_id = ?)",
+                    (session_id,),
+                )
+                self._conn.execute(
+                    "DELETE FROM sessions_fts WHERE session_id = ?", (session_id,)
+                )
+            except sqlite3.OperationalError:
+                pass
             self._conn.execute(
                 "DELETE FROM tool_events WHERE session_id = ?", (session_id,)
             )
@@ -229,13 +243,6 @@ class SessionStore:
                 "DELETE FROM messages WHERE session_id = ?", (session_id,)
             )
             try:
-                self._conn.execute(
-                    "DELETE FROM messages_fts WHERE rowid IN (SELECT id FROM messages WHERE session_id = ?)",
-                    (session_id,),
-                )
-                self._conn.execute(
-                    "DELETE FROM sessions_fts WHERE session_id = ?", (session_id,)
-                )
                 self._conn.execute(
                     "DELETE FROM token_usage WHERE session_id = ?", (session_id,)
                 )
@@ -248,11 +255,19 @@ class SessionStore:
         """Update the session timestamp (and optionally its title)."""
         now = int(time.time())
         with self._lock:
-            self._conn.execute(
-                "UPDATE sessions SET updated_at = ?, title = ? WHERE id = ?",
-                (now, title, session_id),
-            )
-            self._fts_sync_title(session_id, title)
+            if title is None:
+                # sessions.title is NOT NULL: a plain timestamp bump must not
+                # write NULL into it.
+                self._conn.execute(
+                    "UPDATE sessions SET updated_at = ? WHERE id = ?",
+                    (now, session_id),
+                )
+            else:
+                self._conn.execute(
+                    "UPDATE sessions SET updated_at = ?, title = ? WHERE id = ?",
+                    (now, title, session_id),
+                )
+                self._fts_sync_title(session_id, title)
             self._conn.commit()
 
     def set_title(self, session_id: str, title: str) -> None:

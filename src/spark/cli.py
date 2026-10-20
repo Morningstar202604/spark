@@ -138,6 +138,13 @@ def _launch_tui(
 @app.callback()
 def main(
     ctx: typer.Context,
+    version_flag: bool = typer.Option(
+        False,
+        "--version",
+        "-V",
+        is_eager=True,
+        help="输出当前语义化版本号后退出",
+    ),
     workdir: Path = typer.Option(
         Path("."), "--workdir", dir_okay=True, file_okay=False
     ),
@@ -151,6 +158,9 @@ def main(
         help="sandbox-only | workspace | full-access | unrestricted",
     ),
 ) -> None:
+    if version_flag:
+        typer.echo(version_line(_installed_version()))
+        raise typer.Exit(0)
     if ctx.invoked_subcommand is not None:
         return
     try:
@@ -217,6 +227,9 @@ async def _exec_async(
     tool_ctx.mcp_call = bridge.call
     tool_ctx.mcp_bridge = bridge
     bridge.set_sampling_handler(prov)
+    # One-shot CLI: the process *is* the turn, so there is nothing to resume
+    # after a crash. The default in-memory saver still backs in-process
+    # approval interrupts without paying for a durable DB.
     loop = AgentLoop(
         workdir=workdir,
         cfg=cfg,
@@ -549,13 +562,19 @@ def resume_cmd(
 @app.command("version", help="输出当前语义化版本号")
 def version_cmd() -> None:
     """Show the installed Spark version."""
+    typer.echo(version_line(_installed_version()))
+
+
+def _installed_version() -> str:
+    """Resolve the distribution version once, shared by --version and `version`."""
     from importlib.metadata import PackageNotFoundError, version
 
     try:
-        detail = version("spark-agent")
+        return version("spark-agent")
     except PackageNotFoundError:
-        detail = "development build"
-    typer.echo(version_line(detail))
+        from spark import __version__
+
+        return __version__ or "development build"
 
 
 @app.command("models", help="查询开放模型目录（models.dev）——搜索模型/价格/上下文长度")

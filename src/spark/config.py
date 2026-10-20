@@ -39,7 +39,7 @@ ApprovalMode = Literal[
     "approve-plan",
     "manual",
 ]
-"""五档审批模式（业界范式对齐）：
+"""六档审批模式（业界范式对齐）：
 
 * ``full-auto``   — 全部自动执行（写/执行均 allow），仅 deny 规则可拦截
 * ``auto-edit``   — 写工具自动、执行工具逐条确认（历史三档，保留兼容）

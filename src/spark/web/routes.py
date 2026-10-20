@@ -303,9 +303,14 @@ def build_handler_class(html: str):
                 return
             if path == "/api/openapi.json":
                 # P1：OpenAPI 合同层（前端 codegen 单一事实来源；见 web/api_spec.py）
-                from spark.web.api_spec import openapi_schema
+                from spark.web.api_spec import OpenApiUnavailable, openapi_schema
 
-                self._json(200, openapi_schema())
+                try:
+                    schema = openapi_schema()
+                except OpenApiUnavailable as exc:
+                    self._json(503, {"error": str(exc), "hint": "pip install 'spark-agent[openapi]'"})
+                    return
+                self._json(200, schema)
                 return
             if path == "/api/config":
                 state.ensure_default_profile()

@@ -1,6 +1,6 @@
 """Shared memory-side LLM helpers: chat completion, embeddings, JSON parsing.
 
-传输统一走 :mod:`spark.providers.aux`（LiteLLM 单一通道）；本模块保留
+传输统一走 :mod:`spark.providers.auxiliary`（LiteLLM 单一通道）；本模块保留
 原函数签名与返回契约（``embed_texts`` 失败返回 None、``chat_complete``
 无 choices 返回空串），供 extractor/service 按旧语义调用。
 """
@@ -22,7 +22,7 @@ async def chat_complete(
     temperature: float = 0.0,
     max_tokens: int = 1000,
 ) -> str:
-    from spark.providers.aux import chat_once
+    from spark.providers.auxiliary import chat_once
 
     return await chat_once(
         base_url=base_url,
@@ -42,7 +42,7 @@ async def embed_texts(
     model: str,
     texts: list[str],
 ) -> list[list[float]] | None:
-    from spark.providers.aux import embed_once
+    from spark.providers.auxiliary import embed_once
 
     return await embed_once(base_url=base_url, api_key=api_key, model=model, texts=texts)
 
