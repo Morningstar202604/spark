@@ -2,6 +2,82 @@
 
 本项目遵循语义化版本。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)。
 
+## [Unreleased]
+
+### 安全（受保护路径与只读工具越权通道，2026-10-20）
+
+全量审查 + 三路专家审计共同复现并修复；每条都有对应回归测试
+（`tests/test_hardening_regressions.py`，57 例）。
+
+- **shell 检查的多形态绕过**：引号包裹、命令替换 `$(...)`、反引号、`${IFS}`、
+  重定向紧贴（`echo x>.git/hooks/pre-commit`）、cwd 相对路径（`../.git/hooks/x`）、
+  环境变量间接引用（`%SPARK_HOME%/config.toml`）、cmd 中点引号拼接
+  （`"C:\Win"dows\win.ini`）此前都能绕过受保护路径比对。
+- **git 控制面**：`.git/{hooks,config,info,objects,refs,modules}` 在任意深度受保护
+  （此前只有根目录一层，嵌套仓库与子模块可自由写 hook）；并拒绝 `git -c alias.*`
+  （git 自带的任意命令执行）与 `--git-dir` / `--work-tree`。
+- **凭据路径**：反斜杠形式（`.ssh\config`）与 env 展开后同样拦截；新增
+  `.npmrc` / `.git-credentials`。
+- **diagnostics 免审批运行**：拒绝以 `-` 开头的 target（曾可用 `--fix` 改写文件）；
+  改用 `-P` 防止仓库自带 `ruff/` 包被 import；tsc 只接受全局二进制（不再经 npx
+  执行 `node_modules/.bin/tsc`）。
+- **PTY**：`cwd` 收敛到 workdir（此前请求体可传任意绝对路径）。
+- **审批分类缓存 **：键从 `tool_call.id` 改为 `(id, name, arguments)` 哈希——
+  `openai_compat` 在模型不返回 id 时统一生成 `call_0`，旧键会让只读工具的
+  「放行」判定被写工具复用，从而跳过写入审批。
+- **误杀回归修正**：词边界改动曾导致 `npm run format`、`echo su`、
+  `2>/dev/null` 被拦；深层目标 `rm -rf /home/user` 曾被放行。现按
+  「前缀 / 动词+开关 / 命令位」三类分别匹配，`/dev/null` 等设备汇例外放行。
+
+### 修复（真实模型调用被阻断）
+
+- **LiteLLM ≥1.100 的 MCP handler 冲突**：请求带 `tools` 时 LiteLLM 会加载
+  `litellm.responses.mcp`，该模块要求 mcp 2.x API（`mcp.types.CacheableResult` /
+  独立 `mcp_types` 包），而本项目锁 mcp 1.x——**所有带工具的模型调用**都会以
+  `cannot import name 'CacheableResult'` 失败。加 `_skip_mcp_handler=True` 恢复。
+- **probe 误判推理型模型**：`content` 为 null 而答案在 `reasoning_content` 时
+  被判为「端点返回空」；现同时识别两个字段。
+
+### 修复（正确性）
+
+- `SessionStore.touch()` 省略 title 时违反 NOT NULL；`delete_session` 先删 FTS
+  再删 messages（此前子查询总为空，留下孤儿索引行）。
+- `/api/settings` 改为全部校验通过后统一提交：被 400 拒绝的请求不再顺手清空
+  `protected_paths`；新增 `context` 节（Project 页此前改了存不进）。
+- `/api/config` 补 `repo_map_enabled` / `repo_map_max_chars`。
+- `__version__` 改从 `importlib.metadata` 读取（此前硬编码 0.9.10 与 pyproject 分裂）。
+- OpenAPI 合同层改为可选依赖 `[openapi]`，未安装时端点返回 503。
+- 审批事件下发 `tool` 与完整 `arguments`。
+
+### 新增（运行时可恢复性）
+
+- `core/runtime.py`：进程级共享事件循环。此前 `iter_turn_sync` 每轮新建 loop，
+  使 `AsyncSqliteSaver` 的连接跨 loop 不可用，A10 崩溃恢复实际一直跑在内存版上。
+- `persistent_checkpointer()` 接入 web / TUI；SQLite 加 `synchronous=NORMAL`
+  （约省 19ms/轮）与 `wal_autocheckpoint`。
+- 生产者改为 `await put` 背压：慢消费者不再独占共享 loop（曾可让所有会话卡死）。
+
+### 新增（界面）
+
+- 响应式：桌面侧栏可拖拽调宽（双击复位、方向键微调、持久化）；移动端设置页
+  横向 tab；修复折叠后残留 270px 死区。
+- 按需加载：首屏 JS 680KB → 140KB（gzip 214 → ~110KB），弹层首次打开后保持挂载。
+- 快捷键：Ctrl+K 移到 App（放在面板内部导致永不触发）；Esc 与停止按钮统一走
+  `handleCancel`，并跳过输入框 / 有弹层 / 待审批。
+- 停止真正生效：abort 时取消 reader（此前只翻转本地标志，服务端继续跑工具）。
+- 审批卡片：`alertdialog` + 焦点移入/恢复、可查看完整参数。
+
+### 工程
+
+- CI 测试矩阵扩为 ubuntu + windows × 3.11/3.12；新增 `windows-checkout` 作业防止
+  Windows 保留文件名混入（`providers/aux.py` 已改名 `auxiliary.py`）。
+- `build-exe` 冒烟测试不再用 `|| true` 吞掉失败。
+- 新增 `docs/FEATURES.md`（按「能力 / 落点 / 用法」组织）与
+  `scripts/live_smoke.py`（六阶段真机验证，密钥只从环境变量读）。
+- 全量门禁：pytest 752 passed / 5 skipped；ruff / mypy(93 文件) / bandit /
+  import-linter 全绿；真机 6/6（step-5-preview、Qwen3.8-Flash-Next）。
+
+
 ## [0.9.11] - 2026-10-19
 
 P2 第六批（**上下文合同 + 双粒度时间机器 + 权限/审批扩展 + MCP 全能力推进**），
@@ -453,7 +529,7 @@ CI 转绿批次：修复 GitHub Actions 长期全红的五个独立根因，全�
   在 0.1.0，与 CHANGELOG 的 0.8.0 及发布 tag 脱节）。
 - **Windows EXE 重建**并冒烟通过（真实模型对话 + shell 工具调用）。
 
-## [Unreleased]
+## [2026-10-10] 双树收敛收尾（历史记录）
 
 ### 变更（双树收敛收尾，2026-10-10）
 - **根树退役，`src/spark` 成为唯一主干**：pip 发行（`packages.find where=["src"]`）、pytest
