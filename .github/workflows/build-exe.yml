@@ -51,9 +51,16 @@ jobs:
       - name: Smoke test
         shell: bash
         run: |
-          set -e
-          ./dist/spark.exe --version >/tmp/spark-exe-version.txt 2>&1 || true
-          cat /tmp/spark-exe-version.txt | tail -3
+          set -euo pipefail
+          # `--version` must exit 0 and print a version: a silent || true here
+          # would let a broken bundle ship (missing hidden imports only show up
+          # when the exe actually starts).
+          ./dist/spark.exe --version | tee /tmp/spark-exe-version.txt
+          grep -qE '0\.[0-9]+\.[0-9]+' /tmp/spark-exe-version.txt
+          # Exercise a real entry point that imports the full app graph (web
+          # server + tools + providers) without binding a port.
+          ./dist/spark.exe version | tee /tmp/spark-exe-version2.txt
+          grep -qE '0\.[0-9]+\.[0-9]+' /tmp/spark-exe-version2.txt
           test -s dist/spark.exe && echo "spark.exe OK"
 
       - name: Upload artifact

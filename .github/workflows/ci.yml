@@ -28,9 +28,13 @@ jobs:
 
   test:
     needs: quality
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
+        # Both supported platforms are first-class: the same code must pass on
+        # Linux and Windows (different shell, path semantics, process model).
+        os: [ubuntu-latest, windows-latest]
         python-version: ["3.11", "3.12"]
     steps:
       - uses: actions/checkout@v4
@@ -45,4 +49,24 @@ jobs:
       - name: Test (pytest + coverage)
         run: |
           python -m pytest -q --cov=spark --cov-report=term-missing --cov-fail-under=65
+
+  windows-checkout:
+    # Guards the failure mode found in review: a Windows-reserved filename in the
+    # tree makes `git clone` unusable on Windows even though Linux is fine.
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: No Windows-reserved paths
+        shell: pwsh
+        run: |
+          $reserved = 'CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9]'
+          $bad = git ls-files | Where-Object {
+            $leaf = [System.IO.Path]::GetFileNameWithoutExtension($_)
+            $leaf -match "^($reserved)$"
+          }
+          if ($bad) {
+            Write-Error "Windows-reserved filenames in tree: $bad"
+            exit 1
+          }
+          Write-Host "no reserved filenames"
 

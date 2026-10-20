@@ -25,7 +25,7 @@ AgentLoop 是核心引擎，负责管理整个对话回合：
   用户输入
     │
     ▼
-  [上下文检查] ──≥85%──→ 触发 8 段式压缩
+  [上下文检查] ──≥85%──→ 触发 5 段式压缩（Objective / Important Details / Work State / Next Move / Relevant Files）
     │
     ▼
   [记忆检索] → 补充到 messages
