@@ -504,7 +504,13 @@ class SessionStore:
             self._conn.commit()
 
     def list_bg_jobs(self, running_only: bool = False) -> list[dict]:
-        sql = "SELECT id, command, cwd, started_at, finished_at, exit_code FROM bg_jobs"
+        # Include `output`: callers listing jobs otherwise could not show the
+        # output of a job that only exists in the store (after a restart), which
+        # made `bg_list` and restart recovery disagree.
+        sql = (
+            "SELECT id, command, cwd, started_at, finished_at, exit_code, output "
+            "FROM bg_jobs"
+        )
         if running_only:
             sql += " WHERE finished_at IS NULL"
         sql += " ORDER BY started_at DESC LIMIT 50"

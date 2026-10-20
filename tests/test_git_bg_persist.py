@@ -156,12 +156,18 @@ def test_bg_output_falls_back_to_store_after_restart(tmp_path: Path) -> None:
     sandbox = WorkdirSandbox(tmp_path, _cfg())
     r = bg.bg_start_tool(sandbox, {"command": "echo survived"})
     job_id = r.payload["job_id"]
-    deadline = time.time() + 5
+    # Wait for the *persisted* row, not just the in-memory buffer: the reader
+    # thread writes to the store asynchronously, and clearing JOBS too early
+    # (which is exactly what this test simulates) raced that write.
+    deadline = time.time() + 10
+    persisted = False
     while time.time() < deadline:
-        out = bg.bg_output_tool({"job_id": job_id})
-        if "survived" in str(out.payload.get("output", "")):
+        row = store.get_bg_job(job_id)
+        if row is not None and "survived" in (row.get("output") or ""):
+            persisted = True
             break
         time.sleep(0.1)
+    assert persisted, "output never reached the store before the restart simulation"
     bg.JOBS.clear()  # simulate a server restart losing in-memory state
     after = bg.bg_output_tool({"job_id": job_id})
     assert after.ok, after.payload

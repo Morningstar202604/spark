@@ -116,12 +116,26 @@ def _start_background(sandbox: WorkdirSandbox, command: str, cwd: str | None) ->
     }
 
     def reader() -> None:
+        # Periodic persistence while the job is still running: the store used to
+        # receive output only once, after the process exited, so a long-running
+        # job showed nothing after a restart and "last persisted output" was
+        # always empty. Flush at most every ~0.5 s to keep write amplification
+        # bounded.
+        last_flush = 0.0
+        dirty = False
         try:
             stdout = proc.stdout
             assert stdout is not None
             for line in stdout:
                 with JOBS_LOCK:
                     job["output"] = clip_text(job["output"] + line, MAX_BUFFER, keep_tail=True)
+                dirty = True
+                now = time.time()
+                if now - last_flush >= 0.5:
+                    if dirty:
+                        _persist_state(job)
+                        dirty = False
+                    last_flush = now
         except Exception:
             # 进程输出流异常时强制标记失败，避免任务卡在 running 状态
             logger.warning("后台作业 %s 输出流读取失败，标记为失败", job.get("id"), exc_info=True)
@@ -129,7 +143,7 @@ def _start_background(sandbox: WorkdirSandbox, command: str, cwd: str | None) ->
         proc.wait()
         job["exit_code"] = proc.returncode
         job["finished_at"] = time.time()
-        _persist_state(job)
+        _persist_state(job)  # final flush: authoritative exit code + full output
 
     threading.Thread(target=reader, daemon=True, name=f"bg-job-{job_id}").start()
     with JOBS_LOCK:
