@@ -9,6 +9,7 @@ on:
 jobs:
   quality:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -35,6 +36,9 @@ jobs:
   test:
     needs: quality
     runs-on: ${{ matrix.os }}
+    # A hung test previously kept Windows runners alive for 40+ minutes with no
+    # signal. Cap the job so a deadlock fails fast and visibly.
+    timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
@@ -57,6 +61,7 @@ jobs:
           python -m pytest -q --cov=spark --cov-report=term-missing --cov-fail-under=65
 
   windows-checkout:
+    timeout-minutes: 10
     # Guards the failure mode found in review: a Windows-reserved filename in the
     # tree makes `git clone` unusable on Windows even though Linux is fine.
     runs-on: windows-latest
