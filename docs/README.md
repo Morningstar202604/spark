@@ -2,6 +2,7 @@
 
 | 文档 | 中文 | English |
 | --- | --- | --- |
+| **功能总览（以实现为准）** | [docs/FEATURES.md](FEATURES.md) | — |
 | 安装与打包（含 Windows EXE） | [docs/INSTALL.md](INSTALL.md) | [docs/en/INSTALL.md](en/INSTALL.md) |
 | 配置参考 config.toml | [docs/CONFIG.md](CONFIG.md) | [docs/en/CONFIG.md](en/CONFIG.md) |
 | 配置参考（含 API 一览） | [docs/CONFIGURATION.md](CONFIGURATION.md) | — |

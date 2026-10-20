@@ -21,9 +21,15 @@ from typing import Any
 
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
+from spark.config import default_home
+
 logger = logging.getLogger(__name__)
 
-__all__ = ["TurnCheckpointer", "MemoryTurnCheckpointer"]
+__all__ = [
+    "TurnCheckpointer",
+    "MemoryTurnCheckpointer",
+    "persistent_checkpointer",
+]
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS pending_turns (
@@ -59,6 +65,12 @@ class TurnCheckpointer:
             return
         # aiosqlite<0.22：langgraph-checkpoint-sqlite 依赖 Thread.is_alive()
         self._conn = await aiosqlite.connect(str(self.db_path))
+        # Match the session store's durability profile (WAL + NORMAL): every turn
+        # writes ~7 checkpoint rows, and the SQLite default (FULL) costs ~19 ms
+        # per turn in fsyncs for zero recovery benefit on a local agent.
+        await self._conn.execute("PRAGMA synchronous=NORMAL")
+        # Keep the WAL from pinning ~4 MB forever in a long-lived web process.
+        await self._conn.execute("PRAGMA wal_autocheckpoint=64")
         self._saver = AsyncSqliteSaver(self._conn)
         await self._saver.setup()
         async with self._conn.executescript(_SCHEMA):
@@ -66,6 +78,10 @@ class TurnCheckpointer:
 
     async def close(self) -> None:
         if self._conn is not None:
+            try:
+                await self._conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            except Exception:  # pragma: no cover - best effort
+                logger.debug("wal checkpoint failed", exc_info=True)
             try:
                 await self._conn.close()
             except Exception:  # pragma: no cover
@@ -153,3 +169,55 @@ class MemoryTurnCheckpointer:
 
     async def list_pending(self) -> list[dict[str, Any]]:
         return sorted(self._pending.values(), key=lambda r: r["created_at"])
+
+
+_CHECKPOINTER: TurnCheckpointer | None = None
+_CHECKPOINTER_PATH: Path | None = None
+
+
+def persistent_checkpointer(db_path: Path | str | None = None) -> TurnCheckpointer | None:
+    """Process-wide durable turn checkpointer, started on the agent runtime loop.
+
+    Surfaces that drive turns through :mod:`spark.core.runtime` (web / TUI /
+    ACP) share one connection: the saver's aiosqlite connection is bound to the
+    runtime loop, so it must be created and started there.  Returns None when
+    the durable store cannot be opened — callers then fall back to the
+    in-memory saver and lose only crash recovery, not the approval flow.
+
+    The target path is re-resolved on every call so a changed ``SPARK_HOME``
+    (tests, or a user switching homes) gets its own database instead of
+    silently reusing the previous one.
+    """
+    global _CHECKPOINTER, _CHECKPOINTER_PATH
+    target = Path(db_path) if db_path is not None else default_home() / "checkpoints.db"
+    if _CHECKPOINTER is not None and _CHECKPOINTER_PATH == target:
+        return _CHECKPOINTER
+    if _CHECKPOINTER is not None and _CHECKPOINTER_PATH != target:
+        reset_persistent_checkpointer()
+    try:
+        from spark.core.runtime import get_runtime
+
+        checkpointer = TurnCheckpointer(target)
+        get_runtime().run(checkpointer.start(), timeout=15)
+        _CHECKPOINTER = checkpointer
+        _CHECKPOINTER_PATH = target
+        return checkpointer
+    except Exception:
+        logger.warning("durable turn checkpointer unavailable", exc_info=True)
+        return None
+
+
+def reset_persistent_checkpointer() -> None:
+    """Drop the cached checkpointer (used by tests and by home switching)."""
+    global _CHECKPOINTER, _CHECKPOINTER_PATH
+    checkpointer = _CHECKPOINTER
+    _CHECKPOINTER = None
+    _CHECKPOINTER_PATH = None
+    if checkpointer is None:
+        return
+    try:
+        from spark.core.runtime import get_runtime
+
+        get_runtime().run(checkpointer.close(), timeout=10)
+    except Exception:  # pragma: no cover - best effort
+        logger.debug("checkpointer close failed", exc_info=True)

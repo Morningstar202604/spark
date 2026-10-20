@@ -478,23 +478,11 @@ class Compactor:
         recent: list[SparkChatMessage],
         budget_chars: int,
     ) -> list[SparkChatMessage]:
-        """Char-budget trimming from the newest message backwards.
+        """Char-budget trimming (implementation lives in core.context).
 
-        预算口径是字符（对应 ``context.history_budget_chars`` 配置项），
-        按角色独立计费：正文长度 + tool_calls 参数长度。从最新消息向旧
-        保留，至少保留一条（保证有上下文可用）。早年的"token-aware"
-        描述与实现不符，已更正——token 层面的上限由 AgentLoop 的
-        compact 阈值与 max_context_tokens 把关。
+        Delegating keeps a single definition: message building must not import
+        this module (it pulls litellm + llama_index at import time).
         """
-        kept: list[SparkChatMessage] = []
-        used = 0
-        for msg in reversed(recent):
-            size = len(msg.content or "") + sum(
-                len(str(c.arguments)) for c in (msg.tool_calls or [])
-            )
-            if used + size > budget_chars and kept:
-                break
-            kept.append(msg)
-            used += size
-        kept.reverse()
-        return kept
+        from spark.core.context import trim_recent as _trim
+
+        return _trim(recent, budget_chars)

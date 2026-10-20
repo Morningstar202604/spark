@@ -19,7 +19,6 @@ from __future__ import annotations
 import json as _json
 import logging
 import queue
-from pathlib import Path
 from typing import Any
 
 from spark.pty import EXIT_MARKER, get_manager
@@ -44,7 +43,20 @@ def handle_pty_open(handler: HandlerBase, body: dict[str, Any]) -> None:
     tab_id = str(body.get("tab_id") or "main").strip()[:64] or "main"
     cwd_raw = body.get("cwd")
     state = _route_state(handler)
-    cwd = Path(str(cwd_raw)) if cwd_raw else state.workdir
+    # The terminal runs a real shell with no approval gate, so its cwd must stay
+    # inside the workdir — otherwise the request body becomes an arbitrary
+    # directory escape that the agent's own sandbox would have refused.
+    if cwd_raw:
+        try:
+            cwd = state.sandbox.resolve(str(cwd_raw))
+        except Exception as exc:
+            handler._json(400, {"error": f"invalid cwd: {exc}"})
+            return
+        if not cwd.is_dir():
+            handler._json(400, {"error": f"cwd not found: {cwd_raw}"})
+            return
+    else:
+        cwd = state.workdir
     try:
         rows = int(body.get("rows") or 24)
         cols = int(body.get("cols") or 80)

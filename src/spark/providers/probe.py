@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 # **原始线上协议**（SSE 帧格式、finish_reason / [DONE]、非流式结构）。
 # LiteLLM 的宽容解析会掩盖不兼容端点，使 ``spark test`` / 设置页"测试连接"
 # 失去诊断价值。其余一次性辅助调用（摘要/标题/记忆）已收敛到
-# :mod:`spark.providers.aux`，本模块是唯一保留的直连实现。
+# :mod:`spark.providers.auxiliary`，本模块是唯一保留的直连实现。
 
 PROBE_PROMPT = (
     "Reply with exactly the token SPARK_OK followed by one short sentence "
@@ -58,7 +58,7 @@ def _extract_message_content(payload: dict) -> str:
         return ""
     message = choices[0].get("message") or {}
     content = message.get("content")
-    if isinstance(content, str):
+    if isinstance(content, str) and content.strip():
         return content
     if isinstance(content, list):
         parts = []
@@ -67,9 +67,25 @@ def _extract_message_content(payload: dict) -> str:
                 parts.append(str(item.get("text") or item.get("content") or ""))
             elif isinstance(item, str):
                 parts.append(item)
-        return "".join(parts)
+        joined = "".join(parts)
+        if joined.strip():
+            return joined
+    # Reasoning models (DeepSeek-R1 family, Step, many domestic endpoints) put
+    # the answer in `reasoning_content` and leave `content` null. Reading only
+    # `content` made a perfectly healthy endpoint look broken.
+    for key in ("reasoning_content", "reasoning", "thinking"):
+        value = message.get(key)
+        if isinstance(value, str) and value.strip():
+            return value
     delta = choices[0].get("delta") or {}
-    return str(delta.get("content") or "")
+    delta_content = delta.get("content")
+    if isinstance(delta_content, str) and delta_content.strip():
+        return delta_content
+    for key in ("reasoning_content", "reasoning"):
+        value = delta.get(key)
+        if isinstance(value, str) and value.strip():
+            return value
+    return ""
 
 
 def _chat_url(base_url: str) -> str:
@@ -126,6 +142,13 @@ async def _stream_once(client: httpx.AsyncClient, url: str, api_key: str, model:
             content = delta.get("content")
             if isinstance(content, str) and content:
                 parts.append(content)
+            else:
+                # Reasoning-only streams (same family as the non-stream path).
+                for key in ("reasoning_content", "reasoning"):
+                    value = delta.get(key)
+                    if isinstance(value, str) and value:
+                        parts.append(value)
+                        break
             if choice.get("finish_reason"):
                 finished = True
     text = "".join(parts).strip()

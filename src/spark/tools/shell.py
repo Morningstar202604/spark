@@ -3,7 +3,6 @@ from __future__ import annotations
 import logging
 import os
 import shutil
-import signal
 import subprocess
 import threading
 from concurrent.futures import ThreadPoolExecutor
@@ -14,7 +13,7 @@ from pydantic import BaseModel
 
 from spark.errors import PathEscapeError
 from spark.models import ToolResult
-from spark.platform_compat import CREATE_NEW_PROCESS_GROUP
+from spark.platform_compat import kill_process_tree, popen_kwargs
 from spark.sandbox import SandboxPolicyError, WorkdirSandbox
 from spark.tools._common import clip_text
 
@@ -88,15 +87,17 @@ def run_shell(
             ok=False,
             payload={"error": "run_shell is disabled: sandbox-only access mode"},
         )
-    reason = sandbox.check_shell(args.command)
-    if reason:
-        return ToolResult(ok=False, payload={"error": reason, "command": args.command})
     try:
         cwd = sandbox.resolve(args.cwd or ".")
     except (PathEscapeError, SandboxPolicyError) as exc:
         return ToolResult(ok=False, payload={"error": str(exc)})
     if not cwd.exists() or not cwd.is_dir():
         return ToolResult(ok=False, payload={"error": f"cwd not found: {args.cwd}"})
+    # Check after resolving cwd so relative paths are judged from where the
+    # process will actually run (`../.git/hooks/x` from a subdirectory).
+    reason = sandbox.check_shell(args.command, cwd=cwd)
+    if reason:
+        return ToolResult(ok=False, payload={"error": reason, "command": args.command})
     output_limit = max(0, int(max_output_chars))
     byte_limit = min(max(0, int(MAX_SHELL_OUTPUT_BYTES)), output_limit * 4)
     process_kwargs: dict = {
@@ -105,10 +106,7 @@ def run_shell(
         "stdout": subprocess.PIPE,
         "stderr": subprocess.PIPE,
     }
-    if os.name == "nt":
-        process_kwargs["creationflags"] = CREATE_NEW_PROCESS_GROUP
-    else:
-        process_kwargs["start_new_session"] = True
+    process_kwargs.update(popen_kwargs(new_group=True))
 
     # OS 级沙箱：workspace 模式且 bwrap 可用时走命名空间隔离；
     # 不可用/更高权限档位时维持原路径（check_shell 仍在前面把关）。
@@ -224,32 +222,8 @@ def _close_process_streams(process: subprocess.Popen) -> None:
 
 
 def _kill_process_tree(process: subprocess.Popen) -> None:
-    if os.name == "nt":
-        try:
-            subprocess.run(
-                ["taskkill", "/F", "/T", "/PID", str(process.pid)],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                timeout=5,
-                check=False,
-            )
-        except (OSError, subprocess.TimeoutExpired):
-            pass
-    else:
-        try:
-            process_group = os.getpgid(process.pid)  # type: ignore[attr-defined,arg-type]
-        except OSError:
-            process_group = None
-        if process_group is not None:
-            try:
-                os.killpg(process_group, signal.SIGKILL)  # type: ignore[attr-defined,arg-type]
-            except OSError:
-                pass
-    if process.poll() is None:
-        try:
-            process.kill()
-        except OSError:
-            pass
+    # Platform split (taskkill /T vs killpg) lives in platform_compat.
+    kill_process_tree(process.pid, process)
 
 
 def detect_env(workdir) -> dict:

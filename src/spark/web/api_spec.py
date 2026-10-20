@@ -5,15 +5,22 @@
 本模块只做"合同"，不接管运行时（现有 ThreadingHTTPServer 保持不变）；
 FastAPI 全量迁移（P1.5）时同一份模型直接变成实现。
 
+FastAPI 是**可选依赖**（``pip install 'spark-agent[openapi]'``）：只为生成
+schema 而把完整 ASGI 框架塞进必装依赖不划算。未安装时
+:func:`openapi_schema` 抛 :class:`OpenApiUnavailable`，路由层降级为 503。
+
 对齐对象：``web/routes.py`` 中 status / config / models / memory / sessions /
-checkpoints 六个只读端点的真实返回结构。
+checkpoints / history 七个只读端点的真实返回结构。
 """
 from __future__ import annotations
 
 from typing import Any
 
-from fastapi import FastAPI
 from pydantic import BaseModel, Field
+
+
+class OpenApiUnavailable(RuntimeError):
+    """FastAPI is not installed, so the OpenAPI contract cannot be generated."""
 
 
 class StatusInfo(BaseModel):
@@ -77,86 +84,81 @@ class ErrorResponse(BaseModel):
     error: str
 
 
-app = FastAPI(
-    title="Spark Web API",
-    version="0.9",
-    description=(
-        "Spark 本地 Web 服务合同层。运行时由本地 token 鉴权；"
-        "此 schema 供前端 codegen（orval/openapi-typescript）与未来 FastAPI 迁移复用。"
-    ),
-)
-
-
-@app.get(
-    "/api/status",
-    response_model=StatusInfo,
-    tags=["runtime"],
-    summary="运行态快照（会话/循环/用量）",
-)
-def get_status() -> Any:  # pragma: no cover - 合同层，仅生成 schema
+# Schema-only stubs: FastAPI only needs the signatures to emit the contract.
+def _get_status() -> Any:  # pragma: no cover
     ...
 
 
-@app.get(
-    "/api/config",
-    response_model=dict[str, Any],
-    tags=["runtime"],
-    summary="完整配置（已脱敏）",
-)
-def get_config() -> Any:  # pragma: no cover
+def _get_config() -> Any:  # pragma: no cover
     ...
 
 
-@app.get(
-    "/api/models",
-    response_model=ModelsResponse,
-    tags=["models"],
-    summary="模型档案列表（密钥脱敏）",
-)
-def get_models() -> Any:  # pragma: no cover
+def _get_models() -> Any:  # pragma: no cover
     ...
 
 
-@app.get(
-    "/api/memory",
-    response_model=MemoryResponse,
-    tags=["memory"],
-    summary="记忆条目 + 可选搜索",
-)
-def get_memory(q: str = "") -> Any:  # pragma: no cover
+def _get_memory(q: str = "") -> Any:  # pragma: no cover
     ...
 
 
-@app.get(
-    "/api/sessions",
-    response_model=SessionsResponse,
-    tags=["sessions"],
-    summary="当前 workdir 的会话列表（≤50）",
-)
-def get_sessions() -> Any:  # pragma: no cover
+def _get_sessions() -> Any:  # pragma: no cover
     ...
 
 
-@app.get(
-    "/api/checkpoints",
-    response_model=CheckpointsResponse,
-    tags=["checkpoints"],
-    summary="当前会话检查点",
-)
-def get_checkpoints() -> Any:  # pragma: no cover
+def _get_checkpoints() -> Any:  # pragma: no cover
     ...
 
 
-@app.get(
-    "/api/history",
-    response_model=list[dict[str, Any]],
-    tags=["sessions"],
-    summary="当前会话消息历史",
-)
-def get_history() -> Any:  # pragma: no cover
+def _get_history() -> Any:  # pragma: no cover
     ...
+
+
+_ROUTES: tuple[tuple[str, Any, str, str, Any], ...] = (
+    ("/api/status", StatusInfo, "runtime", "运行态快照（会话/循环/用量）", _get_status),
+    ("/api/config", dict[str, Any], "runtime", "完整配置（已脱敏）", _get_config),
+    ("/api/models", ModelsResponse, "models", "模型档案列表（密钥脱敏）", _get_models),
+    ("/api/memory", MemoryResponse, "memory", "记忆条目 + 可选搜索", _get_memory),
+    ("/api/sessions", SessionsResponse, "sessions", "当前 workdir 的会话列表（≤50）", _get_sessions),
+    ("/api/checkpoints", CheckpointsResponse, "checkpoints", "当前会话检查点", _get_checkpoints),
+    ("/api/history", list[dict[str, Any]], "sessions", "当前会话消息历史", _get_history),
+)
+
+_APP: Any = None
+
+
+def _build_app() -> Any:
+    """Construct the declarative FastAPI app (requires the optional extra)."""
+    global _APP
+    if _APP is not None:
+        return _APP
+    try:
+        from fastapi import FastAPI
+    except ImportError as exc:  # pragma: no cover - exercised via the 503 path
+        raise OpenApiUnavailable(
+            "OpenAPI contract requires fastapi: pip install 'spark-agent[openapi]'"
+        ) from exc
+
+    app = FastAPI(
+        title="Spark Web API",
+        version="0.9",
+        description=(
+            "Spark 本地 Web 服务合同层。运行时由本地 token 鉴权；"
+            "此 schema 供前端 codegen（orval/openapi-typescript）与未来 FastAPI 迁移复用。"
+        ),
+    )
+    for path, model, tag, summary, handler in _ROUTES:
+        app.add_api_route(
+            path,
+            handler,
+            methods=["GET"],
+            response_model=model,
+            tags=[tag],
+            summary=summary,
+        )
+    _APP = app
+    return app
 
 
 def openapi_schema() -> dict[str, Any]:
     """生成 OpenAPI 3.1 JSON（由现有 Web 服务器在 /api/openapi.json 提供）。"""
-    return app.openapi()
+    return _build_app().openapi()

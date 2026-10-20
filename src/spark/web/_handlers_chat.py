@@ -6,7 +6,6 @@
 
 from __future__ import annotations
 
-import asyncio as _asyncio
 import base64 as _b64mod
 import json as _json
 import logging
@@ -35,7 +34,11 @@ def _handle_chat(handler: HandlerBase, body: dict) -> None:
         return
     try:
         with state.turn_lock:
-            events = _asyncio.run(state.loop.run(prompt))
+            # Drive the turn on the shared runtime loop: the durable turn
+            # checkpointer's SQLite connection is bound to that loop, so a
+            # per-request asyncio.run() would fail with "Future attached to a
+            # different loop" as soon as crash recovery is enabled.
+            events = list(state.loop.iter_turn_sync(prompt))
     except Exception as exc:
         handler._json(500, {"error": str(exc)})
         return

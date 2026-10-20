@@ -13,7 +13,9 @@ export const Composer = memo(function Composer() {
   const streaming = useChatStore((s) => s.streaming)
   const setInput = useChatStore((s) => s.setInput)
   const send = useChatStore((s) => s.send)
-  const cancel = useChatStore((s) => s.cancel)
+  // Route through the session store so the local abort and POST /api/cancel
+  // happen together (chatStore.cancel only aborts the fetch).
+  const cancel = useSessionStore((s) => s.handleCancel)
   const status = useSessionStore((s) => s.status)
   const openSettings = useUiStore((s) => s.openSettings)
   const lang = useUiStore((s) => s.lang)

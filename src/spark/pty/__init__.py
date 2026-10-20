@@ -37,8 +37,13 @@ except ImportError:  # pragma: no cover
 
 
 def _default_shell() -> str:
-    shell = os.environ.get("SHELL", "/bin/bash")
-    return shell if os.path.exists(shell) else "/bin/bash"
+    """Interactive shell: $SHELL when it exists, else the first known-good one."""
+    candidates = [os.environ.get("SHELL", "")]
+    candidates += ["/bin/bash", "/usr/bin/bash", "/bin/zsh", "/bin/sh"]
+    for shell in candidates:
+        if shell and os.path.exists(shell):
+            return shell
+    return "/bin/sh"
 
 
 class PtySession:
@@ -54,8 +59,9 @@ class PtySession:
     ) -> None:
         if _PtyProcess is None:
             raise ImportError(
-                "ptyprocess 未安装；内置终端仅支持 Linux/macOS。"
-                "请安装 extras：pip install 'spark-agent[pty]'"
+                "内置终端需要 ptyprocess（仅 Linux/macOS 支持）："
+                "pip install 'spark-agent[pty]'。"
+                "Windows 没有 POSIX 伪终端，请在系统终端里直接运行命令。"
             )
         self.sid = sid
         self.tab_id = tab_id

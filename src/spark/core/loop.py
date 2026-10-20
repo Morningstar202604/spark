@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import hashlib
 import json
 import logging
@@ -14,7 +13,6 @@ from stat import S_ISREG
 from typing import TYPE_CHECKING, Any, cast
 
 from spark.config import ApprovalMode, SparkConfig
-from spark.core.compact import Compactor
 from spark.core.context import (
     build_messages,
     invalidate_system_prompt_cache,
@@ -101,6 +99,12 @@ class AgentLoop:
         self._tool_overhead_tokens = 0
         self._call_window: deque[str] = deque(maxlen=self._breaker_window())
         self._call_counts: dict[str, int] = {}
+        # (tool_call.id, name, arguments) → verdict, so an interrupted approve
+        # node cannot re-run hooks on resume. The id alone is not a safe key:
+        # openai_compat falls back to "call_0" when a provider omits ids, so two
+        # different tools in one round would share a verdict — and a stale
+        # "allow" from a read-only tool would silently authorise a write.
+        self._classification_cache: dict[str, dict[str, Any]] = {}
         self._turn_tokens = 0
         # P2 上下文合同：turn 级 usage 聚合 + 自动检查点 id（replay flush 用）
         self._turn_usage_totals: dict[str, int | str] | None = None
@@ -129,7 +133,9 @@ class AgentLoop:
         self.hooks = HookRegistry.from_config(
             [hook.model_dump() for hook in getattr(cfg, "hooks", [])], workdir
         )
-        self._compactor = Compactor(provider=provider, cfg=cfg)
+        # Lazy: spark.core.compact pulls litellm + llama_index (~1.7 s of import
+        # time) and is only needed when a turn actually has to compact.
+        self._compactor: Any = None
         # --- lifecycle hooks (best-effort) ---
         self._notify_safe("app_start", {"workdir": str(workdir)})
         if len(self.history) == 0:
@@ -289,18 +295,34 @@ class AgentLoop:
         return events
 
     def iter_turn_sync(self, user_text: str, images=None):
+        """Drive a turn from a non-async thread.
+
+        Runs on the process-wide :class:`~spark.core.runtime.AgentRuntime` loop
+        rather than a fresh loop per turn: the turn checkpointer's SQLite
+        connection is bound to its constructing loop, and creating a new loop
+        per turn made a persistent checkpointer impossible ("Future attached to
+        a different loop"), which is why crash recovery silently degraded to
+        in-memory state.
+        """
+        from spark.core.runtime import get_runtime
+
         self.cancelled = False
-        agen = self.iter_turn(user_text, images=images)
-        loop = asyncio.new_event_loop()
-        try:
-            while True:
-                try:
-                    yield loop.run_until_complete(agen.__anext__())
-                except StopAsyncIteration:
-                    break
-        finally:
-            loop.run_until_complete(agen.aclose())
-            loop.close()
+        yield from get_runtime().iterate(self.iter_turn(user_text, images=images))
+
+    async def iter_turn_managed(self, user_text: str, images=None):
+        """Drive a turn from a surface that owns its own asyncio loop (TUI/ACP).
+
+        The turn body still runs on the shared runtime loop (where the
+        checkpointer's SQLite connection lives); this coroutine only forwards
+        events, so the caller's loop is never blocked by agent work.
+        """
+        from spark.core.runtime import get_runtime
+
+        self.cancelled = False
+        async for event in get_runtime().iterate_async(
+            self.iter_turn(user_text, images=images)
+        ):
+            yield event
 
     @staticmethod
     def _calculate_history_tokens(history: list[ChatMessage]) -> int:
@@ -415,6 +437,14 @@ class AgentLoop:
             self._tool_schema_revision = revision
         return self._tool_overhead_tokens
 
+    def _get_compactor(self):
+        """Construct the compactor on first use (see __init__)."""
+        if self._compactor is None:
+            from spark.core.compact import Compactor
+
+            self._compactor = Compactor(provider=self.provider, cfg=self.cfg)
+        return self._compactor
+
     def _compact_boundary(self) -> int:
         """Index of the first message to keep, or -1 when no safe cut exists.
 
@@ -452,7 +482,8 @@ class AgentLoop:
         old_part = self.history[:boundary]
         if all(m.role == "summary" for m in old_part):
             return None
-        summary_text = await self._compactor.summarize(old_part)
+        compactor = self._get_compactor()
+        summary_text = await compactor.summarize(old_part)
         if not summary_text:
             return None
         summary_msg = ChatMessage(
@@ -613,6 +644,7 @@ class AgentLoop:
         self._last_checkpoint_id = None
         self._call_window = deque(maxlen=self._breaker_window())
         self._call_counts.clear()
+        self._classification_cache.clear()
         # 控制流移交 LangGraph 状态机（graph.py = 唯一真相源）：
         # llm →(有工具) approve →(interrupt 审批) execute → llm → … → finalize / END。
         if self._turn_graph is None:
@@ -890,16 +922,29 @@ class AgentLoop:
         ``interrupt``（_decide_calls），直调路径走 approver 回调
         （_run_tool_body）——两者随后的执行分派完全一致。
         """
+        key = self._classification_key(call)
+        cached = self._classification_cache.get(key)
+        if cached is not None:
+            # The approve node re-runs from the top when an interrupt resumes
+            # (LangGraph semantics), so a classification already decided for
+            # this exact call must not repeat its side effects — pre_tool hooks
+            # fire once per call, not once per resume. A cached "prompt" still
+            # reaches interrupt() below, which returns the resume value again.
+            return dict(cached)
         if self.hooks.enabled:
             hook_verdict = self.hooks.notify(
                 "pre_tool", {"tool": call.name, "arguments": call.arguments}
             )
             if not hook_verdict.allow:
-                return {"action": "hook_block", "reason": hook_verdict.reason}
+                verdict = {"action": "hook_block", "reason": hook_verdict.reason}
+                self._classification_cache[key] = verdict
+                return verdict
         if self._approval_mode() == "plan-only":
             readonly = READONLY_TOOLS | self.registry.readonly_mcp
             if call.name not in readonly:
-                return {"action": "plan_only", "reason": ""}
+                verdict = {"action": "plan_only", "reason": ""}
+                self._classification_cache[key] = verdict
+                return verdict
         decision = decide(
             self._approval_mode(),
             call,
@@ -910,8 +955,30 @@ class AgentLoop:
             scopes=getattr(self.cfg, "permission_scopes", None) or None,
         )
         if decision == "deny":
-            return {"action": "deny", "reason": "denied by permission rule"}
-        return {"action": decision, "reason": ""}
+            verdict = {"action": "deny", "reason": "denied by permission rule"}
+        else:
+            verdict = {"action": decision, "reason": ""}
+        self._classification_cache[key] = verdict
+        return dict(verdict)
+
+    def _classification_key(self, call: ToolCall) -> str:
+        """Cache key for an approve-node verdict.
+
+        ``call.id`` alone is unsafe: ``openai_compat`` emits ``"call_0"`` for
+        every call when a provider omits ids, so a read-only verdict could be
+        handed to a later write in the same round and skip its approval prompt.
+        The key therefore covers id + name + arguments, which is exactly the
+        identity LangGraph replays on resume.
+        """
+        return hashlib.sha1(
+            json.dumps(
+                {"id": call.id, "name": call.name, "arguments": call.arguments},
+                sort_keys=True,
+                ensure_ascii=False,
+                default=str,
+            ).encode("utf-8"),
+            usedforsecurity=False,
+        ).hexdigest()
 
     def _approval_mode(self) -> ApprovalMode:
         """生效审批模式：H4 档案覆盖 > 配置基线（零配置突变）。"""

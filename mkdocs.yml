@@ -25,6 +25,7 @@ theme:
 
 nav:
   - 首页: index.md
+  - 功能总览: FEATURES.md
   - 开始:
       - 安装: INSTALL.md
       - 配置: CONFIG.md
