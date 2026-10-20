@@ -304,11 +304,22 @@ export const useChatStore = create<ChatState>((set, get) => ({
           items: s.items.filter((m) => !(m.id === assistantId && !m.text && !m.segments.length)),
         }))
         get().addErrorItem(msg)
-        useUiStore.getState().pushToast("toast.sendFailed", "error")
+        // api.ts already surfaced a toast for transport failures; only the
+        // higher-level "send failed" toast is added here for other errors.
       }
     } finally {
-      set({ streaming: false, abortController: null })
-      useSessionStore.getState().setApproval(null)
+      // Any termination path ends the stream: an aborted or failed turn used to
+      // leave the bubble blinking "generating" forever because only turn_end /
+      // done cleared the flag.
+      patchLast((it) => (it.streaming ? { ...it, streaming: false } : it))
+      // Guard against a superseded turn: if the user already started a new one,
+      // this late-completing stream must not clear the new turn's controller or
+      // streaming flag (that made Stop disappear and allowed a third concurrent
+      // send).
+      if (get().abortController === ac) {
+        set({ streaming: false, abortController: null })
+        useSessionStore.getState().setApproval(null)
+      }
       await useSessionStore.getState().refreshSessions()
     }
   },

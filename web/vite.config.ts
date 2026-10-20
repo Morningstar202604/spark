@@ -22,11 +22,17 @@ export default defineConfig({
     },
   },
   server: {
-    host: '0.0.0.0',
+    // Loopback only. The backend grants token-free control to requests arriving
+    // from 127.0.0.1, and the proxy makes every dev request look local — binding
+    // 0.0.0.0 would hand the whole agent to anyone on the LAN.
+    // Phone/laptop testing on the same network: `spark web --host 0.0.0.0`
+    // and open the backend port directly (it enforces X-Spark-Token).
+    host: '127.0.0.1',
     port: 5173,
+    strictPort: false,
     proxy: {
       '/api': {
-        target: 'http://127.0.0.1:8000',
+        target: process.env.SPARK_DEV_BACKEND || 'http://127.0.0.1:8000',
         changeOrigin: true,
       },
     },

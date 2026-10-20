@@ -36,10 +36,21 @@ export async function fetchWithTimeout(
 }
 
 async function readJson<T>(res: Response): Promise<T> {
-  const data = await res.json()
+  // Error bodies are not always JSON (a proxy 502, a 413 from the stdlib
+  // server). Parsing unconditionally turned those into "Unexpected token" and
+  // hid the real status.
+  const text = await res.text()
+  let data: unknown = null
+  if (text) {
+    try {
+      data = JSON.parse(text)
+    } catch {
+      data = null
+    }
+  }
   if (!res.ok) {
-    const msg = (data as { error?: string }).error || `HTTP ${res.status}`
-    throw new Error(msg)
+    const fromBody = (data as { error?: string } | null)?.error
+    throw new Error(fromBody || `HTTP ${res.status} ${text.slice(0, 120)}`.trim())
   }
   return data as T
 }
@@ -249,13 +260,29 @@ export async function testConnection(payload: {
   model: string
   api_key: string
 }): Promise<ProbeResult> {
-  const res = await fetchWithTimeout("/api/test", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  })
-  const data = await res.json()
-  return data as ProbeResult
+  const res = await fetchWithTimeout(
+    "/api/test",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    },
+    // A probe performs a real streaming round-trip; the 30s default could cut a
+    // slow endpoint off before it answers.
+    120000,
+  )
+  if (!res.ok) {
+    const text = await res.text()
+    let detail = text
+    try {
+      detail = (JSON.parse(text) as { error?: string }).error || text
+    } catch {
+      /* non-JSON error body */
+    }
+    // Surface the failure as a ProbeResult so the UI shows it in place.
+    return { ok: false, error: detail || `HTTP ${res.status}`, model: payload.model, base_url: payload.base_url, content: "", stream_content: "", rounds: 0, latency_ms: 0, details: [] }
+  }
+  return (await res.json()) as ProbeResult
 }
 
 /* ------------------------------------------------------------------ */
@@ -572,6 +599,18 @@ export async function streamChat(
         throw new Error(msg)
       }
       const reader = res.body.getReader()
+      // fetchWithTimeout() detaches the caller's abort listener once the
+      // response headers arrive, so from here on nothing observes `signal`.
+      // Without this hook, Stop only flipped a local flag while the server kept
+      // running the turn (and its tools) until it finished on its own.
+      const onAbort = () => {
+        try {
+          void reader.cancel()
+        } catch {
+          /* stream already closed */
+        }
+      }
+      signal?.addEventListener("abort", onAbort, { once: true })
       try {
         const decoder = new TextDecoder()
         let buffer = ""
@@ -597,6 +636,7 @@ export async function streamChat(
           }
         }
       } finally {
+        signal?.removeEventListener("abort", onAbort)
         try { reader.cancel() } catch { /* ignore */ }
       }
     } catch (e) {

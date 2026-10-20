@@ -1,4 +1,4 @@
-import { memo, useMemo, useState } from "react"
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import type { SessionRow } from "../types"
 import { IconHistory, IconMonitor, IconMoon, IconPlus, IconSearch, IconSettings, IconSun, IconTrash, IconX } from "./icons"
 import { cls, IconButton } from "./ui"
@@ -37,6 +37,124 @@ function groupKey(ts: number): TranslationKey {
 
 const GROUP_ORDER: TranslationKey[] = ["sidebar.today", "sidebar.yesterday", "sidebar.last7", "sidebar.earlier"]
 
+const SIDEBAR_MIN = 220
+const SIDEBAR_MAX = 420
+const SIDEBAR_KEY = "spark.sidebarWidth"
+
+/**
+ * Drag-to-resize for the desktop sidebar.
+ *
+ * The width lives in a CSS variable on the <aside> so dragging never
+ * re-renders the session list; only pointer moves touch the DOM. Persisted to
+ * localStorage so the layout survives reloads, double-click resets it, and
+ * arrow keys move it for keyboard users.
+ */
+function useSidebarWidth() {
+  const [value, setValue] = useState(() => {
+    try {
+      const stored = Number(localStorage.getItem(SIDEBAR_KEY))
+      return Number.isFinite(stored) && stored >= SIDEBAR_MIN && stored <= SIDEBAR_MAX ? stored : 270
+    } catch {
+      return 270 // storage blocked (private mode / policy): fall back to default
+    }
+  })
+  const drag = useRef<{ startX: number; startW: number; el: HTMLElement | null; pointerId: number } | null>(null)
+  const pending = useRef(0)
+  const frame = useRef(0)
+
+  // During a drag only the CSS variable is written (no React state), so a
+  // pointermove never re-renders the memoised session list. State is synced
+  // once when the gesture ends.
+  const writeWidth = useCallback((next: number, el: HTMLElement | null) => {
+    const clamped = Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, Math.round(next)))
+    el?.style.setProperty("--sidebar-w", `${clamped}px`)
+    pending.current = clamped
+    return clamped
+  }, [])
+
+  const commit = useCallback(() => {
+    const clamped = pending.current
+    setValue(clamped)
+    try {
+      localStorage.setItem(SIDEBAR_KEY, String(clamped))
+    } catch {
+      /* storage blocked: the width still applies for this session */
+    }
+  }, [])
+
+  const onPointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    const container = e.currentTarget.parentElement as HTMLElement | null
+    drag.current = {
+      startX: e.clientX,
+      startW: container?.offsetWidth ?? 270,
+      el: container,
+      pointerId: e.pointerId,
+    }
+    pending.current = container?.offsetWidth ?? 270
+    e.currentTarget.setPointerCapture(e.pointerId)
+  }, [])
+
+  useEffect(() => {
+    const move = (e: PointerEvent) => {
+      const d = drag.current
+      if (!d) return
+      // A release outside the window can skip pointerup; a move with no buttons
+      // means the gesture is over, so stop instead of rubber-banding.
+      if (e.buttons === 0 || e.pointerId !== d.pointerId) {
+        drag.current = null
+        commit()
+        return
+      }
+      if (frame.current) return
+      frame.current = requestAnimationFrame(() => {
+        frame.current = 0
+        const cur = drag.current
+        if (cur) writeWidth(cur.startW + (e.clientX - cur.startX), cur.el)
+      })
+    }
+    const up = () => {
+      if (!drag.current) return
+      drag.current = null
+      if (frame.current) {
+        cancelAnimationFrame(frame.current)
+        frame.current = 0
+      }
+      commit()
+    }
+    window.addEventListener("pointermove", move)
+    window.addEventListener("pointerup", up)
+    window.addEventListener("pointercancel", up)
+    return () => {
+      window.removeEventListener("pointermove", move)
+      window.removeEventListener("pointerup", up)
+      window.removeEventListener("pointercancel", up)
+      if (frame.current) cancelAnimationFrame(frame.current)
+    }
+  }, [writeWidth, commit])
+
+  const apply = useCallback(
+    (next: number) => {
+      const el = document.getElementById("session-sidebar")
+      writeWidth(next, el)
+      commit()
+    },
+    [writeWidth, commit],
+  )
+
+  const reset = useCallback(() => apply(270), [apply])
+
+  const onKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLDivElement>) => {
+      if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return
+      e.preventDefault()
+      apply(value + (e.key === "ArrowRight" ? 16 : -16))
+    },
+    [apply, value],
+  )
+
+  return { value, onPointerDown, onKeyDown, reset }
+}
+
 export const Sidebar = memo(function Sidebar() {
   const sessions = useSessionStore((s) => s.sessions)
   const status = useSessionStore((s) => s.status)
@@ -70,6 +188,7 @@ export const Sidebar = memo(function Sidebar() {
 
   const currentId = status?.session_id
   const themeLabel = t(theme === "light" ? "display.light" : theme === "dark" ? "display.dark" : "display.system", lang)
+  const width = useSidebarWidth()
 
   return (
     <>
@@ -80,11 +199,34 @@ export const Sidebar = memo(function Sidebar() {
         id="session-sidebar"
         aria-hidden={!sidebarOpen}
         inert={!sidebarOpen}
+        style={{ "--sidebar-w": `${width.value}px` } as React.CSSProperties}
         className={cls(
+          // The width utility lives in the open branch only: emitting the same
+          // lg:w-[var(--sidebar-w)] at base level kept it winning over
+          // lg:w-0 in the closed branch (same media block, later source order),
+          // so collapsing left a 270px dead strip on desktop.
           "fixed inset-y-0 left-0 z-40 flex w-[270px] shrink-0 flex-col border-r border-line bg-sidebar transition-transform duration-200 lg:static lg:translate-x-0 lg:z-auto",
-          sidebarOpen ? "translate-x-0" : "-translate-x-full lg:w-0 lg:border-r-0 lg:overflow-hidden",
+          sidebarOpen
+            ? "translate-x-0 lg:w-[var(--sidebar-w)]"
+            : "-translate-x-full lg:w-0 lg:border-r-0 lg:overflow-hidden",
         )}
       >
+        {/* 桌面端拖拽调宽：手机/平板隐藏 */}
+        {sidebarOpen && (
+          <div
+            role="separator"
+            aria-orientation="vertical"
+            aria-label={t("sidebar.resize", lang)}
+            aria-valuenow={width.value}
+            aria-valuemin={SIDEBAR_MIN}
+            aria-valuemax={SIDEBAR_MAX}
+            tabIndex={0}
+            onPointerDown={width.onPointerDown}
+            onDoubleClick={width.reset}
+            onKeyDown={width.onKeyDown}
+            className="absolute inset-y-0 -right-1 z-10 hidden w-2 cursor-col-resize touch-none lg:block hover:bg-accent/25 active:bg-accent/40"
+          />
+        )}
         {/* 头部 */}
         <div className="flex items-center gap-2 px-3 pt-3 pb-2">
           <BrandMark size={28} />

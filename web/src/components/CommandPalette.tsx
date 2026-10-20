@@ -55,18 +55,16 @@ export const CommandPalette = memo(function CommandPalette() {
     }
   }, [open])
 
-  // 全局快捷键
+  // 面板内的快捷键（Ctrl+K 的全局开关在 App.tsx：本组件仅在打开时挂载，
+  // 把"打开自己"的快捷键放在这里会导致它永远无法被触发）
   useEffect(() => {
+    if (!open) return
     const onKey = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
-        e.preventDefault()
-        setOpen(!useUiStore.getState().paletteOpen)
-      }
       if (e.key === "Escape") setOpen(false)
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
-  }, [setOpen])
+  }, [open, setOpen])
 
   const commands = useMemo<Cmd[]>(() => {
     const themeOrder: Theme[] = ["light", "dark", "system"]

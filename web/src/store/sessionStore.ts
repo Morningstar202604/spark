@@ -115,6 +115,11 @@ export const useSessionStore = create<SessionState>((set, get) => {
     },
 
     handleCancel: async () => {
+      // Abort the local SSE request first so the UI stops immediately, then ask
+      // the server to stop the turn. The header button used to post
+      // /api/cancel only, leaving the stream open until the server closed it —
+      // two "stop" affordances with different behaviour.
+      useChatStore.getState().cancel()
       try {
         await cancelTurn()
       } catch {

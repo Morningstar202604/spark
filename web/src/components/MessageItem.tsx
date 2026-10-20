@@ -1,6 +1,8 @@
-import { memo, useCallback, useState } from "react"
+import { lazy, memo, Suspense, useCallback, useState } from "react"
 import type { ChatMsg, Segment } from "../store/chatStore"
-import Markdown from "./Markdown"
+// Markdown + highlight.js are only needed once an assistant message with text
+// exists, so they are not part of the first paint (saves ~112 KB gzip).
+const Markdown = lazy(() => import("./Markdown"))
 import ToolBlock from "./ToolBlock"
 import { ThinkingBlock } from "./ThinkingBlock"
 import { PlanCard } from "./PlanCard"
@@ -62,7 +64,9 @@ function SegmentRenderer({ seg, streaming }: { seg: Segment; streaming?: boolean
       if (!seg.text) return null
       return (
         <div className={cls("md-body-wrap", streaming && "caret")}>
-          <Markdown text={seg.text} />
+          <Suspense fallback={<span className="whitespace-pre-wrap">{seg.text}</span>}>
+            <Markdown text={seg.text} />
+          </Suspense>
         </div>
       )
   }

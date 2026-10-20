@@ -1,16 +1,9 @@
-import { lazy, Suspense, useCallback, useEffect } from "react"
+import { lazy, Suspense, useCallback, useEffect, useState } from "react"
 import { Sidebar } from "./components/Sidebar"
 import { Header } from "./components/Header"
 import { ChatView } from "./components/ChatView"
 import { Composer } from "./components/Composer"
 import { ApprovalModal } from "./components/ApprovalModal"
-import { CommandPalette } from "./components/CommandPalette"
-import { CheckpointModal } from "./components/CheckpointModal"
-import { FileViewer } from "./components/FileViewer"
-import { BrowserModal } from "./components/BrowserModal"
-import { Terminal } from "./components/Terminal"
-import { ExecutionGraph } from "./components/ExecutionGraph"
-import { ReplayModal } from "./components/ReplayModal"
 import Toast from "./components/Toast"
 import { fetchStatus } from "./api"
 import type { Status } from "./types"
@@ -18,30 +11,54 @@ import { useChatStore } from "./store/chatStore"
 import { useSessionStore } from "./store/sessionStore"
 import { useUiStore } from "./store/uiStore"
 
+// Heavy, rarely-first-action surfaces are split out of the initial bundle:
+// xterm, xyflow and the diff/checkpoint/replay UIs would otherwise all load
+// before the first message is even typed.
 const SettingsModal = lazy(() => import("./components/SettingsModal"))
+const CommandPalette = lazy(() => import("./components/CommandPalette").then((m) => ({ default: m.CommandPalette })))
+const CheckpointModal = lazy(() => import("./components/CheckpointModal").then((m) => ({ default: m.CheckpointModal })))
+const FileViewer = lazy(() => import("./components/FileViewer").then((m) => ({ default: m.FileViewer })))
+const BrowserModal = lazy(() => import("./components/BrowserModal").then((m) => ({ default: m.BrowserModal })))
+const Terminal = lazy(() => import("./components/Terminal").then((m) => ({ default: m.Terminal })))
+const ReplayModal = lazy(() => import("./components/ReplayModal").then((m) => ({ default: m.ReplayModal })))
+const ExecutionGraph = lazy(() => import("./components/ExecutionGraph").then((m) => ({ default: m.ExecutionGraph })))
 
 export default function App() {
-  const { setStatus, setPlan, refreshSessions } = useSessionStore()
-  const { loadInitialHistory } = useChatStore()
-  const { settingsOpen, closeSettings, toasts, dismissToast } = useUiStore()
+  // Selector subscriptions only: subscribing to whole stores re-rendered this
+  // root on every streamed token (rAF-batched), which defeated the memoised
+  // virtual list underneath.
+  const setStatus = useSessionStore((s) => s.setStatus)
+  const refreshSessions = useSessionStore((s) => s.refreshSessions)
+  const loadInitialHistory = useChatStore((s) => s.loadInitialHistory)
+  const closeSettings = useUiStore((s) => s.closeSettings)
+  const toasts = useUiStore((s) => s.toasts)
+  const dismissToast = useUiStore((s) => s.dismissToast)
 
   useEffect(() => {
     fetchStatus()
       .then((s) => {
         setStatus(s)
-        setPlan(s.plan || [])
+        useSessionStore.getState().setPlan(s.plan || [])
       })
       .catch(() => useUiStore.getState().pushToast("toast.backendError", "error"))
     refreshSessions()
     loadInitialHistory()
-  }, [setStatus, setPlan, refreshSessions, loadInitialHistory])
+  }, [setStatus, refreshSessions, loadInitialHistory])
 
-  // Ctrl+N 新建会话 / Ctrl+\ 切换侧边栏
+  // Ctrl+N 新建会话 / Ctrl+\ 切换侧边栏 / Esc 停止生成
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "n") {
         e.preventDefault()
         if (!useChatStore.getState().streaming) void useSessionStore.getState().handleNewSession()
+      }
+      // Ctrl+K must live here, not in CommandPalette: that component is only
+      // mounted while the palette is open, so a shortcut defined inside it can
+      // never open it.
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault()
+        const ui = useUiStore.getState()
+        ui.setPaletteOpen(!ui.paletteOpen)
       }
       if ((e.metaKey || e.ctrlKey) && e.key === "\\") {
         e.preventDefault()
@@ -54,18 +71,50 @@ export default function App() {
         if (s.terminalOpen) s.closeTerminal()
         else s.openTerminal()
       }
+      // Esc 停止生成。跳过输入框（用户在用 Esc 取消输入）与任何弹层
+      // （它们自己处理 Esc），也跳过待审批状态（Esc 应留给审批动作）。
+      if (e.key === "Escape" && !e.defaultPrevented) {
+        const target = e.target as HTMLElement | null
+        const tag = target?.tagName?.toLowerCase()
+        if (tag === "input" || tag === "textarea" || target?.isContentEditable) return
+        const ui = useUiStore.getState()
+        const overlayOpen =
+          ui.paletteOpen || ui.settingsOpen || ui.checkpointsOpen || ui.filesOpen ||
+          ui.browserOpen || ui.graphOpen || ui.replayOpen || ui.terminalOpen
+        if (overlayOpen) return
+        if (useSessionStore.getState().approval) return
+        if (useChatStore.getState().streaming) {
+          e.preventDefault()
+          void useSessionStore.getState().handleCancel()
+        }
+      }
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
   }, [])
 
-  const handleSaved = useCallback(
-    (s: Status) => {
-      setStatus(s)
-      setPlan(s.plan || [])
-    },
-    [setStatus, setPlan],
-  )
+  const handleSaved = useCallback((s: Status) => {
+    setStatus(s)
+    useSessionStore.getState().setPlan(s.plan || [])
+  }, [setStatus])
+
+  const settingsOpen = useUiStore((s) => s.settingsOpen)
+  const paletteOpen = useUiStore((s) => s.paletteOpen)
+  const checkpointsOpen = useUiStore((s) => s.checkpointsOpen)
+  const filesOpen = useUiStore((s) => s.filesOpen)
+  const browserOpen = useUiStore((s) => s.browserOpen)
+  const terminalOpen = useUiStore((s) => s.terminalOpen)
+  const graphOpen = useUiStore((s) => s.graphOpen)
+  const replayOpen = useUiStore((s) => s.replayOpen)
+  const seen = useSeenSurfaces({
+    palette: paletteOpen,
+    checkpoints: checkpointsOpen,
+    files: filesOpen,
+    browser: browserOpen,
+    terminal: terminalOpen,
+    graph: graphOpen,
+    replay: replayOpen,
+  })
 
   return (
     <div className="flex h-full overflow-hidden bg-canvas text-ink">
@@ -77,18 +126,54 @@ export default function App() {
         <Composer />
       </div>
       <ApprovalModal />
-      <CommandPalette />
-      <CheckpointModal />
-      <FileViewer />
-      <BrowserModal />
-        <Terminal />
-        <ExecutionGraph />
-        <ReplayModal />
+      {/* Chunks are fetched on first open (keeps the initial bundle at ~140 KB),
+          but each surface then stays mounted: unmounting on close threw away
+          the browse URL, the file viewer's current directory and the replay
+          drill-down, which felt like the app forgot what you were doing.
+          Every component already returns null while its own flag is false. */}
+      <Suspense fallback={<SurfaceLoading />}>
+        {seen.palette && <CommandPalette />}
+        {seen.checkpoints && <CheckpointModal />}
+        {seen.files && <FileViewer />}
+        {seen.browser && <BrowserModal />}
+        {seen.terminal && <Terminal />}
+        {seen.graph && <ExecutionGraph />}
+        {seen.replay && <ReplayModal />}
+      </Suspense>
       {settingsOpen && (
         <Suspense fallback={null}>
           <SettingsModal onClose={closeSettings} onSaved={handleSaved} />
         </Suspense>
       )}
+    </div>
+  )
+}
+
+/** Latch each surface on its first open so local UI state survives a close. */
+function useSeenSurfaces(open: Record<string, boolean>): Record<string, boolean> {
+  const [seen, setSeen] = useState<Record<string, boolean>>({})
+  useEffect(() => {
+    const next = Object.keys(open).filter((k) => open[k] && !seen[k])
+    // Only re-render when a new surface was opened for the first time.
+    if (next.length > 0) {
+      setSeen((prev) => {
+        const merged = { ...prev }
+        for (const key of next) merged[key] = true
+        return merged
+      })
+    }
+  }, [open, seen])
+  return seen
+}
+
+/** Minimal placeholder while a lazily-loaded surface chunk arrives. */
+function SurfaceLoading() {
+  return (
+    <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/20 backdrop-blur-[1px]" role="status" aria-live="polite">
+      <div className="flex items-center gap-2 rounded-lg border border-line bg-panel px-3 py-2 text-xs text-ink2">
+        <span className="h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent" />
+        <span>Loading…</span>
+      </div>
     </div>
   )
 }

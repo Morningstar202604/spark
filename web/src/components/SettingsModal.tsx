@@ -4,12 +4,28 @@ import { fetchConfig, fetchAgentsMd, saveAgentsMd, saveSettings, testConnection,
 import MemorySection from "./MemorySection"
 import { McpRegistryModal } from "./McpRegistryModal"
 import type { McpRegistryItem } from "../api"
-import { applyTheme, getStoredTheme, type Theme } from "../theme"
+import type { Theme } from "../theme"
 import { Badge, Button, Field, IconButton, Select, Spinner, TextArea, TextInput, Toggle, cls } from "./ui"
 import { IconBrain, IconCheck, IconGlobe, IconKey, IconLayers, IconMoon, IconPlus, IconSettings, IconSun, IconTerminal, IconTrash, IconX } from "./icons"
 import { useSessionStore } from "../store/sessionStore"
 import { useUiStore } from "../store/uiStore"
 import { t, type TranslationKey } from "../i18n"
+
+// Mirrors spark.hooks.HookRegistry.EVENTS (backend validates against it).
+/** Split a hook argument line, honouring "double" and 'single' quotes. */
+function splitArgs(raw: string): string[] {
+  const out: string[] = []
+  const re = /"([^"]*)"|'([^']*)'|(\S+)/g
+  let m: RegExpExecArray | null
+  while ((m = re.exec(raw)) !== null) out.push(m[1] ?? m[2] ?? m[3])
+  return out
+}
+
+const HOOK_EVENTS = [
+  "turn_start", "pre_tool", "post_tool", "turn_end",
+  "app_start", "session_create", "session_load",
+  "compaction", "memory_extract", "approval_needed", "tool_error",
+]
 
 type Tab = "model" | "agent" | "security" | "display" | "memory" | "mcp" | "project"
 
@@ -54,7 +70,13 @@ export default function SettingsDrawer({ onClose, onSaved }: Props) {
   const [profileForm, setProfileForm] = useState({ id: "", name: "", provider: "openai_compat", base_url: "", model: "", api_key: "" })
   const [protectedText, setProtectedText] = useState("")
   const [hookRows, setHookRows] = useState<HookEntry[]>([])
-  const [theme, setTheme] = useState<Theme>(() => getStoredTheme())
+  // Raw argument text per row, so quotes survive typing; rows are re-split on
+  // every change but the input keeps what the user actually typed.
+  const [argsText, setArgsText] = useState<Record<number, string>>({})
+  // Single source of truth is the UI store: a local copy left the command
+  // palette computing "next theme" from a stale value.
+  const theme = useUiStore((s) => s.theme)
+  const setTheme = useUiStore((s) => s.setTheme)
   const [showRegistry, setShowRegistry] = useState(false)
   const dirtyRef = useRef({ cfg: false, mcp: false, md: false })
 
@@ -145,6 +167,15 @@ export default function SettingsDrawer({ onClose, onSaved }: Props) {
           show_notices: cfg.agent.show_notices,
           effort: cfg.agent.effort,
           system_prompt: cfg.agent.system_prompt ?? "",
+        },
+        // Project tab edits land here; without this field every context change
+        // was silently discarded on save.
+        context: {
+          compact_threshold: cfg.context.compact_threshold,
+          max_context_tokens: cfg.context.max_context_tokens,
+          keep_recent_messages: cfg.context.keep_recent_messages,
+          history_budget_chars: cfg.context.history_budget_chars,
+          repo_map_enabled: cfg.context.repo_map_enabled,
         },
         mcp_servers: mcpRows,
         hooks: hookRows,
@@ -308,6 +339,25 @@ export default function SettingsDrawer({ onClose, onSaved }: Props) {
               <IconButton title={t("common.close", lang)} onClick={onClose} className="ml-auto">
                 <IconX size={15} />
               </IconButton>
+            </div>
+
+            {/* 移动端：横向可滚动 tab。左导航在 <sm 时隐藏，没有这一条就只剩首个 tab 可达 */}
+            <div className="flex gap-1 overflow-x-auto border-b border-line px-2 py-1.5 sm:hidden">
+              {TABS.map((tb) => (
+                <button
+                  key={tb.key}
+                  type="button"
+                  onClick={() => setTab(tb.key)}
+                  aria-current={tab === tb.key ? "page" : undefined}
+                  className={cls(
+                    "flex shrink-0 items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[12px] font-medium transition-colors",
+                    tab === tb.key ? "bg-selected text-ink" : "text-ink2 hover:bg-hover",
+                  )}
+                >
+                  <span className={tab === tb.key ? "text-accent" : "text-ink3"}>{tb.icon}</span>
+                  {t(tb.labelKey, lang)}
+                </button>
+              ))}
             </div>
 
         {/* 内容 */}
@@ -514,17 +564,47 @@ export default function SettingsDrawer({ onClose, onSaved }: Props) {
               <section className="flex flex-col gap-3 rounded-xl border border-line bg-panel p-4">
                 <h3 className="text-sm font-semibold text-ink">{t("security.hooks", lang)}</h3>
                 <p className="text-xs leading-relaxed text-ink3">{t("security.hooksDesc", lang)}</p>
-                <div className="flex flex-col gap-2">
+                <div className="flex flex-col gap-3">
+                  {hookRows.length === 0 && (
+                    <p className="text-xs text-ink3">{t("security.noHooks", lang)}</p>
+                  )}
                   {hookRows.map((h, i) => (
-                    <div key={i} className="flex items-center gap-2 rounded-lg border border-line bg-panel2 px-3 py-2">
-                      <span className="shrink-0 rounded-md bg-hover px-1.5 py-0.5 font-mono text-[10px] text-ink2">{h.event}</span>
-                      <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-ink2">{h.command} {h.args.join(" ")}</span>
-                      <IconButton title={t("security.deleteHook", lang)} onClick={() => setHookRows((rows) => rows.filter((_, idx) => idx !== i))} className="h-6 w-6 text-ink3 hover:text-err">
-                        <IconTrash size={11} />
-                      </IconButton>
+                    <div key={i} className="flex flex-col gap-2 rounded-lg border border-line bg-panel2 px-3 py-2.5">
+                      <div className="flex items-center gap-2">
+                        <Select
+                          value={h.event}
+                          onChange={(e) => { dirtyRef.current.cfg = true; setHookRows((rows) => rows.map((r, idx) => idx === i ? { ...r, event: e.target.value } : r)) }}
+                          aria-label={t("security.hookEvent", lang)}
+                        >
+                          {HOOK_EVENTS.map((ev) => <option key={ev} value={ev}>{ev}</option>)}
+                        </Select>
+                        <IconButton title={t("security.deleteHook", lang)} onClick={() => { dirtyRef.current.cfg = true; setHookRows((rows) => rows.filter((_, idx) => idx !== i)) }} className="h-7 w-7 shrink-0 text-ink3 hover:text-err">
+                          <IconTrash size={12} />
+                        </IconButton>
+                      </div>
+                      <TextInput
+                        value={h.command}
+                        onChange={(e) => { dirtyRef.current.cfg = true; setHookRows((rows) => rows.map((r, idx) => idx === i ? { ...r, command: e.target.value } : r)) }}
+                        placeholder={t("security.hookCommandPh", lang)}
+                        className="font-mono"
+                      />
+                      <TextInput
+                        value={argsText[i] ?? h.args.join(" ")}
+                        onChange={(e) => {
+                          const raw = e.target.value
+                          // Keep the raw text while typing so grouped quotes stay
+                          // intact; split only on save (splitting per keystroke
+                          // made "hello world" impossible to enter).
+                          dirtyRef.current.cfg = true
+                          setArgsText((m) => ({ ...m, [i]: raw }))
+                          setHookRows((rows) => rows.map((r, idx) => idx === i ? { ...r, args: splitArgs(raw) } : r))
+                        }}
+                        placeholder={t("security.hookArgsPh", lang)}
+                        className="font-mono"
+                      />
                     </div>
                   ))}
-                  <Button size="sm" variant="soft" onClick={() => setHookRows((rows) => [...rows, { event: "pre_tool", command: "", args: [], name: "", timeout_sec: 10 }])}>
+                  <Button size="sm" variant="soft" onClick={() => { dirtyRef.current.cfg = true; setHookRows((rows) => [...rows, { event: "pre_tool", command: "", args: [], name: "", timeout_sec: 10 }]) }}>
                     <IconPlus size={12} /> {t("security.addHook", lang)}
                   </Button>
                 </div>
@@ -541,7 +621,7 @@ export default function SettingsDrawer({ onClose, onSaved }: Props) {
                     <button
                       key={th}
                       type="button"
-                      onClick={() => { setTheme(th); applyTheme(th) }}
+                      onClick={() => setTheme(th)}
                       className={cls("flex flex-col items-center gap-1.5 rounded-lg border px-2 py-3 transition-colors", theme === th ? "border-accent bg-accent-soft/40" : "border-line bg-panel2 hover:bg-hover")}
                     >
                       {th === "light" ? <IconSun size={16} /> : th === "dark" ? <IconMoon size={16} /> : <IconLayers size={16} />}
@@ -680,13 +760,51 @@ export default function SettingsDrawer({ onClose, onSaved }: Props) {
                 <h3 className="text-sm font-semibold text-ink">{t("project.contextMgmt", lang)}</h3>
                 <p className="text-xs leading-relaxed text-ink3">{t("project.contextDesc", lang)}</p>
                 <Field label={t("project.compactThreshold", lang)}>
-                  <TextInput type="number" value={cfg.context.compact_threshold ?? 85} onChange={(e) => { dirtyRef.current.cfg = true; setCfg((c) => (c ? { ...c, context: { ...c.context, compact_threshold: Number(e.target.value) || 85 } } : c)) }} />
+                  {/* Stored as a fraction (0.1–0.99) but shown as a percentage:
+                      typing 85 must mean 85%, and clearing the box must keep the
+                      old value instead of injecting one the backend rejects. */}
+                  <TextInput
+                    type="number"
+                    min={10}
+                    max={99}
+                    step={1}
+                    value={Math.round((cfg.context.compact_threshold ?? 0.85) * 100)}
+                    onChange={(e) => {
+                      const raw = e.target.value
+                      if (raw === "") return
+                      const pct = Math.min(99, Math.max(10, Number(raw)))
+                      dirtyRef.current.cfg = true
+                      setCfg((c) => (c ? { ...c, context: { ...c.context, compact_threshold: pct / 100 } } : c))
+                    }}
+                  />
                 </Field>
                 <Field label={t("project.contextBudget", lang)}>
-                  <TextInput type="number" value={cfg.context.max_context_tokens ?? 0} onChange={(e) => { dirtyRef.current.cfg = true; setCfg((c) => (c ? { ...c, context: { ...c.context, max_context_tokens: Number(e.target.value) || 0 } } : c)) }} />
+                  <TextInput
+                    type="number"
+                    min={1024}
+                    value={cfg.context.max_context_tokens ?? 32768}
+                    onChange={(e) => {
+                      const raw = e.target.value
+                      if (raw === "") return
+                      dirtyRef.current.cfg = true
+                      setCfg((c) => (c ? { ...c, context: { ...c.context, max_context_tokens: Math.max(1024, Number(raw)) } } : c))
+                    }}
+                  />
                 </Field>
                 <Field label={t("project.keepRecent", lang)}>
-                  <TextInput type="number" value={cfg.context.keep_recent_messages ?? 20} onChange={(e) => { dirtyRef.current.cfg = true; setCfg((c) => (c ? { ...c, context: { ...c.context, keep_recent_messages: Number(e.target.value) || 0 } } : c)) }} />
+                  <TextInput
+                    type="number"
+                    min={2}
+                    max={200}
+                    value={cfg.context.keep_recent_messages ?? 8}
+                    onChange={(e) => {
+                      const raw = e.target.value
+                      if (raw === "") return
+                      const keep = Math.min(200, Math.max(2, Number(raw)))
+                      dirtyRef.current.cfg = true
+                      setCfg((c) => (c ? { ...c, context: { ...c.context, keep_recent_messages: keep } } : c))
+                    }}
+                  />
                 </Field>
               </section>
 
@@ -698,8 +816,8 @@ export default function SettingsDrawer({ onClose, onSaved }: Props) {
           )}
         </div>
 
-        {/* 底部保存 */}
-        {tab !== "memory" && tab !== "project" && (
+        {/* 底部保存：memory 页有自己的即时操作，其余页（含 project）都可保存 */}
+        {tab !== "memory" && (
           <div className="border-t border-line bg-panel2 px-4 py-3">
             <Button variant="primary" full onClick={handleSave} disabled={busy === "save"}>
               {busy === "save" ? (

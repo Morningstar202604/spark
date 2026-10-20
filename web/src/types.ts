@@ -76,6 +76,8 @@ export interface FullConfig {
     max_context_tokens?: number
     compact_threshold?: number
     keep_recent_messages?: number
+    repo_map_enabled?: boolean
+    repo_map_max_chars?: number
   }
   mcp_servers: McpServer[]
   mcp_errors: string[]
@@ -116,6 +118,13 @@ export interface SettingsPayload {
     effort?: "low" | "medium" | "high"
     system_prompt?: string
   }
+  context?: {
+    compact_threshold?: number
+    max_context_tokens?: number
+    keep_recent_messages?: number
+    history_budget_chars?: number
+    repo_map_enabled?: boolean
+  }
   mcp_servers: McpServer[]
   hooks?: HookEntry[]
 }
@@ -148,11 +157,13 @@ export interface ContextUsage {
 export interface ProbeResult {
   ok: boolean
   error?: string
+  base_url?: string
   model?: string
   latency_ms?: number
   rounds?: number
   content?: string
   stream_content?: string
+  details?: string[]
 }
 
 export interface SessionRow {
@@ -176,6 +187,10 @@ export interface ApprovalInfo {
   summary: string
   diff?: string | null
   id?: string
+  /** Tool name that requested approval (present on approval_needed). */
+  tool?: string
+  /** Exact arguments the tool will run with. */
+  arguments?: Record<string, unknown>
 }
 
 export interface ModelProfile {
