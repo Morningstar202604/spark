@@ -499,3 +499,17 @@ def test_run_tests_still_rejects_repo_without_tests(tmp_path: Path) -> None:
     assert gitops.detect_test_command(tmp_path) is None
     result = gitops.run_tests(_sb(tmp_path), gitops.RunTestsArgs(path="."))
     assert result.ok is False
+
+
+def test_http_server_threads_do_not_block_shutdown() -> None:
+    """A stalled SSE client must never keep the process alive.
+
+    Without ``daemon_threads`` + ``block_on_close=False``, ``server_close()``
+    joins every worker thread, so one hung connection wedges shutdown — which is
+    exactly how a CI job can sit for 40 minutes with no output.
+    """
+    from spark.web.server import SparkHTTPServer
+
+    assert SparkHTTPServer.daemon_threads is True
+    assert SparkHTTPServer.block_on_close is False
+    assert SparkHTTPServer.allow_reuse_address is True

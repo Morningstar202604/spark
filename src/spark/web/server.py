@@ -54,10 +54,37 @@ class SparkHTTPServer(ThreadingHTTPServer):
     The HTTP handler (built by ``build_handler_class``) retrieves the
     state via ``self.server.state`` and the UI directory via
     ``self.server.ui_dir``.
+
+    Two hardening defaults matter in CI and on flaky networks:
+
+    * ``daemon_threads`` — a handler blocked on a stalled SSE client must not
+      keep the process alive; without this, ``server_close()`` waits for every
+      worker thread and can hang indefinitely.
+    * ``allow_reuse_address`` + a short ``request_queue_size`` — repeated test
+      runs rebind the same port; TIME_WAIT otherwise fails the second bind on
+      Windows runners.
     """
 
     state: Any = None  # SparkWebState, set by _build_server_and_state
     ui_dir: Path | None = None
+    daemon_threads = True
+    allow_reuse_address = True
+    block_on_close = False
+    request_queue_size = 32
+
+    def handle_error(self, request, client_address) -> None:  # pragma: no cover
+        """Log handler exceptions instead of dumping them to stderr.
+
+        A traceback per dropped SSE connection spammed CI logs and made real
+        failures hard to spot; the connection error itself is expected.
+        """
+        import sys
+
+        exc = sys.exc_info()[1]
+        if isinstance(exc, (ConnectionError, BrokenPipeError, TimeoutError)):
+            logger.debug("client disconnected: %s", client_address)
+            return
+        logger.warning("request handler error for %s", client_address, exc_info=True)
 
 
 def _build_server_and_state(
