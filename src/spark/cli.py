@@ -46,7 +46,10 @@ from spark.tools.mcp_bridge import McpBridge
 from spark.tools.registry import ToolContext, ToolRegistry
 
 app = typer.Typer(
-    add_completion=False,
+    # Typer's completion machinery is built in; keeping it off only removed the
+    # `--install-completion` flag. Shell completion is a real usability win for
+    # a CLI with 14 subcommands.
+    add_completion=True,
     invoke_without_command=True,
     no_args_is_help=False,
     help="◆ Spark [Ember] — 本地编程智能体。新手从 spark init → spark doctor → spark web 开始。",

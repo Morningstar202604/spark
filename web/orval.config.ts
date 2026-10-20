@@ -1,16 +1,23 @@
-// P1：前端 API 客户端 codegen 配置（数据源 = 本地服务 /api/openapi.json）
-// 用法：先起 web 服务，再 npm run gen:api
+// P1：前端 API 合同 codegen（数据源 = 仓库内提交的 web/openapi.json）
+//
+// 只生成 **TypeScript 类型**，不生成 HTTP 客户端：项目现有调用层是 fetch +
+// zustand（web/src/api.ts），引入 axios/react-query 会平白多两个运行时依赖。
+// 类型层解决真正的问题——后端改字段时前端在 tsc 阶段就能发现。
+//
+// 重新生成：python scripts/export_openapi.py && cd web && npm run gen:api
 import { defineConfig } from "orval";
 
 export default defineConfig({
   spark: {
-    input: "http://127.0.0.1:8000/api/openapi.json",
+    input: "./openapi.json",
     output: {
-      target: "./src/api/generated.ts",
-      client: "react-query",
-      mode: "tags-split",
+      target: "./src/api/schema.ts",
+      client: "fetch",
+      mode: "single",
+      clean: true,
       override: {
-        query: { useQuery: true, useMutation: true },
+        // Types only: no hooks, no client wrapper.
+        useTypeOverInterfaces: true,
       },
     },
   },

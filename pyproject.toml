@@ -117,6 +117,9 @@ ignore = []
 # routes.py 保持 import-light：pty 写路径在 _POST_HANDLERS 定义后就近懒加载，
 # 不为 import 排序把 pty 依赖提到模块顶部。
 "src/spark/web/routes.py" = ["E402", "I001"]
+# Standalone scripts must sys.path-insert the source tree before importing
+# spark, so their imports legitimately follow executable code.
+"scripts/*.py" = ["E402", "I001"]
 
 [tool.mypy]
 python_version = "3.11"

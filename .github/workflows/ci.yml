@@ -18,13 +18,19 @@ jobs:
         run: |
           pip install -e ".[dev]"
       - name: Lint (ruff)
-        run: ruff check src/spark tests
+        run: ruff check src/spark tests scripts
       - name: Type check (mypy)
         run: mypy src/spark --ignore-missing-imports
       - name: Import layering (import-linter)
         run: lint-imports
       - name: Security scan (bandit)
         run: bandit -r src/spark -ll -ii -c bandit.yaml
+      - name: OpenAPI snapshot is current
+        # The frontend types in web/src/api/schema.ts are generated from this
+        # snapshot; a stale file means the UI silently drifts from the API.
+        run: |
+          pip install -e ".[openapi]"
+          python scripts/export_openapi.py --check
 
   test:
     needs: quality
@@ -45,7 +51,7 @@ jobs:
         run: |
           pip install -e ".[dev]"
       - name: Lint (ruff)
-        run: ruff check src/spark tests
+        run: ruff check src/spark tests scripts
       - name: Test (pytest + coverage)
         run: |
           python -m pytest -q --cov=spark --cov-report=term-missing --cov-fail-under=65
