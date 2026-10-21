@@ -71,6 +71,14 @@ export const IconCopy = (p: P) =>
     </>
   ))
 export const IconCheck = (p: P) => base(p, <path d="M20 6 9 17l-5-5" />)
+export const IconDownload = (p: P) =>
+  base(p, (
+    <>
+      <path d="M12 3v12" />
+      <path d="m7 11 5 5 5-5" />
+      <path d="M4 21h16" />
+    </>
+  ))
 export const IconChevronRight = (p: P) => base(p, <path d="m9 18 6-6-6-6" />)
 export const IconChevronDown = (p: P) => base(p, <path d="m6 9 6 6 6-6" />)
 export const IconX = (p: P) => base(p, <path d="M18 6 6 18M6 6l12 12" />)

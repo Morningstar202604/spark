@@ -81,11 +81,29 @@ export function buildGraph(nodes: ExecutionNode[], edges: ExecutionEdge[], lang:
 } {
   // Simple layered layout: one row per kind, each row centred on the widest one
   // so a single-tool turn does not draw three boxes glued to the left edge.
-  const rows: Record<string, number> = { root: 0, agent: 1, tool: 2, result: 3 }
+  // Depth-aware rows: a tool owned by a sub-agent sits one row below that
+  // sub-agent, so read_file/glob are visibly nested instead of looking like
+  // siblings of the `task` call.
+  const childOf = new Map<string, string>()
+  for (const e of edges) childOf.set(e.to, e.from)
+  const rowOf = (id: string, seen = 0): number => {
+    if (seen > 8) return 2
+    const parent = childOf.get(id)
+    if (!parent) return 1
+    return rowOf(parent, seen + 1) + 1
+  }
   const perRow: Record<number, ExecutionNode[]> = {}
+  let maxRow = 0
   for (const n of nodes) {
-    const row = rows[n.kind] ?? 1
+    if (n.kind === "result") continue
+    const row = n.kind === "root" ? 0 : rowOf(n.id)
+    maxRow = Math.max(maxRow, row)
     ;(perRow[row] ||= []).push(n)
+  }
+  // "Result" sits directly below the deepest node instead of at a fixed row,
+  // otherwise a flat turn leaves a large empty band above it.
+  for (const n of nodes.filter((x) => x.kind === "result")) {
+    ;(perRow[maxRow + 1] ||= []).push(n)
   }
   const COL_W = 240
   const widest = Math.max(1, ...Object.values(perRow).map((r) => r.length))

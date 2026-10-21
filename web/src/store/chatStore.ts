@@ -175,6 +175,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
     // 之前执行图渲染的是写死的样例数据（"静态样例（待接 loop 事件流）"）。
     const graphNodes: GraphNode[] = [{ id: "root", label: "Spark", kind: "root", status: "running" }]
     const graphEdges: GraphEdge[] = []
+    // The `task` tool is the parent of its sub-agents; remembering it lets the
+    // graph draw root -> task -> subtask -> each subtask's own tools.
+    let taskToolId: string | null = null
     set({ turnGraph: { nodes: [...graphNodes], edges: [] } })
     const pushGraph = () => set({ turnGraph: { nodes: [...graphNodes], edges: [...graphEdges] } })
 
@@ -244,15 +247,40 @@ export const useChatStore = create<ChatState>((set, get) => ({
           buf.think += ev.text
           schedule()
           break
+        case "subtask_start": {
+          flush()
+          const idx = ev.data?.index ?? 0
+          graphNodes.push({
+            id: `agent-${idx}`,
+            label: `subtask ${idx + 1}`,
+            kind: "agent",
+            status: "running",
+          })
+          graphEdges.push({ from: taskToolId ?? "root", to: `agent-${idx}` })
+          pushGraph()
+          break
+        }
+        case "subtask_end": {
+          flush()
+          const idx = ev.data?.index ?? 0
+          const node = graphNodes.find((n) => n.id === `agent-${idx}`)
+          if (node) {
+            node.status = "done"
+            pushGraph()
+          }
+          break
+        }
         case "tool_start": {
           flush()
+          const parent = typeof ev.data?.subtask_index === "number" ? `agent-${ev.data.subtask_index}` : "root"
           graphNodes.push({
             id: `tool-${ev.tool.id}`,
             label: ev.tool.name,
             kind: "tool",
             status: "running",
           })
-          graphEdges.push({ from: "root", to: `tool-${ev.tool.id}` })
+          graphEdges.push({ from: parent, to: `tool-${ev.tool.id}` })
+          if (ev.tool.name === "task") taskToolId = `tool-${ev.tool.id}`
           pushGraph()
           patchLast((it) => ({
             ...it,

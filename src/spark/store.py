@@ -349,6 +349,16 @@ class SessionStore:
             )
             self._conn.commit()
 
+    def list_tool_events(self, session_id: str, limit: int = 500) -> list[dict]:
+        """Tool invocations for a session, oldest first (export/audit use)."""
+        with self._lock:
+            rows = self._conn.execute(
+                """SELECT id, message_id, name, arguments_json, result_json, approval, created_at
+                   FROM tool_events WHERE session_id = ? ORDER BY id LIMIT ?""",
+                (session_id, max(1, int(limit))),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
     def set_compact_from(self, session_id: str, message_id: int) -> None:
         with self._lock:
             self._conn.execute(

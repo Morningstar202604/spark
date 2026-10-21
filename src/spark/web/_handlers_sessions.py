@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import cast
 
@@ -187,6 +188,91 @@ def _history_messages(state) -> list[dict]:
                 entry["id"] = row_id
             messages.append(entry)
     return messages
+
+
+def _session_markdown(state) -> str:
+    """Render the current session as a portable Markdown transcript.
+
+    Same shape opencode/codex use for ``/export``: a heading with the session
+    metadata, then one section per turn with the user prompt, the assistant
+    answer, and a compact list of the tools that ran (name + first line of the
+    result, so the file stays readable).
+    """
+    from datetime import datetime
+
+    session = state.store.get_session(state.session_id) or {}
+    title = session.get("title") or "untitled"
+    lines = [
+        f"# {title}",
+        "",
+        f"- 会话：`{state.session_id}`",
+        f"- 工作目录：`{state.workdir}`",
+        f"- 模型：`{session.get('model') or state.cfg.provider.model}`",
+        f"- 导出时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+        "",
+        "---",
+        "",
+    ]
+    tool_queue: list[dict] = []
+    try:
+        for row in state.store.list_tool_events(state.session_id):
+            tool_queue.append(row)
+    except Exception:  # pragma: no cover - export must not fail on a side query
+        logger.debug("list_tool_events failed", exc_info=True)
+
+    for msg in state.loop.history if state.loop else []:
+        if msg.role == "user" and msg.content:
+            lines += ["## 用户", "", msg.content, ""]
+        elif msg.role == "assistant" and msg.content:
+            lines += ["## Spark", "", msg.content, ""]
+        elif msg.role == "tool":
+            name = msg.name or "tool"
+            # Stored tool content is the full JSON payload; show arguments plus a
+            # clipped result instead of dumping escaped JSON at the reader.
+            snippet = _tool_snippet(msg.content or "")
+            lines += [f"**工具** `{name}`", "", f"```\n{snippet}\n```", ""]
+    lines += ["---", "", f"导出工具事件 {len(tool_queue)} 条。", ""]
+    return "\n".join(lines)
+
+
+def _tool_snippet(raw: str, limit: int = 400) -> str:
+    """Compact, readable rendering of one stored tool payload."""
+    try:
+        payload = json.loads(raw)
+    except (TypeError, ValueError):
+        return raw.strip()[:limit]
+    if not isinstance(payload, dict):
+        return raw.strip()[:limit]
+    args = payload.get("arguments")
+    result = payload.get("result")
+    parts: list[str] = []
+    if isinstance(args, dict) and args:
+        parts.append("args: " + json.dumps(args, ensure_ascii=False)[:200])
+    if result is not None:
+        text = result if isinstance(result, str) else json.dumps(result, ensure_ascii=False)
+        parts.append("result: " + text[:limit])
+    return "\n".join(parts) if parts else raw.strip()[:limit]
+
+
+def _handle_session_export(handler: HandlerBase, body: dict) -> None:
+    state = _route_state(handler)
+    fmt = str(body.get("format") or "markdown").strip().lower()
+    if fmt not in {"markdown", "md", "json"}:
+        handler._json(400, {"error": "format must be markdown or json"})
+        return
+    if fmt == "json":
+        payload = {
+            "session_id": state.session_id,
+            "title": (state.store.get_session(state.session_id) or {}).get("title"),
+            "workdir": str(state.workdir),
+            "messages": _history_messages(state),
+        }
+        handler._json(200, {"ok": True, "format": "json", "content": json.dumps(payload, ensure_ascii=False, indent=2)})
+        return
+    handler._json(
+        200,
+        {"ok": True, "format": "markdown", "content": _session_markdown(state)},
+    )
 
 
 def _handle_checkpoints_rollback(handler: HandlerBase, body: dict) -> None:

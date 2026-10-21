@@ -1,11 +1,13 @@
 import { memo, useEffect, useMemo, useRef, useState } from "react"
+import { exportSession } from "../api"
 import { useUiStore } from "../store/uiStore"
 import { useSessionStore } from "../store/sessionStore"
-import { t } from "../i18n"
+import { t, type Lang } from "../i18n"
 import { cls, Kbd } from "./ui"
 import {
   IconCheck,
   IconCommand,
+  IconDownload,
   IconFile,
   IconGlobe,
   IconHistory,
@@ -17,6 +19,28 @@ import {
   IconSun,
 } from "./icons"
 import type { Theme } from "../theme"
+
+/** 会话导出：走 /api/sessions/export，用浏览器下载 Markdown 文件。 */
+async function downloadTranscript(lang: Lang) {
+  const ui = useUiStore.getState()
+  try {
+    const data = await exportSession("markdown")
+    const stamp = new Date().toISOString().slice(0, 16).replace(/[:T]/g, "-")
+    const blob = new Blob([data.content], { type: "text/markdown;charset=utf-8" })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement("a")
+    a.href = url
+    a.download = `spark-${stamp}.md`
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    URL.revokeObjectURL(url)
+    ui.pushToast("toast.exported", "success")
+  } catch {
+    ui.pushToast("toast.exportFailed", "error")
+  }
+  void lang
+}
 
 interface Cmd {
   id: string
@@ -113,6 +137,17 @@ export const CommandPalette = memo(function CommandPalette() {
         run: () => {
           useUiStore.getState().openReplay()
           setOpen(false)
+        },
+      },
+      {
+        id: "export",
+        group: t("palette.groupGeneral", lang),
+        title: t("palette.exportChat", lang),
+        hint: "md",
+        icon: <IconDownload size={15} />,
+        run: () => {
+          setOpen(false)
+          void downloadTranscript(lang)
         },
       },
       {

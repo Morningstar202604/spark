@@ -150,8 +150,10 @@ export interface ToolCall {
 export type ChatEvent =
   | { type: "text_delta"; text: string }
   | { type: "reasoning_delta"; text: string }
-  | { type: "tool_start"; tool: ToolCall }
-  | { type: "tool_end"; tool: ToolCall; ok: boolean; result: unknown }
+  | { type: "tool_start"; tool: ToolCall; data?: { subtask_index?: number } }
+  | { type: "subtask_start"; data: { index: number; prompt: string; total: number } }
+  | { type: "subtask_end"; text?: string; data: { index: number; summary: string } }
+  | { type: "tool_end"; tool: ToolCall; ok: boolean; result: unknown; data?: { subtask_index?: number } }
   | { type: "approval_needed"; approval: ApprovalInfo; tool: ToolCall }
   | { type: "compaction"; data: { before_tokens?: number; after_tokens?: number; limit?: number; summarized_messages?: number; usage?: ContextUsage } }
   | { type: "context"; data: { usage: ContextUsage } }

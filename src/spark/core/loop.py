@@ -1345,6 +1345,8 @@ class AgentLoop:
                         "tool_end",
                         "plan",
                         "approval_needed",
+                        "subtask_start",
+                        "subtask_end",
                     }:
                         yield sub_event
                     elif sub_event.type == "turn_end":
@@ -1377,6 +1379,8 @@ class AgentLoop:
                         "tool_end",
                         "plan",
                         "approval_needed",
+                        "subtask_start",
+                        "subtask_end",
                     }:
                         yield sub_event
                     elif sub_event.type == "turn_end":
@@ -1549,6 +1553,11 @@ class AgentLoop:
                 return index, f"subtask failed: {exc}"
 
         tasks = [_asyncio.create_task(runner(i, p)) for i, p in enumerate(prompts)]
+        for i, prompt in enumerate(prompts):
+            yield TurnEvent(
+                type="subtask_start",
+                data={"index": i, "prompt": prompt[:200], "total": len(prompts)},
+            )
         try:
             # Drive the whole fan-out from the queue so a sub-agent that is waiting
             # on approval or a long tool still delivers its events immediately;
@@ -1557,6 +1566,11 @@ class AgentLoop:
             while remaining > 0:
                 index, event = await queue.get()
                 if event is not None:
+                    # Tag tool events with the child that produced them so the
+                    # execution graph can nest them under their sub-agent
+                    # instead of drawing every tool as a sibling of `task`.
+                    if event.type in {"tool_start", "tool_end"} and event.data is None:
+                        event = event.model_copy(update={"data": {"subtask_index": index}})
                     yield event
                     continue
                 remaining -= 1
@@ -1576,6 +1590,8 @@ class AgentLoop:
             while not queue.empty():
                 index, event = queue.get_nowait()
                 if event is not None:
+                    if event.type in {"tool_start", "tool_end"} and event.data is None:
+                        event = event.model_copy(update={"data": {"subtask_index": index}})
                     yield event
         finally:
             for task in tasks:
@@ -1584,6 +1600,11 @@ class AgentLoop:
             await _asyncio.gather(*tasks, return_exceptions=True)
         for i in range(len(prompts)):
             label = f"[子任务 {i + 1}]"
+            yield TurnEvent(
+                type="subtask_end",
+                text=f"{label} {summaries.get(i, 'no output')}",
+                data={"index": i, "summary": summaries.get(i, "")},
+            )
             yield TurnEvent(
                 type="turn_end", text=f"{label} {summaries.get(i, 'no output')}"
             )

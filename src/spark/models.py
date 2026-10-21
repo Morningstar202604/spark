@@ -15,6 +15,10 @@ TurnEventType = Literal[
     "compaction",
     "context",
     "plan",
+    # Sub-agent lifecycle. Without these the execution graph could only draw the
+    # main agent and its own tools; a fan-out looked like a flat tool call.
+    "subtask_start",
+    "subtask_end",
     "turn_end",
     "turn_error",
 ]

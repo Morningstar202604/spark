@@ -83,6 +83,19 @@ export async function fetchCommands(): Promise<{ commands: SlashCommandInfo[] }>
   return readJson(await fetchWithTimeout("/api/commands"))
 }
 
+/** 导出当前会话（opencode/codex 的 /export 等价物）。 */
+export async function exportSession(
+  format: "markdown" | "json" = "markdown",
+): Promise<{ ok: boolean; format: string; content: string }> {
+  return readJson(
+    await fetchWithTimeout("/api/sessions/export", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ format }),
+    }),
+  )
+}
+
 export async function saveAgentsMd(
   content: string,
 ): Promise<{ ok: boolean; chars: number; max_fragment_chars: number }> {

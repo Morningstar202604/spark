@@ -363,3 +363,139 @@ def test_sessions_list_cap_is_generous(live) -> None:
     rows = _get(base, "/api/sessions")["sessions"]
     assert len(rows) >= 60, "session list must not silently truncate at 50"
     assert any(r["id"] == sid for r in rows)
+
+
+# ---------------------------------------------------------------------------
+# Round 3: sub-agent graph events, session export
+# ---------------------------------------------------------------------------
+
+
+def test_subtask_events_are_emitted_for_parallel_fanout(tmp_path: Path) -> None:
+    import asyncio
+
+    from spark.core.loop import AgentLoop
+    from spark.models import ChatDelta, ToolCall
+    from spark.providers.mock import MockProvider
+    from spark.sandbox import WorkdirSandbox
+    from spark.tools.registry import ToolContext, ToolRegistry
+
+    cfg = SparkConfig()
+    cfg.provider.name = "mock"
+    cfg.provider.model = "m"
+    cfg.agent.approval = "full-auto"
+    cfg.agent.max_tool_rounds = 3
+    store = SessionStore(tmp_path / "sub.db")
+    sid = store.create_session(tmp_path, "m")
+    reg = ToolRegistry(ToolContext(sandbox=WorkdirSandbox(tmp_path, cfg), config=cfg))
+    provider = MockProvider(
+        rounds=[
+            [
+                ChatDelta(
+                    type="tool_call",
+                    tool_call=ToolCall(
+                        id="t1",
+                        name="task",
+                        arguments={"tasks": [{"prompt": "a"}, {"prompt": "b"}]},
+                    ),
+                ),
+                ChatDelta(type="end"),
+            ],
+            [ChatDelta(type="text", text="done"), ChatDelta(type="end")],
+        ]
+    )
+    loop = AgentLoop(
+        workdir=tmp_path, cfg=cfg, provider=provider, registry=reg, store=store, session_id=sid
+    )
+
+    async def collect() -> list:
+        return [e async for e in loop.iter_turn("go")]
+
+    events = asyncio.run(collect())
+    starts = [e for e in events if e.type == "subtask_start"]
+    ends = [e for e in events if e.type == "subtask_end"]
+    # The execution graph needs both edges of the life cycle, per child.
+    assert len(starts) == 2 and len(ends) == 2
+    assert {e.data["index"] for e in starts} == {0, 1}
+    assert all(e.data["total"] == 2 for e in starts)
+    store.close()
+
+
+def test_session_export_markdown_has_metadata_and_tools(live) -> None:
+    base, _ = live
+    _post(base, "/api/chat", {"prompt": "list files"})
+    body = _post(base, "/api/sessions/export", {"format": "markdown"})
+    assert body["ok"] is True
+    md = body["content"]
+    assert md.startswith("# ")
+    assert "工作目录" in md and "模型" in md
+    assert "## 用户" in md and "list files" in md
+    assert "list_dir" in md
+
+
+def test_session_export_json_roundtrip(live) -> None:
+    import json as _json
+
+    base, _ = live
+    _post(base, "/api/chat", {"prompt": "hello"})
+    body = _post(base, "/api/sessions/export", {"format": "json"})
+    payload = _json.loads(body["content"])
+    assert payload["session_id"]
+    assert any(m["role"] == "user" and m["content"] == "hello" for m in payload["messages"])
+
+
+def test_session_export_rejects_unknown_format(live) -> None:
+    base, _ = live
+    with pytest.raises(urllib.error.HTTPError) as err:
+        _post(base, "/api/sessions/export", {"format": "pdf"})
+    assert err.value.code == 400
+
+
+def test_subtask_tool_events_are_tagged_with_their_child(tmp_path: Path) -> None:
+    """A child's tools must carry its index, or the graph draws them as siblings."""
+    import asyncio
+
+    from spark.core.loop import AgentLoop
+    from spark.models import ToolCall, TurnEvent
+    from spark.sandbox import WorkdirSandbox
+    from spark.tools.registry import ToolContext, ToolRegistry
+
+    cfg = SparkConfig()
+    cfg.provider.name = "mock"
+    cfg.provider.model = "m"
+    cfg.agent.approval = "full-auto"
+    store = SessionStore(tmp_path / "tag.db")
+    sid = store.create_session(tmp_path, "m")
+    reg = ToolRegistry(ToolContext(sandbox=WorkdirSandbox(tmp_path, cfg), config=cfg))
+    loop = AgentLoop(
+        workdir=tmp_path,
+        cfg=cfg,
+        provider=__import__("spark.providers.mock", fromlist=["MockProvider"]).MockProvider(),
+        registry=reg,
+        store=store,
+        session_id=sid,
+    )
+
+    call = ToolCall(id="x1", name="glob", arguments={"pattern": "*.py"})
+
+    async def fake_child(index, prompt, queue, **kwargs):
+        await queue.put((index, TurnEvent(type="tool_start", tool_call=call)))
+        await queue.put((index, TurnEvent(type="tool_end", tool_call=call)))
+        await queue.put((index, None))
+        return f"child-{index}"
+
+    loop._collect_subtask_events = fake_child  # type: ignore[method-assign]
+
+    async def collect():
+        return [
+            e
+            async for e in loop.spawn_subtasks_parallel(
+                ["a", "b"], system_extras=["", ""], tools_allowlists=[None, None]
+            )
+        ]
+
+    events = asyncio.run(collect())
+    tool_events = [e for e in events if e.type in {"tool_start", "tool_end"}]
+    assert len(tool_events) == 4
+    assert all(e.data and "subtask_index" in e.data for e in tool_events)
+    assert {e.data["subtask_index"] for e in tool_events} == {0, 1}
+    store.close()
