@@ -153,6 +153,8 @@ export type ChatEvent =
   | { type: "tool_start"; tool: ToolCall; data?: { subtask_index?: number } }
   | { type: "subtask_start"; data: { index: number; prompt: string; total: number } }
   | { type: "subtask_end"; text?: string; data: { index: number; summary: string } }
+  | { type: "subtask_progress"; data: { index: number; phase: "thinking" | "answering"; chars: number } }
+  | { type: "subtask_trace"; data: { index: number; thinking_chars: number; answer_chars: number; tools: number } }
   | { type: "tool_end"; tool: ToolCall; ok: boolean; result: unknown; data?: { subtask_index?: number } }
   | { type: "approval_needed"; approval: ApprovalInfo; tool: ToolCall }
   | { type: "compaction"; data: { before_tokens?: number; after_tokens?: number; limit?: number; summarized_messages?: number; usage?: ContextUsage } }
@@ -197,6 +199,9 @@ export interface HistoryMessage {
   images?: string[]
   /** Database row id; present when the backend could align rows with history. */
   id?: number
+  tool_call_id?: string
+  /** Present when an assistant turn only requested tools (no text). */
+  tool_calls?: Array<{ id: string; name: string; arguments: unknown }>
 }
 
 export interface ApprovalInfo {

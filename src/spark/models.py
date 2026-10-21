@@ -19,6 +19,10 @@ TurnEventType = Literal[
     # main agent and its own tools; a fan-out looked like a flat tool call.
     "subtask_start",
     "subtask_end",
+    # Per-child progress/trace. The parent renders one bubble, so these carry
+    # counters (chars, tool count) rather than the child's raw stream.
+    "subtask_progress",
+    "subtask_trace",
     "turn_end",
     "turn_error",
 ]

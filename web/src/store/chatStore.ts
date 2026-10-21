@@ -5,6 +5,14 @@ import { useSessionStore } from "./sessionStore"
 import { useUiStore } from "./uiStore"
 import { t } from "../i18n"
 
+export interface SubtaskTrace {
+  index: number
+  thinkingChars: number
+  answerChars: number
+  tools: number
+  phase: "thinking" | "answering" | "done"
+}
+
 export interface ToolCallState {
   id: string
   name: string
@@ -13,6 +21,8 @@ export interface ToolCallState {
   startedAt: number
   durationMs?: number
   result?: unknown
+  /** Only on the `task` tool: per-child trace collected from subtask_* events. */
+  subtasks?: SubtaskTrace[]
 }
 
 /** 助手消息内部的顺序片段，忠实还原"思考→计划→工具→文本"交错顺序 */
@@ -247,9 +257,81 @@ export const useChatStore = create<ChatState>((set, get) => ({
           buf.think += ev.text
           schedule()
           break
+        case "subtask_progress": {
+          const idx = ev.data?.index ?? 0
+          patchLast((it) => ({
+            ...it,
+            segments: it.segments.map((seg) =>
+              seg.kind === "tool" && seg.tool.name === "task"
+                ? {
+                    ...seg,
+                    tool: {
+                      ...seg.tool,
+                      subtasks: (seg.tool.subtasks ?? []).map((s) =>
+                        s.index === idx
+                          ? {
+                              ...s,
+                              phase: ev.data.phase,
+                              thinkingChars: ev.data.phase === "thinking" ? ev.data.chars : s.thinkingChars,
+                              answerChars: ev.data.phase === "answering" ? ev.data.chars : s.answerChars,
+                            }
+                          : s,
+                      ),
+                    },
+                  }
+                : seg,
+            ),
+          }))
+          break
+        }
+        case "subtask_trace": {
+          const idx = ev.data?.index ?? 0
+          patchLast((it) => ({
+            ...it,
+            segments: it.segments.map((seg) =>
+              seg.kind === "tool" && seg.tool.name === "task"
+                ? {
+                    ...seg,
+                    tool: {
+                      ...seg.tool,
+                      subtasks: (seg.tool.subtasks ?? []).map((s) =>
+                        s.index === idx
+                          ? {
+                              ...s,
+                              phase: "done" as const,
+                              thinkingChars: ev.data.thinking_chars,
+                              answerChars: ev.data.answer_chars,
+                              tools: ev.data.tools,
+                            }
+                          : s,
+                      ),
+                    },
+                  }
+                : seg,
+            ),
+          }))
+          break
+        }
         case "subtask_start": {
           flush()
           const idx = ev.data?.index ?? 0
+          patchLast((it) => ({
+            ...it,
+            segments: it.segments.map((seg) =>
+              seg.kind === "tool" && seg.tool.name === "task"
+                ? {
+                    ...seg,
+                    tool: {
+                      ...seg.tool,
+                      subtasks: [
+                        ...(seg.tool.subtasks ?? []).filter((s) => s.index !== idx),
+                        { index: idx, thinkingChars: 0, answerChars: 0, tools: 0, phase: "thinking" as const },
+                      ].sort((a, b) => a.index - b.index),
+                    },
+                  }
+                : seg,
+            ),
+          }))
           graphNodes.push({
             id: `agent-${idx}`,
             label: `subtask ${idx + 1}`,
@@ -529,10 +611,30 @@ export const useChatStore = create<ChatState>((set, get) => ({
 }))
 
 /** 后端 history（user/assistant/tool 平铺）→ 前端分组 + 顺序片段模型 */
-export function historyToItems(msgs: { role: string; content: string; name?: string; images?: string[]; id?: number }[]): ChatMsg[] {
+export function historyToItems(
+  msgs: Array<{
+    role: string
+    content: string
+    name?: string
+    images?: string[]
+    id?: number
+    tool_call_id?: string
+    tool_calls?: Array<{ id: string; name: string; arguments: unknown }>
+  }>,
+): ChatMsg[] {
   const out: ChatMsg[] = []
+  // Tool results are matched to the pending call by id so the reloaded card
+  // keeps the arguments it was created with (this used to render `{}`).
+  const pending = new Map<string, ToolCallState>()
   for (const m of msgs) {
     if (m.role === "tool") {
+      const matched = m.tool_call_id ? pending.get(m.tool_call_id) : undefined
+      if (matched) {
+        matched.status = "ok"
+        matched.result = m.content
+        pending.delete(m.tool_call_id as string)
+        continue
+      }
       const tool: ToolCallState = {
         id: `h-${out.length}-${Date.now()}`,
         name: m.name || "tool",
@@ -547,6 +649,22 @@ export function historyToItems(msgs: { role: string; content: string; name?: str
       } else {
         out.push({ id: uid(), role: "assistant", text: "", segments: [{ kind: "tool", tool }] })
       }
+    } else if (m.role === "assistant" && m.tool_calls && m.tool_calls.length > 0) {
+      const msgId = uid()
+      const segs: Segment[] = []
+      if (m.content) segs.push({ kind: "text", text: m.content })
+      for (const call of m.tool_calls) {
+        const tool: ToolCallState = {
+          id: call.id || `h-${msgId}-${segs.length}`,
+          name: call.name,
+          arguments: call.arguments,
+          status: "running",
+          startedAt: 0,
+        }
+        segs.push({ kind: "tool", tool })
+        pending.set(tool.id, tool)
+      }
+      out.push({ id: msgId, role: "assistant", text: m.content, segments: segs, dbId: m.id })
     } else if (m.role === "user") {
       out.push({ id: uid(), role: "user", text: m.content, images: m.images, segments: [], dbId: m.id })
     } else {

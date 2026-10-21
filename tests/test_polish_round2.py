@@ -499,3 +499,24 @@ def test_subtask_tool_events_are_tagged_with_their_child(tmp_path: Path) -> None
     assert all(e.data and "subtask_index" in e.data for e in tool_events)
     assert {e.data["subtask_index"] for e in tool_events} == {0, 1}
     store.close()
+
+
+def test_history_keeps_assistant_tool_calls_and_ids(live) -> None:
+    """Reloading a session must rebuild tool cards with their arguments.
+
+    Regression: `_history_messages` dropped assistant rows that only carried
+    tool_calls (no text), so the UI rendered every tool as `{}`.
+    """
+    import json as _json
+
+    base, store = live
+    _post(base, "/api/chat", {"prompt": "list files"})
+    body = _get(base, "/api/history")
+    calls = [m for m in body["messages"] if m.get("tool_calls")]
+    assert calls, "assistant tool-call rows must survive the history projection"
+    call = calls[0]["tool_calls"][0]
+    assert call["name"] and isinstance(call["arguments"], dict) and call["arguments"]
+    # The tool result references the same call id so the UI can pair them.
+    tool_rows = [m for m in body["messages"] if m.get("role") == "tool"]
+    assert any(m.get("tool_call_id") for m in tool_rows)
+    _json.dumps(body)  # must be JSON-serialisable

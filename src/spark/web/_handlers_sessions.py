@@ -169,7 +169,9 @@ def _history_messages(state) -> list[dict]:
     aligned = len(ids) == len(history)
     for index, msg in enumerate(history):
         row_id = ids[index] if aligned else None
-        if msg.role in {"user", "assistant"} and msg.content:
+        if msg.role in {"user", "assistant"} and msg.content and not (
+            msg.role == "assistant" and msg.tool_calls
+        ):
             entry: dict = {"role": msg.role, "content": msg.content}
             if row_id is not None:
                 entry["id"] = row_id
@@ -183,6 +185,24 @@ def _history_messages(state) -> list[dict]:
                 "role": "tool",
                 "name": msg.name or "",
                 "content": msg.content or "",
+            }
+            if msg.tool_call_id:
+                entry["tool_call_id"] = msg.tool_call_id
+            if row_id is not None:
+                entry["id"] = row_id
+            messages.append(entry)
+        elif msg.role == "assistant" and msg.tool_calls:
+            # An assistant message that only requested tools has no text, so it
+            # was dropped entirely: reloading a session lost the tool arguments
+            # (the card rendered `{}`) and merged turns. Emit it as a tool-call
+            # carrier so the UI can rebuild the same cards it showed live.
+            entry = {
+                "role": "assistant",
+                "content": msg.content or "",
+                "tool_calls": [
+                    {"id": c.id, "name": c.name, "arguments": c.arguments}
+                    for c in msg.tool_calls
+                ],
             }
             if row_id is not None:
                 entry["id"] = row_id

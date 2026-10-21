@@ -1,5 +1,5 @@
 import { memo, useState } from "react"
-import type { ToolCallState } from "../store/chatStore"
+import type { SubtaskTrace, ToolCallState } from "../store/chatStore"
 import { cls, Spinner } from "./ui"
 import { IconCheck, IconChevronRight, IconCommand, IconFile, IconFolder, IconGlobe, IconSearch, IconTerminal, IconX } from "./icons"
 import { DiffView } from "./DiffView"
@@ -30,6 +30,15 @@ function toolIcon(name: string) {
 }
 
 /** 参数摘要：优先 path/command/file 等关键字段 */
+function subtaskArgSummary(args: unknown): string {
+  if (typeof args !== "object" || args === null) return ""
+  const a = args as Record<string, unknown>
+  const tasks = a.tasks
+  if (Array.isArray(tasks)) return `${tasks.length} 个子任务`
+  if (typeof a.prompt === "string") return a.prompt.slice(0, 60)
+  return argSummary(args)
+}
+
 function argSummary(args: unknown): string {
   if (typeof args !== "object" || args === null) return ""
   const a = args as Record<string, unknown>
@@ -53,6 +62,29 @@ function resultTextOf(tool: ToolCallState): string {
   } catch {
     return String(result)
   }
+}
+
+function SubtaskTraceList({ traces }: { traces: SubtaskTrace[] }) {
+  const lang = useUiStore((s) => s.lang)
+  return (
+    <div className="mb-2 flex flex-col gap-1.5">
+      {traces.map((s) => (
+        <div key={s.index} className="flex items-center gap-2 rounded-md border border-line bg-panel2 px-2.5 py-1.5 text-[11px]">
+          <span className="font-mono text-ink3">#{s.index + 1}</span>
+          <span className={cls("font-medium", s.phase === "done" ? "text-ok" : "text-accent")}>
+            {s.phase === "done"
+              ? t("subtask.done", lang)
+              : t(s.phase === "thinking" ? "subtask.thinking" : "subtask.answering", lang)}
+          </span>
+          <span className="ml-auto flex gap-3 font-mono text-[10px] text-ink3">
+            <span>{t("subtask.thinkingChars", lang, { n: s.thinkingChars })}</span>
+            <span>{t("subtask.answerChars", lang, { n: s.answerChars })}</span>
+            <span>{t("subtask.toolCount", lang, { n: s.tools })}</span>
+          </span>
+        </div>
+      ))}
+    </div>
+  )
 }
 
 function SubagentCard({ resultText }: { resultText: string }) {
@@ -100,7 +132,9 @@ export const ToolBlock = memo(function ToolBlock({ tool }: { tool: ToolCallState
         </span>
         <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-hover text-ink2">{toolIcon(name)}</span>
         <span className="font-mono text-xs font-semibold text-ink">{name}</span>
-        <span className="min-w-0 truncate font-mono text-[11px] text-ink3">{argSummary(args)}</span>
+        <span className="min-w-0 truncate font-mono text-[11px] text-ink3">
+          {name === "task" ? subtaskArgSummary(args) : argSummary(args)}
+        </span>
         <span className="ml-auto flex shrink-0 items-center gap-1.5">
           {running ? (
             <>
@@ -124,6 +158,7 @@ export const ToolBlock = memo(function ToolBlock({ tool }: { tool: ToolCallState
 
       {open && (
         <div className="anim-fade border-t border-line px-3 py-2.5">
+          {tool.subtasks && tool.subtasks.length > 0 && <SubtaskTraceList traces={tool.subtasks} />}
           <div className="mb-1 text-[10px] font-semibold tracking-wider text-ink3 uppercase">{t("common.args", lang)}</div>
           <pre className="max-h-56 overflow-auto rounded-md bg-code p-2.5 font-mono text-[11px] leading-relaxed whitespace-pre-wrap break-all text-ink2">
             {JSON.stringify(args, null, 2)}

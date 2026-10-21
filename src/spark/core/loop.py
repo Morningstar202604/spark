@@ -1347,6 +1347,8 @@ class AgentLoop:
                         "approval_needed",
                         "subtask_start",
                         "subtask_end",
+                        "subtask_progress",
+                        "subtask_trace",
                     }:
                         yield sub_event
                     elif sub_event.type == "turn_end":
@@ -1381,6 +1383,8 @@ class AgentLoop:
                         "approval_needed",
                         "subtask_start",
                         "subtask_end",
+                        "subtask_progress",
+                        "subtask_trace",
                     }:
                         yield sub_event
                     elif sub_event.type == "turn_end":
@@ -1645,14 +1649,66 @@ class AgentLoop:
         sub_loop._extra_system_prompt = system_extra
         self._active_children.append(sub_loop)
         final_text = ""
+        thought_chars = 0
+        text_chars = 0
+        tool_count = 0
         try:
             async for event in sub_loop.iter_turn(prompt):
                 if event.type in {"tool_start", "tool_end", "plan", "approval_needed"}:
+                    if event.type == "tool_start":
+                        tool_count += 1
                     await queue.put((index, event))
+                elif event.type == "reasoning_delta" and event.text:
+                    # Forward a counter, not the raw stream: the parent turn is
+                    # one bubble, so the trace summary is what the graph and the
+                    # card can actually show without duplicating the transcript.
+                    thought_chars += len(event.text)
+                    await queue.put(
+                        (
+                            index,
+                            TurnEvent(
+                                type="subtask_progress",
+                                data={
+                                    "index": index,
+                                    "phase": "thinking",
+                                    "chars": thought_chars,
+                                },
+                            ),
+                        )
+                    )
+                elif event.type == "text_delta" and event.text:
+                    text_chars += len(event.text)
+                    await queue.put(
+                        (
+                            index,
+                            TurnEvent(
+                                type="subtask_progress",
+                                data={
+                                    "index": index,
+                                    "phase": "answering",
+                                    "chars": text_chars,
+                                },
+                            ),
+                        )
+                    )
                 elif event.type == "turn_end":
                     final_text = event.text or ""
                 elif event.type == "turn_error":
                     final_text = f"subtask failed: {event.text}"
+            await queue.put(
+                (
+                    index,
+                    TurnEvent(
+                        type="subtask_trace",
+                        data={
+                            "index": index,
+                            "thinking_chars": thought_chars,
+                            "answer_chars": text_chars,
+                            "tools": tool_count,
+                        },
+                    ),
+                )
+            )
             await queue.put((index, None))
             return final_text
         finally:
