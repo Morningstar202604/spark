@@ -306,20 +306,25 @@ def _handle_test(handler: HandlerBase, body: dict) -> None:
         body.get("base_url") or state.cfg.provider.base_url
     ).strip()
     model = str(body.get("model") or state.cfg.provider.model).strip()
+    explicit_key = str(body.get("api_key") or "").strip()
     stored_key = state.cfg.provider.api_key or ""
-    if not _probe_target_allowed(base_url, state.cfg.provider.base_url):
+    # The stored credential may only travel to the endpoint it belongs to. When
+    # the user is testing a *different* endpoint before saving it, they must
+    # bring their own key — otherwise "Test connection" could exfiltrate the
+    # saved key to any host the form names.
+    if not _probe_target_allowed(base_url, state.cfg.provider.base_url) and not explicit_key:
         handler._json(
             400,
             {
                 "error": (
-                    "refusing to send the stored credential to a different "
-                    "endpoint; change the provider base_url explicitly, or "
-                    "supply an explicit api_key for this address"
-                )
+                    "切换端点测试时请一并填入该端点的 API Key；"
+                    "存储的密钥只会发往当前已配置的地址"
+                ),
+                "needs_api_key": True,
             },
         )
         return
-    api_key = str(body.get("api_key") or "").strip() or stored_key
+    api_key = explicit_key or stored_key
     if not api_key:
         try:
             api_key = require_api_key(state.cfg) or ""

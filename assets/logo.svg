@@ -1,10 +1,20 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="Spark">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="Spark">
   <defs>
-    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#14b8a6"/>
-      <stop offset="1" stop-color="#0ea5e9"/>
+    <linearGradient id="s-bg" x1="0" y1="0" x2="64" y2="64" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ffc48c"/>
+      <stop offset="0.45" stop-color="#f97316"/>
+      <stop offset="1" stop-color="#c2410c"/>
     </linearGradient>
+    <radialGradient id="s-glow" cx="0.28" cy="0.18" r="1">
+      <stop offset="0" stop-color="#fffaf3" stop-opacity="0.32"/>
+      <stop offset="0.65" stop-color="#ffffff" stop-opacity="0.03"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </radialGradient>
   </defs>
-  <rect x="8" y="8" width="112" height="112" rx="26" fill="url(#g)"/>
-  <path d="M70 20 L38 68 h20 L58 108 L90 56 H70 Z" fill="#ffffff"/>
+  <rect width="64" height="64" rx="15" fill="url(#s-bg)"/>
+  <rect width="64" height="64" rx="15" fill="url(#s-glow)"/>
+  <g transform="translate(32 32) scale(0.74) translate(-32 -32)">
+    <path d="M32 4C33.9 21.2 42.8 30.1 60 32C42.8 33.9 33.9 42.8 32 60C30.1 42.8 21.2 33.9 4 32C21.2 30.1 30.1 21.2 32 4Z"
+          fill="#fff"/>
+  </g>
 </svg>

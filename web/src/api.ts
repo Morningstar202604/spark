@@ -73,6 +73,16 @@ export async function fetchAgentsMd(): Promise<{
   return readJson(await fetchWithTimeout("/api/agents_md"))
 }
 
+export interface SlashCommandInfo {
+  name: string
+  description: string
+}
+
+/** 项目里定义的自定义斜杠命令（.spark/commands/*.md）。 */
+export async function fetchCommands(): Promise<{ commands: SlashCommandInfo[] }> {
+  return readJson(await fetchWithTimeout("/api/commands"))
+}
+
 export async function saveAgentsMd(
   content: string,
 ): Promise<{ ok: boolean; chars: number; max_fragment_chars: number }> {
@@ -202,6 +212,68 @@ export async function deleteSession(sessionId: string): Promise<{ ok: boolean; s
       body: JSON.stringify({ session_id: sessionId }),
     }),
   )
+}
+
+export async function renameSession(sessionId: string, title: string): Promise<{ ok: boolean; status: Status }> {
+  return readJson(
+    await fetchWithTimeout("/api/sessions/rename", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ session_id: sessionId, title }),
+    }),
+  )
+}
+
+export async function forkSession(
+  sessionId?: string,
+): Promise<{ ok: boolean; status: Status; messages: HistoryMessage[] }> {
+  return readJson(
+    await fetchWithTimeout("/api/sessions/fork", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ session_id: sessionId ?? "" }),
+    }),
+  )
+}
+
+export async function deleteMessage(messageId: number): Promise<{
+  ok: boolean
+  status: Status
+  messages: HistoryMessage[]
+}> {
+  return readJson(
+    await fetchWithTimeout("/api/messages/delete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message_id: messageId }),
+    }),
+  )
+}
+
+export interface HealthRow {
+  level: "ok" | "warn" | "bad"
+  kind: string
+  message: string
+  fix: string
+  auto_fixable: boolean
+}
+
+export async function fetchDiagnostics(): Promise<{
+  ok: boolean
+  rows: HealthRow[]
+  blocking: number
+  warnings: number
+}> {
+  return readJson(await fetchWithTimeout("/api/diagnostics"))
+}
+
+export async function runSelfHeal(): Promise<{
+  ok: boolean
+  actions: Array<{ kind: string; message: string; applied: boolean; detail?: string; error?: string }>
+  rows: HealthRow[]
+  remaining: HealthRow[]
+}> {
+  return readJson(await fetchWithTimeout("/api/selfheal", { method: "POST" }))
 }
 
 export async function respondApproval(decision: "allow" | "allow_always" | "deny"): Promise<void> {
@@ -507,6 +579,7 @@ export async function fetchReplayTurn(index: number): Promise<ReplayRecord> {
 export interface TimelineMessageBrief {
   id: number
   role: string
+  name?: string
   preview: string
   created_at: number
 }
@@ -565,6 +638,7 @@ export async function streamChat(
   onEvent: (ev: ChatEvent) => void,
   signal?: AbortSignal,
   images: string[] = [],
+  webSearch = true,
 ): Promise<void> {
   if (signal?.aborted) {
     throw new DOMException("Aborted", "AbortError")
@@ -583,7 +657,7 @@ export async function streamChat(
         {
           method: "POST",
           headers,
-          body: JSON.stringify({ prompt, images }),
+          body: JSON.stringify({ prompt, images, web_search: webSearch }),
           signal,
         },
         60000,

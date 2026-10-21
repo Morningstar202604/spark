@@ -234,11 +234,20 @@ class SparkWebState:
             session_id = latest["id"] if latest else None
         if session_id is None:
             self.session_id = self.store.create_session(
-                self.workdir, self.cfg.provider.model, title="web preview"
+                self.workdir, self.cfg.provider.model, title="新对话"
             )
         else:
             self.session_id = session_id
-        approver = self.approver if self.cfg.agent.approval != "full-auto" else None
+        # The approver is created once (in __init__ only when the startup mode
+        # was not full-auto). Reusing that decision meant switching full-auto →
+        # suggest left approver=None, so every write/shell call was silently
+        # denied: the UI promised approvals that could never appear.
+        if self.cfg.agent.approval == "full-auto":
+            approver = None
+        else:
+            if self.approver is None:
+                self.approver = WebApprover()
+            approver = self.approver
         previous_session = getattr(self, "session_id", "")
         self.loop = AgentLoop(
             workdir=self.workdir,
@@ -300,7 +309,31 @@ class SparkWebState:
             "mcp_errors": list(self.mcp_bridge.errors) if self.mcp_bridge else [],
             "context": usage,
             "plan": plan,
+            **self._demo_flags(key),
         }
+
+    def _demo_flags(self, key: str) -> dict:
+        """Say out loud when the configured provider silently fell back to mock.
+
+        ``create_provider`` degrades to ``MockProvider`` when an openai_compat
+        provider has no key, which kept the UI looking like a live model was
+        answering while every reply was scripted. The flag is derived from the
+        loop's actual provider instance, not from config, so it cannot drift.
+        """
+        provider_name = str(self.cfg.provider.name)
+        live = self.loop.provider if self.loop is not None else None
+        is_mock = live is not None and live.__class__.__name__ == "MockProvider"
+        if provider_name == "mock":
+            return {"demo_mode": True, "demo_reason": "当前使用 Mock 演示模型"}
+        if is_mock:
+            env_name = self.cfg.provider.api_key_env or "SPARK_API_KEY"
+            return {
+                "demo_mode": True,
+                "demo_reason": f"缺少 API Key（{env_name}），已退回 Mock 演示模型",
+            }
+        if provider_name == "openai_compat" and not key:
+            return {"demo_mode": True, "demo_reason": "缺少 API Key，尚未连接真实模型"}
+        return {"demo_mode": False, "demo_reason": ""}
 
     def ensure_default_profile(self) -> None:
         if self.cfg.model_profiles:

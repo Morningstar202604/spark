@@ -1,30 +1,39 @@
 import { cls } from "./ui"
 
 /**
- * BrandMark — Spark 品牌徽标：渐变圆角方块 + 星火符号。
- * 用于侧边栏顶部、空状态、设置面板品牌卡、favicon。
+ * BrandMark — Spark 品牌徽标：渐变圆角方块 + 四角星火符号。
+ *
+ * 几何与 `brand/mark.svg` / `web/public/favicon.svg` 完全一致（同一渐变与同一
+ * 路径），任何一处修改都要三处同步——图标和 favicon 一旦漂移，品牌就开始腐烂。
  */
 export function BrandMark({ size = 28, className }: { size?: number; className?: string }) {
+  const id = `spark-bg-${size}`
   return (
     <span
-      className={cls("inline-flex shrink-0 items-center justify-center rounded-xl", className)}
+      className={cls("inline-flex shrink-0 items-center justify-center", className)}
       style={{
         width: size,
         height: size,
-        background: "linear-gradient(135deg, var(--accent) 0%, #f59e0b 55%, #fbbf24 100%)",
-        boxShadow: "0 1px 2px rgba(0,0,0,.12), 0 4px 12px -4px rgba(249,115,22,.45)",
+        borderRadius: size * 0.24,
+        background: "linear-gradient(135deg, #ffc48c 0%, #f97316 45%, #c2410c 100%)",
+        boxShadow: "0 1px 2px rgba(0,0,0,.12), 0 6px 16px -6px rgba(249,115,22,.55)",
       }}
       aria-hidden="true"
     >
-      <svg width={size * 0.58} height={size * 0.58} viewBox="0 0 24 24" fill="none">
-        <path
-          d="M12 2c.6 3.8 2.1 5.9 5.6 7.1-.6 1-1.2 1.9-1.5 3.2M12 2C9.8 5.2 7.9 7 4.5 7.9c.8 1.3 1.5 2.3 2.3 3.4M12 2c1.1 4.6 3.1 7.5 7.2 8.9M12 22c-.5-3.2-1.9-5-4.9-6.1.6-.9 1-1.6 1.4-2.8M12 22c1.9-2.8 3.5-4.3 6.6-5.2-.7-1.1-1.3-1.9-2.1-2.8M12 22c-.9-4-2.7-6.4-6.4-7.6"
-          stroke="white"
-          strokeWidth="2.1"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
-        <path d="M12 9v6M9 12h6" stroke="white" strokeWidth="2.1" strokeLinecap="round" />
+      <svg width={size} height={size} viewBox="0 0 64 64" fill="none" aria-hidden="true">
+        <defs>
+          <linearGradient id={id} x1="0" y1="0" x2="64" y2="64" gradientUnits="userSpaceOnUse">
+            <stop stopColor="#ffc48c" />
+            <stop offset="0.45" stopColor="#f97316" />
+            <stop offset="1" stopColor="#c2410c" />
+          </linearGradient>
+        </defs>
+        <g transform="translate(32 32) scale(0.74) translate(-32 -32)">
+          <path
+            d="M32 4C33.9 21.2 42.8 30.1 60 32C42.8 33.9 33.9 42.8 32 60C30.1 42.8 21.2 33.9 4 32C21.2 30.1 30.1 21.2 32 4Z"
+            fill="white"
+          />
+        </g>
       </svg>
     </span>
   )

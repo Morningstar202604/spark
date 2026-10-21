@@ -78,11 +78,15 @@ def parse_mcp_servers(items: list) -> list:
         args_raw = item.get("args")
         ro_raw = item.get("readonly_tools")
         allowed_raw = item.get("allowed_tools")
+        env_raw = item.get("env")
         out.append(
             McpServerConfig(
                 name=name,
                 command=command,
                 args=[str(a) for a in args_raw] if isinstance(args_raw, list) else [],
+                env={str(k): str(v) for k, v in env_raw.items()}
+                if isinstance(env_raw, dict)
+                else {},
                 readonly_tools=[str(a) for a in ro_raw]
                 if isinstance(ro_raw, list)
                 else [],

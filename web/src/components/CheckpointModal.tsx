@@ -181,7 +181,11 @@ export const CheckpointModal = memo(function CheckpointModal() {
                         <span className="w-12 shrink-0 font-mono text-[10px] uppercase text-ink3">
                           {_ROLE_LABEL[m.role] || m.role}
                         </span>
-                        <p className="min-w-0 flex-1 truncate text-[12px] text-ink2">{m.preview || "-"}</p>
+                        <p className="min-w-0 flex-1 truncate text-[12px] text-ink2">
+                          {m.role === "tool" && m.name ? <span className="font-mono text-accent">{m.name}</span> : null}
+                          {m.role === "tool" && m.name ? " · " : ""}
+                          {m.preview || (m.role === "tool" ? "" : "-")}
+                        </p>
                         {confirmMsgId === m.id ? (
                           <div className="flex shrink-0 items-center gap-1.5">
                             <Button size="sm" variant="danger" disabled={undoing !== null} onClick={() => doUndo(m.id)}>

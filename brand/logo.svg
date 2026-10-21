@@ -1,26 +1,23 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 64" width="320" height="64">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 248 64" width="248" height="64" role="img" aria-label="Spark agent">
   <defs>
-    <linearGradient id="shell" x1="2" y1="2" x2="30" y2="30" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#2a1a12"/>
-      <stop offset="1" stop-color="#4a2415"/>
+    <linearGradient id="l-bg" x1="0" y1="0" x2="64" y2="64" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ffc48c"/>
+      <stop offset="0.45" stop-color="#f97316"/>
+      <stop offset="1" stop-color="#c2410c"/>
     </linearGradient>
-    <linearGradient id="core" x1="10" y1="9" x2="23" y2="24" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#ffd9a8"/>
-      <stop offset="0.45" stop-color="#ff9d4f"/>
-      <stop offset="1" stop-color="#ff6a1f"/>
-    </linearGradient>
-    <radialGradient id="heat" cx="0.5" cy="0.5" r="0.5">
-      <stop offset="0" stop-color="#ff8a3d" stop-opacity="0.45"/>
-      <stop offset="1" stop-color="#ff8a3d" stop-opacity="0"/>
+    <radialGradient id="l-glow" cx="0.28" cy="0.18" r="1">
+      <stop offset="0" stop-color="#fffaf3" stop-opacity="0.32"/>
+      <stop offset="0.65" stop-color="#ffffff" stop-opacity="0.03"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
     </radialGradient>
   </defs>
-  <g transform="translate(2 2)">
-    <rect x="1" y="1" width="58" height="58" rx="17" fill="url(#shell)" stroke="#7a3a1c" stroke-width="1.6"/>
-    <rect x="1" y="1" width="58" height="58" rx="17" fill="url(#heat)"/>
-    <path d="M9.2 6.6 L9.2 14.1 L12.6 11.4 M22.8 25.4 L22.8 17.9 L19.4 20.6" fill="none" stroke="#7a3a1c" stroke-width="1.3" stroke-linecap="round" opacity="0.85" transform="scale(2)"/>
-    <path d="M18.2 8.6 L11.6 17.4 h3.9 l-1.4 6.6 6.6-8.9 h-3.9 l1.4-6.5 z" fill="url(#core)" stroke="#2a1a12" stroke-width="0.7" stroke-linejoin="round" transform="scale(2)"/>
+  <rect x="1" y="5" width="54" height="54" rx="13" fill="url(#l-bg)"/>
+  <rect x="1" y="5" width="54" height="54" rx="13" fill="url(#l-glow)"/>
+  <g transform="translate(28 32) scale(0.78) translate(-32 -32)">
+    <path d="M32 4C33.9 21.2 42.8 30.1 60 32C42.8 33.9 33.9 42.8 32 60C30.1 42.8 21.2 33.9 4 32C21.2 30.1 30.1 21.2 32 4Z" fill="#fff"/>
   </g>
-  <text x="82" y="45" font-family="ui-sans-serif, system-ui, 'Segoe UI', sans-serif" font-size="38" font-weight="800" letter-spacing="0.5" fill="#1f1a16">Spark</text>
-  <text x="229" y="45" font-family="ui-sans-serif, system-ui, 'Segoe UI', sans-serif" font-size="38" font-weight="300" fill="#8a7f74">agent</text>
-  <rect x="227" y="50" width="64" height="4" rx="2" fill="#ff7a3d"/>
+  <text x="70" y="41" font-family="ui-sans-serif, system-ui, 'Segoe UI', -apple-system, sans-serif"
+        font-size="29" font-weight="700" letter-spacing="-0.6" fill="#18181b">Spark</text>
+  <text x="164" y="41" font-family="ui-sans-serif, system-ui, 'Segoe UI', -apple-system, sans-serif"
+        font-size="29" font-weight="400" letter-spacing="-0.2" fill="#8e8e98">agent</text>
 </svg>

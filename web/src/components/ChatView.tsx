@@ -1,6 +1,6 @@
-import { memo } from "react"
+import { memo, useMemo } from "react"
 import type { ChatMsg } from "../store/chatStore"
-import MessageItem from "./MessageItem"
+import MessageItem, { type MessageActions } from "./MessageItem"
 import { EmptyState } from "./EmptyState"
 import { VirtualMessageList } from "./VirtualMessageList"
 import { useChatStore } from "../store/chatStore"
@@ -55,7 +55,29 @@ export const ChatView = memo(function ChatView() {
   const loading = useChatStore((s) => s.loading)
   const streaming = useChatStore((s) => s.streaming)
   const setInput = useChatStore((s) => s.setInput)
+  const deleteMessage = useChatStore((s) => s.deleteMessage)
+  const regenerate = useChatStore((s) => s.regenerate)
+  const startEditMessage = useChatStore((s) => s.startEditMessage)
   const lang = useUiStore((s) => s.lang)
+
+  const actions = useMemo<MessageActions>(
+    () => ({
+      onDelete: (m) => {
+        if (!m.dbId) return
+        const ok = window.confirm(t("msg.deleteConfirm", lang))
+        if (ok) void deleteMessage(m.dbId)
+      },
+      onEdit: (m) => {
+        if (!m.dbId) return
+        void startEditMessage(m.dbId)
+      },
+      onRegenerate: (m) => {
+        if (!m.dbId) return
+        void regenerate(m.dbId)
+      },
+    }),
+    [deleteMessage, regenerate, startEditMessage, lang],
+  )
 
   if (loading) {
     return (
@@ -79,7 +101,7 @@ export const ChatView = memo(function ChatView() {
       estimateHeight={estimateHeight}
       renderItem={(m) => (
         <div className="mx-auto max-w-[780px] px-3 sm:px-4" lang={lang}>
-          <MessageItem key={m.id} msg={m} />
+          <MessageItem key={m.id} msg={m} actions={actions} />
         </div>
       )}
       footer={

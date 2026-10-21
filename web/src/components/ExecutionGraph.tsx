@@ -3,6 +3,7 @@ import { ReactFlow, Background, Controls, type Node, type Edge } from "@xyflow/r
 import "@xyflow/react/dist/style.css"
 import { IconButton } from "./ui"
 import { IconX, IconSpark } from "./icons"
+import { useChatStore } from "../store/chatStore"
 import { useUiStore } from "../store/uiStore"
 import { t, type Lang, type TranslationKey } from "../i18n"
 
@@ -78,15 +79,29 @@ export function buildGraph(nodes: ExecutionNode[], edges: ExecutionEdge[], lang:
   nodes: Node[]
   edges: Edge[]
 } {
-  // 简单分层布局：按 kind 确定行，同层水平排列
+  // Simple layered layout: one row per kind, each row centred on the widest one
+  // so a single-tool turn does not draw three boxes glued to the left edge.
   const rows: Record<string, number> = { root: 0, agent: 1, tool: 2, result: 3 }
-  const colCount: Record<number, number> = {}
-  const pos: Record<string, { x: number; y: number }> = {}
+  const perRow: Record<number, ExecutionNode[]> = {}
   for (const n of nodes) {
     const row = rows[n.kind] ?? 1
-    const col = colCount[row] ?? 0
-    colCount[row] = col + 1
-    pos[n.id] = { x: col * 260, y: row * 110 }
+    ;(perRow[row] ||= []).push(n)
+  }
+  const COL_W = 240
+  const widest = Math.max(1, ...Object.values(perRow).map((r) => r.length))
+  const pos: Record<string, { x: number; y: number }> = {}
+  for (const [rowText, rowNodes] of Object.entries(perRow)) {
+    const row = Number(rowText)
+    const offset = ((widest - rowNodes.length) * COL_W) / 2
+    rowNodes.forEach((n, i) => {
+      pos[n.id] = { x: offset + i * COL_W, y: row * 120 }
+    })
+  }
+  const STATUS_TEXT: Record<ExecutionNode["status"], string> = {
+    running: t("graph.status.running", lang),
+    done: t("graph.status.done", lang),
+    error: t("graph.status.error", lang),
+    pending: t("graph.status.pending", lang),
   }
   const rfNodes: Node[] = nodes.map((n) => ({
     id: n.id,
@@ -96,7 +111,7 @@ export function buildGraph(nodes: ExecutionNode[], edges: ExecutionEdge[], lang:
         <div style={{ borderLeft: `3px solid ${nodeColor(n.kind)}`, paddingLeft: 8 }}>
           <div style={{ fontSize: 12, fontWeight: 600 }}>{t(n.label as TranslationKey, lang)}</div>
           <div style={{ fontSize: 10, opacity: 0.75 }}>
-            {t(KIND_LABEL[n.kind], lang)} · <span style={{ color: STATUS_COLOR[n.status] }}>{n.status}</span>
+            {t(KIND_LABEL[n.kind], lang)} · <span style={{ color: STATUS_COLOR[n.status] }}>{STATUS_TEXT[n.status]}</span>
           </div>
         </div>
       ),
@@ -126,8 +141,20 @@ export const ExecutionGraph = memo(function ExecutionGraph() {
   const open = useUiStore((s) => s.graphOpen)
   const close = useUiStore((s) => s.closeGraph)
   const lang = useUiStore((s) => s.lang)
+  const live = useChatStore((s) => s.turnGraph)
+  const streaming = useChatStore((s) => s.streaming)
 
-  const { nodes, edges } = useMemo(() => buildGraph(SAMPLE_NODES, SAMPLE_EDGES, lang), [lang])
+  const liveNodes = useMemo<ExecutionNode[]>(
+    () => live.nodes.map((n) => ({ ...n, label: n.kind === "root" || n.kind === "result" ? `graph.kind.${n.kind}` : n.label })),
+    [live.nodes],
+  )
+  const liveEdges = useMemo<ExecutionEdge[]>(() => live.edges.map((e) => ({ ...e })), [live.edges])
+  const hasLive = liveNodes.length > 0
+
+  const { nodes, edges } = useMemo(
+    () => buildGraph(hasLive ? liveNodes : SAMPLE_NODES, hasLive ? liveEdges : SAMPLE_EDGES, lang),
+    [hasLive, liveNodes, liveEdges, lang],
+  )
 
   if (!open) return null
 
@@ -142,12 +169,23 @@ export const ExecutionGraph = memo(function ExecutionGraph() {
         <div className="flex items-center gap-2 border-b border-line px-4 py-3">
           <IconSpark size={15} className="text-accent" />
           <span className="text-sm font-semibold text-ink">{t("graph.title", lang)}</span>
-          <span className="ml-1 text-[10.5px] text-ink3">{t("graph.sampleNote", lang)}</span>
+          <span className="ml-1 text-[10.5px] text-ink3">
+            {hasLive
+              ? streaming
+                ? t("graph.liveRunning", lang)
+                : t("graph.liveDone", lang)
+              : t("graph.sampleNote", lang)}
+          </span>
           <IconButton title={t("common.close", lang)} onClick={close} className="ml-auto">
             <IconX size={15} />
           </IconButton>
         </div>
         <div className="min-h-0 flex-1">
+          {!hasLive && (
+            <div className="border-b border-line bg-panel2/60 px-4 py-2 text-[11px] text-ink3">
+              {t("graph.emptyHint", lang)}
+            </div>
+          )}
           <ReactFlow nodes={nodes} edges={edges} fitView proOptions={{ hideAttribution: true }}>
             <Background gap={20} color="var(--line)" />
             <Controls showInteractive={false} />

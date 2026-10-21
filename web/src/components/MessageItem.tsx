@@ -6,11 +6,47 @@ const Markdown = lazy(() => import("./Markdown"))
 import ToolBlock from "./ToolBlock"
 import { ThinkingBlock } from "./ThinkingBlock"
 import { PlanCard } from "./PlanCard"
-import { IconCheck, IconCopy, IconSpark } from "./icons"
+import { IconCheck, IconCopy, IconPencil, IconRefresh, IconSpark, IconTrash } from "./icons"
 import { cls } from "./ui"
 import { useSessionStore } from "../store/sessionStore"
 import { useUiStore } from "../store/uiStore"
 import { t } from "../i18n"
+
+export interface MessageActions {
+  onEdit?: (msg: ChatMsg) => void
+  onDelete?: (msg: ChatMsg) => void
+  onRegenerate?: (msg: ChatMsg) => void
+}
+
+function MessageAction({
+  title,
+  onClick,
+  disabled,
+  danger,
+  children,
+}: {
+  title: string
+  onClick: () => void
+  disabled?: boolean
+  danger?: boolean
+  children: React.ReactNode
+}) {
+  return (
+    <button
+      type="button"
+      title={title}
+      aria-label={title}
+      disabled={disabled}
+      onClick={onClick}
+      className={cls(
+        "flex h-6 w-6 items-center justify-center rounded-md text-ink3 transition-colors hover:bg-hover hover:text-ink disabled:pointer-events-none disabled:opacity-35",
+        danger && "hover:text-err",
+      )}
+    >
+      {children}
+    </button>
+  )
+}
 
 function useCopy(text: string) {
   const [copied, setCopied] = useState(false)
@@ -23,10 +59,11 @@ function useCopy(text: string) {
 }
 
 /* ---------------- 用户消息：右侧气泡 ---------------- */
-const UserMessage = memo(function UserMessage({ msg }: { msg: ChatMsg }) {
+const UserMessage = memo(function UserMessage({ msg, actions }: { msg: ChatMsg; actions?: MessageActions }) {
   const lang = useUiStore((s) => s.lang)
+  const { copied, copy } = useCopy(msg.text)
   return (
-    <div className="flex justify-end gap-3 py-3">
+    <div className="group flex justify-end gap-3 py-3">
       <div className="max-w-[86%] sm:max-w-[70%]">
         {msg.images && msg.images.length > 0 && (
           <div className="mb-2 flex flex-wrap justify-end gap-2">
@@ -42,6 +79,26 @@ const UserMessage = memo(function UserMessage({ msg }: { msg: ChatMsg }) {
         )}
         <div className="anim-msg rounded-2xl rounded-br-md bg-[var(--user-bubble)] px-4 py-2.5 text-[14px] leading-relaxed whitespace-pre-wrap break-words text-[var(--user-bubble-text)]">
           {msg.text}
+        </div>
+        <div className="mt-1 flex justify-end gap-0.5 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100 sm:focus-within:opacity-100">
+          <MessageAction title={t("common.copy", lang)} onClick={copy}>
+            {copied ? <IconCheck size={12} className="text-ok" /> : <IconCopy size={12} />}
+          </MessageAction>
+          <MessageAction
+            title={t("msg.editResend", lang)}
+            onClick={() => actions?.onEdit?.(msg)}
+            disabled={!msg.dbId || !actions?.onEdit}
+          >
+            <IconPencil size={12} />
+          </MessageAction>
+          <MessageAction
+            title={t("msg.delete", lang)}
+            danger
+            onClick={() => actions?.onDelete?.(msg)}
+            disabled={!msg.dbId || !actions?.onDelete}
+          >
+            <IconTrash size={12} />
+          </MessageAction>
         </div>
       </div>
       <div className="mt-1 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-hover text-[12px] font-semibold text-ink2">
@@ -72,7 +129,7 @@ function SegmentRenderer({ seg, streaming }: { seg: Segment; streaming?: boolean
   }
 }
 
-const AssistantMessage = memo(function AssistantMessage({ msg }: { msg: ChatMsg }) {
+const AssistantMessage = memo(function AssistantMessage({ msg, actions }: { msg: ChatMsg; actions?: MessageActions }) {
   const { copied, copy } = useCopy(msg.text)
   const lang = useUiStore((s) => s.lang)
   const lastTextStreaming = msg.streaming && msg.segments.some((s) => s.kind === "text" && s.text.length > 0)
@@ -107,17 +164,32 @@ const AssistantMessage = memo(function AssistantMessage({ msg }: { msg: ChatMsg 
               {t("chat.working", lang)}
             </span>
           )}
-          {msg.text && !msg.streaming && (
-            <button
-              type="button"
-              onClick={copy}
-              title={t("chat.copyAll", lang)}
-              className="ml-auto flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] text-ink3 opacity-0 transition-opacity hover:bg-hover hover:text-ink group-hover:opacity-100 focus-visible:opacity-100"
-            >
-              {copied ? <IconCheck size={12} className="text-ok" /> : <IconCopy size={12} />}
-              {copied ? t("common.copied", lang) : t("common.copy", lang)}
-            </button>
-          )}
+          <div className="ml-auto flex items-center gap-0.5 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100 sm:focus-within:opacity-100">
+            {msg.text && !msg.streaming && (
+              <MessageAction title={t("chat.copyAll", lang)} onClick={copy}>
+                {copied ? <IconCheck size={12} className="text-ok" /> : <IconCopy size={12} />}
+              </MessageAction>
+            )}
+            {!msg.streaming && (
+              <MessageAction
+                title={t("msg.regenerate", lang)}
+                onClick={() => actions?.onRegenerate?.(msg)}
+                disabled={!msg.dbId || !actions?.onRegenerate}
+              >
+                <IconRefresh size={12} />
+              </MessageAction>
+            )}
+            {!msg.streaming && (
+              <MessageAction
+                title={t("msg.delete", lang)}
+                danger
+                onClick={() => actions?.onDelete?.(msg)}
+                disabled={!msg.dbId || !actions?.onDelete}
+              >
+                <IconTrash size={12} />
+              </MessageAction>
+            )}
+          </div>
         </div>
         <div className="min-w-0 space-y-1">
           {segments.map((seg, i) => (
@@ -164,12 +236,12 @@ const NoticeMessage = memo(function NoticeMessage({ msg }: { msg: ChatMsg }) {
   )
 })
 
-export default function MessageItem({ msg }: { msg: ChatMsg }) {
+export default function MessageItem({ msg, actions }: { msg: ChatMsg; actions?: MessageActions }) {
   switch (msg.role) {
     case "user":
-      return <UserMessage msg={msg} />
+      return <UserMessage msg={msg} actions={actions} />
     case "assistant":
-      return <AssistantMessage msg={msg} />
+      return <AssistantMessage msg={msg} actions={actions} />
     case "error":
       return <ErrorMessage text={msg.text} />
     case "notice":

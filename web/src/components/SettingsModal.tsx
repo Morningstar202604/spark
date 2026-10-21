@@ -1,12 +1,12 @@
-import { useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import type { FullConfig, HookEntry, McpServer, ModelProfile, ProbeResult, SettingsPayload, Status } from "../types"
-import { fetchConfig, fetchAgentsMd, saveAgentsMd, saveSettings, testConnection, listModelProfiles, saveModelProfile, deleteModelProfile, activateModelProfile } from "../api"
+import { fetchConfig, fetchAgentsMd, saveAgentsMd, saveSettings, testConnection, listModelProfiles, saveModelProfile, deleteModelProfile, activateModelProfile, fetchDiagnostics, runSelfHeal, type HealthRow } from "../api"
 import MemorySection from "./MemorySection"
 import { McpRegistryModal } from "./McpRegistryModal"
 import type { McpRegistryItem } from "../api"
 import type { Theme } from "../theme"
 import { Badge, Button, Field, IconButton, Select, Spinner, TextArea, TextInput, Toggle, cls } from "./ui"
-import { IconBrain, IconCheck, IconGlobe, IconKey, IconLayers, IconMoon, IconPlus, IconSettings, IconSun, IconTerminal, IconTrash, IconX } from "./icons"
+import { IconBrain, IconCheck, IconGlobe, IconKey, IconLayers, IconMoon, IconPlus, IconRefresh, IconSettings, IconStethoscope, IconSun, IconTerminal, IconTrash, IconWrench, IconX } from "./icons"
 import { useSessionStore } from "../store/sessionStore"
 import { useUiStore } from "../store/uiStore"
 import { t, type TranslationKey } from "../i18n"
@@ -23,8 +23,10 @@ function splitArgs(raw: string): string[] {
 
 const HOOK_EVENTS = [
   "turn_start", "pre_tool", "post_tool", "turn_end",
-  "app_start", "session_create", "session_load",
-  "compaction", "memory_extract", "approval_needed", "tool_error",
+  "app_start", "app_stop", "session_create", "session_load", "session_switch",
+  "compaction", "memory_extract", "context_threshold",
+  "approval_needed", "tool_error", "plan_update",
+  "turn_error", "provider_error",
 ]
 
 type Tab = "model" | "agent" | "security" | "display" | "memory" | "mcp" | "project"
@@ -55,6 +57,111 @@ interface Props {
   onClose: () => void
   onSaved: (s: Status) => void
 }
+
+/**
+ * 环境体检 + 一键修复（Project 页底部）。
+ *
+ * 和 CLI 的 `spark doctor` 共用同一份后端报告（/api/diagnostics），
+ * 所以界面不会再出现「CLI 说有问题、界面说一切正常」的分裂。
+ */
+function HealthSection({ lang }: { lang: "zh" | "en" }) {
+  const [rows, setRows] = useState<HealthRow[] | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [expanded, setExpanded] = useState(false)
+  const pushToast = useUiStore((s) => s.pushToast)
+
+  const load = useCallback(async () => {
+    try {
+      const data = await fetchDiagnostics()
+      setRows(data.rows)
+    } catch {
+      setRows([])
+    }
+  }, [])
+
+  useEffect(() => {
+    void load()
+  }, [load])
+
+  const blockers = rows?.filter((r) => r.level === "bad") ?? []
+  const warnings = rows?.filter((r) => r.level === "warn") ?? []
+  const autoFixable = [...blockers, ...warnings].filter((r) => r.auto_fixable)
+  const visible = expanded ? (rows ?? []) : [...blockers, ...warnings].slice(0, 4)
+
+  async function repair() {
+    setBusy(true)
+    try {
+      const report = await runSelfHeal()
+      setRows(report.rows)
+      pushToast("toast.selfhealDone", "success")
+      if (report.remaining.length > 0) setExpanded(true)
+    } catch {
+      pushToast("toast.selfhealFailed", "error")
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <section className="flex flex-col gap-2.5 rounded-xl border border-line bg-panel p-4">
+      <div className="flex items-center justify-between gap-2">
+        <h3 className="flex items-center gap-1.5 text-sm font-semibold text-ink">
+          <IconStethoscope size={14} className="text-accent" />
+          {t("health.title", lang)}
+        </h3>
+        <div className="flex items-center gap-1.5">
+          <Button size="sm" variant="ghost" onClick={() => void load()} disabled={busy}>
+            <IconRefresh size={12} /> {t("health.refresh", lang)}
+          </Button>
+          {autoFixable.length > 0 && (
+            <Button size="sm" variant="primary" onClick={() => void repair()} disabled={busy}>
+              {busy ? <Spinner size={11} /> : <IconWrench size={12} />} {t("health.fix", lang, { n: autoFixable.length })}
+            </Button>
+          )}
+        </div>
+      </div>
+      <p className="text-xs leading-relaxed text-ink3">{t("health.desc", lang)}</p>
+      {rows === null && <p className="py-2 text-xs text-ink3">{t("common.loading", lang)}</p>}
+      {rows !== null && blockers.length === 0 && warnings.length === 0 && (
+        <p className="flex items-center gap-1.5 py-1 text-xs text-ok">
+          <IconCheck size={12} /> {t("health.allGood", lang)}
+        </p>
+      )}
+      <ul className="flex flex-col gap-1">
+        {visible.map((row, i) => (
+          <li
+            key={`${row.kind}-${i}`}
+            className={cls(
+              "rounded-lg border px-2.5 py-1.5 text-[11.5px]",
+              row.level === "bad"
+                ? "border-err/30 bg-err/5 text-err"
+                : row.level === "warn"
+                  ? "border-warn/30 bg-warn/5 text-warn"
+                  : "border-line bg-panel2 text-ink2",
+            )}
+          >
+            <div className="flex items-start gap-1.5">
+              <span className="mt-0.5 shrink-0">{row.level === "bad" ? "!" : row.level === "warn" ? "?" : "✓"}</span>
+              <div className="min-w-0">
+                <p className="break-words">{row.message}</p>
+                {row.fix && <p className="mt-0.5 break-words text-ink3">{row.fix}</p>}
+              </div>
+            </div>
+          </li>
+        ))}
+      </ul>
+      {(rows?.length ?? 0) > visible.length && (
+        <button
+          type="button"
+          onClick={() => setExpanded(true)}
+          className="self-start text-[11px] text-accent hover:underline"
+        >
+          {t("health.showAll", lang)}
+        </button>
+      )}
+    </section>
+  )
+}
 export default function SettingsDrawer({ onClose, onSaved }: Props) {
   const lang = useUiStore((s) => s.lang)
   const setLang = useUiStore((s) => s.setLang)
@@ -63,6 +170,7 @@ export default function SettingsDrawer({ onClose, onSaved }: Props) {
   const [mcpRows, setMcpRows] = useState<McpServer[]>([])
   const [agentsMd, setAgentsMd] = useState<{ filename: string; content: string; chars: number; max_fragment_chars: number } | null>(null)
   const [probe, setProbe] = useState<ProbeResult | null>(null)
+  const [apiKeyInput, setApiKeyInput] = useState("")
   const [notice, setNotice] = useState("")
   const [busy, setBusy] = useState<"save" | "test" | "profile" | null>(null)
   const [profiles, setProfiles] = useState<ModelProfile[]>([])
@@ -84,12 +192,20 @@ export default function SettingsDrawer({ onClose, onSaved }: Props) {
     if (!item.suggested_command) return
     dirtyRef.current.mcp = true
     const derived = (item.name || item.title || "mcp").split("/").pop() || "mcp"
+    // Seed required env vars as empty placeholders so the card shows what the
+    // server needs; an empty value is dropped at save time instead of starting
+    // a server that is guaranteed to fail.
+    const env: Record<string, string> = {}
+    for (const field of item.required_env ?? []) {
+      if (field.required) env[field.name] = ""
+    }
     setMcpRows((rows) => [
       ...rows,
       {
         name: derived.replace(/[^a-zA-Z0-9_-]/g, "-"),
         command: item.suggested_command!,
         args: [...item.suggested_args],
+        env,
         readonly_tools: [],
       },
     ])
@@ -147,7 +263,9 @@ export default function SettingsDrawer({ onClose, onSaved }: Props) {
           name: cfg.provider.name,
           base_url: cfg.provider.base_url,
           model: cfg.provider.model,
-          api_key: cfg.provider.api_key_env ? "" : undefined,
+          // Empty means "keep the stored key": the backend falls back to
+          // cfg.provider.api_key / the env var when this is blank.
+          api_key: apiKeyInput.trim(),
         },
         agent: {
           approval: cfg.agent.approval,
@@ -177,11 +295,22 @@ export default function SettingsDrawer({ onClose, onSaved }: Props) {
           history_budget_chars: cfg.context.history_budget_chars,
           repo_map_enabled: cfg.context.repo_map_enabled,
         },
-        mcp_servers: mcpRows,
+        mcp_servers: mcpRows.map((row) => ({
+          ...row,
+          env: Object.fromEntries(
+            Object.entries(row.env ?? {}).filter(([, value]) => String(value).trim() !== ""),
+          ),
+        })),
         hooks: hookRows,
       }
       const data = await saveSettings(payload)
-      setNotice(t("settings.saved", lang))
+      // Surface MCP boot failures instead of a blanket "saved": a server that
+      // could not start is a saved-but-broken state the user must see.
+      if (data.mcp_errors && data.mcp_errors.length > 0) {
+        setNotice(t("settings.savedWithMcpErrors", lang, { errors: data.mcp_errors.join("; ") }))
+      } else {
+        setNotice(t("settings.saved", lang))
+      }
       dirtyRef.current.cfg = false
       dirtyRef.current.mcp = false
       onSaved(data.status)
@@ -198,7 +327,11 @@ export default function SettingsDrawer({ onClose, onSaved }: Props) {
     setProbe(null)
     setNotice("")
     try {
-      const res = await testConnection({ base_url: cfg!.provider.base_url, model: cfg!.provider.model, api_key: "" })
+      const res = await testConnection({
+        base_url: cfg!.provider.base_url,
+        model: cfg!.provider.model,
+        api_key: apiKeyInput.trim(),
+      })
       setProbe(res)
     } catch (e) {
       setNotice(t("settings.testFailed", lang, { msg: e instanceof Error ? e.message : String(e) }))
@@ -409,6 +542,15 @@ export default function SettingsDrawer({ onClose, onSaved }: Props) {
                 <Field label={t("model.model", lang)}>
                   <TextInput value={cfg.provider.model} onChange={(e) => { dirtyRef.current.cfg = true; setCfg((c) => (c ? { ...c, provider: { ...c.provider, model: e.target.value } } : c)) }} placeholder={t("model.modelPh", lang)} />
                 </Field>
+                <Field label={t("model.apiKey", lang)} hint={t("model.apiKeyHint", lang)}>
+                  <TextInput
+                    type="password"
+                    autoComplete="off"
+                    value={apiKeyInput}
+                    onChange={(e) => setApiKeyInput(e.target.value)}
+                    placeholder={cfg.provider.has_api_key ? t("model.apiKeyKeep", lang, { masked: cfg.provider.api_key_masked }) : t("model.apiKeyPhNew", lang)}
+                  />
+                </Field>
                 <Field label={t("settings.effort", lang)} hint={t("settings.effortDesc", lang)}>
                   <Select value={cfg.agent.effort ?? "medium"} onChange={(e) => patchAgent({ effort: e.target.value as "low" | "medium" | "high" })}>
                     <option value="low">{t("settings.effortLow", lang)}</option>
@@ -504,8 +646,23 @@ export default function SettingsDrawer({ onClose, onSaved }: Props) {
                   </label>
                 ))}
                 <label className="flex items-center justify-between gap-2 rounded-lg bg-panel2 px-3 py-2.5">
-                  <span className="text-[13px] text-ink2">{t("agent.workdirOnly", lang)}</span>
-                  <Toggle checked={cfg.agent.workdir_only} onChange={(v) => patchAgent({ workdir_only: v })} />
+                  <span className="flex flex-col">
+                    <span className="text-[13px] text-ink2">{t("agent.workdirOnly", lang)}</span>
+                    <span className="text-[10.5px] text-ink3">{t("agent.workdirOnlyHint", lang)}</span>
+                  </span>
+                  {/* The legacy workdir_only flag was never read by the sandbox,
+                      so this switch wrote a value nothing obeyed. It now drives
+                      sandbox_mode directly — the one field enforcement reads. */}
+                  <Toggle
+                    checked={cfg.agent.sandbox_mode === "workspace" || cfg.agent.sandbox_mode === "sandbox-only"}
+                    onChange={(v) =>
+                      patchAgent({
+                        workdir_only: v,
+                        sandbox_mode: v ? "workspace" : "full-access",
+                        ...(v ? {} : { approval: cfg.agent.approval === "full-auto" ? "full-auto" : cfg.agent.approval }),
+                      })
+                    }
+                  />
                 </label>
               </section>
 
@@ -710,10 +867,26 @@ export default function SettingsDrawer({ onClose, onSaved }: Props) {
                       <Field label={t("mcp.readonly", lang)}>
                         <TextInput value={s.readonly_tools.join(" ")} onChange={(e) => patchMcp(i, { readonly_tools: e.target.value.split(/\s+/).filter(Boolean) })} placeholder={t("mcp.readonlyPh", lang)} />
                       </Field>
+                      {s.env && Object.keys(s.env).length > 0 && (
+                        <div className="flex flex-col gap-2 rounded-lg border border-warn/30 bg-warn/5 p-2.5">
+                          <p className="text-[11px] text-warn">{t("mcp.envHint", lang)}</p>
+                          {Object.keys(s.env).map((key) => (
+                            <Field key={key} label={key}>
+                              <TextInput
+                                type="password"
+                                autoComplete="off"
+                                value={s.env?.[key] ?? ""}
+                                onChange={(e) => patchMcp(i, { env: { ...(s.env ?? {}), [key]: e.target.value } })}
+                                placeholder={t("mcp.envPh", lang)}
+                              />
+                            </Field>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   ))}
                   <div className="flex items-center gap-2">
-                    <Button size="sm" variant="soft" onClick={() => setMcpRows((rows) => [...rows, { name: `mcp-${rows.length + 1}`, command: "", args: [], readonly_tools: [] }])}>
+                    <Button size="sm" variant="soft" onClick={() => setMcpRows((rows) => [...rows, { name: `mcp-${rows.length + 1}`, command: "", args: [], env: {}, readonly_tools: [] }])}>
                       <IconPlus size={12} /> {t("mcp.add", lang)}
                     </Button>
                     <Button size="sm" variant="soft" onClick={() => setShowRegistry(true)}>
@@ -812,6 +985,8 @@ export default function SettingsDrawer({ onClose, onSaved }: Props) {
                 <h3 className="text-sm font-semibold text-ink">{t("project.workdir", lang)}</h3>
                 <p className="mt-1 font-mono text-xs text-ink2">{cfg.workdir}</p>
               </section>
+
+              <HealthSection lang={lang} />
             </div>
           )}
         </div>

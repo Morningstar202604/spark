@@ -175,6 +175,13 @@ def _handle_chat_stream(handler: HandlerBase, body: dict) -> None:
             if stream.disconnected:
                 return
             state.busy = True
+            web_enabled = bool(body.get("web_search", True))
+            # Always apply the per-turn gate. It used to be skipped whenever a
+            # tool_allowlist was active, so the switch silently did nothing for
+            # users running an approval profile with a tool whitelist.
+            turn_loop.registry.disabled_tools = (
+                set() if web_enabled else {"web_search", "web_fetch"}
+            )
             try:
                 if slash_result is not None:
                     stream.submit_payload(
@@ -204,6 +211,7 @@ def _handle_chat_stream(handler: HandlerBase, body: dict) -> None:
                             break
             finally:
                 state.busy = False
+                turn_loop.registry.disabled_tools = set()
         if stream.disconnected:
             return
         if not stream.finish():

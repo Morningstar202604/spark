@@ -1,8 +1,9 @@
-import { memo, useCallback, useEffect, useRef, useState, type DragEvent, type KeyboardEvent } from "react"
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent } from "react"
 import { useChatStore } from "../store/chatStore"
 import { useSessionStore } from "../store/sessionStore"
 import { useUiStore } from "../store/uiStore"
-import { IconImage, IconPaperclip, IconSend, IconStop, IconX } from "./icons"
+import { fetchCommands, type SlashCommandInfo } from "../api"
+import { IconGlobe, IconImage, IconPaperclip, IconSend, IconStop, IconX } from "./icons"
 import { cls } from "./ui"
 import { t } from "../i18n"
 
@@ -13,6 +14,8 @@ export const Composer = memo(function Composer() {
   const streaming = useChatStore((s) => s.streaming)
   const setInput = useChatStore((s) => s.setInput)
   const send = useChatStore((s) => s.send)
+  const webSearch = useChatStore((s) => s.webSearch)
+  const setWebSearch = useChatStore((s) => s.setWebSearch)
   // Route through the session store so the local abort and POST /api/cancel
   // happen together (chatStore.cancel only aborts the fetch).
   const cancel = useSessionStore((s) => s.handleCancel)
@@ -24,8 +27,41 @@ export const Composer = memo(function Composer() {
   const fileRef = useRef<HTMLInputElement>(null)
   const [images, setImages] = useState<string[]>([])
   const [dragging, setDragging] = useState(false)
+  const [commands, setCommands] = useState<SlashCommandInfo[]>([])
+  const [slashIndex, setSlashIndex] = useState(0)
 
   const model = status?.model
+
+  // Slash menu: only when the message starts with "/" (like Claude Code / Codex).
+  const slashQuery = input.startsWith("/") && !input.includes("\n") ? input.slice(1).split(/\s/)[0].toLowerCase() : null
+  const slashItems = useMemo(() => {
+    if (slashQuery === null) return []
+    return commands.filter((c) => c.name.toLowerCase().includes(slashQuery))
+  }, [commands, slashQuery])
+  const slashOpen = slashQuery !== null && slashItems.length > 0
+
+  useEffect(() => {
+    let alive = true
+    fetchCommands()
+      .then((data) => {
+        if (alive) setCommands(data.commands)
+      })
+      .catch(() => {
+        /* 没有自定义命令是正常状态 */
+      })
+    return () => {
+      alive = false
+    }
+  }, [])
+
+  useEffect(() => {
+    setSlashIndex(0)
+  }, [slashQuery])
+
+  const applySlash = useCallback((name: string) => {
+    setInput(`/${name} `)
+    taRef.current?.focus()
+  }, [setInput])
 
   function autoGrow() {
     const el = taRef.current
@@ -46,6 +82,29 @@ export const Composer = memo(function Composer() {
   }, [input, images, streaming, send])
 
   function onKey(e: KeyboardEvent<HTMLTextAreaElement>) {
+    if (slashOpen) {
+      if (e.key === "ArrowDown") {
+        e.preventDefault()
+        setSlashIndex((i) => Math.min(i + 1, slashItems.length - 1))
+        return
+      }
+      if (e.key === "ArrowUp") {
+        e.preventDefault()
+        setSlashIndex((i) => Math.max(i - 1, 0))
+        return
+      }
+      if (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey)) {
+        e.preventDefault()
+        const pick = slashItems[slashIndex]
+        if (pick) applySlash(pick.name)
+        return
+      }
+      if (e.key === "Escape") {
+        e.preventDefault()
+        setInput("")
+        return
+      }
+    }
     if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault()
       submit()
@@ -114,10 +173,42 @@ export const Composer = memo(function Composer() {
 
         <div
           className={cls(
-            "rounded-2xl border bg-panel shadow-sm transition-colors focus-within:border-accent/70",
+            "relative rounded-2xl border bg-panel shadow-sm transition-colors focus-within:border-accent/70",
             dragging ? "border-accent" : "border-line",
           )}
         >
+          {slashOpen && (
+            <div
+              className="anim-fade absolute bottom-full left-0 mb-2 w-full overflow-hidden rounded-xl border border-line bg-panel shadow-[var(--shadow)]"
+              role="listbox"
+              aria-label={t("composer.slashHint", lang)}
+            >
+              {slashItems.length === 0 && (
+                <p className="px-3 py-2.5 text-[12px] text-ink3">{t("composer.slashEmpty", lang)}</p>
+              )}
+              {slashItems.map((c, i) => (
+                <button
+                  key={c.name}
+                  type="button"
+                  role="option"
+                  aria-selected={i === slashIndex}
+                  onMouseEnter={() => setSlashIndex(i)}
+                  onMouseDown={(e) => {
+                    // mousedown, not click: the textarea blur would close the menu first
+                    e.preventDefault()
+                    applySlash(c.name)
+                  }}
+                  className={cls(
+                    "flex w-full items-center gap-2 px-3 py-2 text-left text-[12.5px]",
+                    i === slashIndex ? "bg-hover text-ink" : "text-ink2",
+                  )}
+                >
+                  <span className="font-mono text-accent">/{c.name}</span>
+                  <span className="min-w-0 flex-1 truncate text-ink3">{c.description}</span>
+                </button>
+              ))}
+            </div>
+          )}
           <textarea
             ref={taRef}
             rows={1}
@@ -147,6 +238,23 @@ export const Composer = memo(function Composer() {
                 className="hidden h-8 w-8 items-center justify-center rounded-lg text-ink3 transition-colors hover:bg-hover hover:text-ink disabled:opacity-45 sm:flex"
               >
                 <IconImage size={16} />
+              </button>
+              <button
+                type="button"
+                title={webSearch ? t("composer.webSearchOn", lang) : t("composer.webSearchOff", lang)}
+                aria-pressed={webSearch}
+                onClick={() => {
+                  const next = !webSearch
+                  setWebSearch(next)
+                  useUiStore.getState().pushToast(next ? "toast.webSearchOn" : "toast.webSearchOff", "info")
+                }}
+                className={cls(
+                  "flex h-8 items-center gap-1.5 rounded-lg px-2 text-[11.5px] font-medium transition-colors",
+                  webSearch ? "bg-accent-soft text-accent" : "text-ink3 hover:bg-hover hover:text-ink",
+                )}
+              >
+                <IconGlobe size={14} />
+                <span className="hidden sm:inline">{t("composer.webSearch", lang)}</span>
               </button>
               {model && (
                 <button
