@@ -4,6 +4,50 @@
 
 ## [Unreleased]
 
+### 新增（消息级操作与分支）
+
+- **消息级删除 / 编辑重发 / 重新生成**：历史接口现在返回真实数据库 id，
+  前端按 id 操作；`POST /api/messages/delete` 新增。此前只有检查点面板能
+  「回退到某条消息」，聊天区每条消息无法单独处理。
+- **会话重命名 / 分叉**：`POST /api/sessions/rename|fork`，侧栏双击或铅笔
+  重命名，顶部按钮分叉当前会话并切过去。
+
+### 新增（环境自愈）
+
+- `spark.selfheal`：`diagnose()` 体检工作目录、SPARK_HOME、凭据、运行时
+  （python/git/node）、配置文件；`repair()` 只做安全可回滚的修复（建目录、
+  写默认配置、备份损坏配置后重建）。
+- 新增 `GET /api/diagnostics`、`POST /api/selfheal`，设置 → 项目页有「环境
+  体检」卡片，可一键修复；CLI 增加 `spark doctor --fix`。
+- **全局配置损坏不再 brick 启动**：`config.toml` 解析失败时备份为
+  `config.toml.broken-<时间戳>` 并按默认配置启动，`cfg.recovery_notes`
+  记录经过。
+
+### 新增（前端真实性与可观测）
+
+- **执行图接入真实事件流**：改为由 SSE 的 tool_start/tool_end 累积节点与边，
+  空会话才显示结构示意（此前无论跑没跑都渲染写死的样例）。
+- **演示模式徽标**：provider 因缺 Key 静默降级到 MockProvider 时，顶部显示
+  「演示模式」并给出原因，不再让脚本回复看起来像真模型。
+- **输入框联网开关**：关闭后本轮不向模型暴露 `web_search/web_fetch`；
+  启用审批档案白名单时同样生效。
+- **斜杠命令补全**：输入 `/` 弹出项目内 `.spark/commands/*.md` 命令列表，
+  支持上下键选择与 Tab/Enter 补全。
+
+### 修复（评审发现的「能点但无效」）
+
+- **`workdir_only` 开关无效**：沙箱只读 `sandbox_mode`，该字段从未被使用。
+  开关改为直接驱动 `sandbox_mode`（workspace ⇄ full-access）。
+- **full-auto 切回 suggest 后审批被静默拒绝**：`WebApprover` 只在启动时非
+  full-auto 才创建，切换后 loop 仍拿 None。改为按需创建。
+- **MCP 每-server 环境变量**：`McpServerConfig.env` 新增并贯穿
+  save/parse/stdio 启动；注册表一键添加会带出必填变量；保存时 MCP 启动
+  失败会明确提示，而不是一律「已保存」。
+- **测试连接不能测新端点**：现在允许在提供该端点自己的 Key 时测试任意
+  地址；仍拒绝把已存密钥发往其他主机。
+- **repo_map 设置不落盘**：`save_config` 补 `repo_map_enabled`/`repo_map_max_chars`。
+- 会话列表上限 50 → 200；助手消息操作在触屏设备上常显（原先仅 hover 可见）。
+
 ### 修复（Windows 上会真实崩溃的问题）
 
 - **控制台编码崩溃**：`typer.echo("◆ …")` 在 cp1252/cp936 控制台抛
