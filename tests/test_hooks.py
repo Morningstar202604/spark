@@ -3,6 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from spark.hooks import HookDecision, HookRegistry
 
 
@@ -42,11 +44,10 @@ def test_first_blocking_hook_wins(tmp_path: Path) -> None:
 
 def test_unknown_event_rejected() -> None:
     registry = HookRegistry()
-    try:
+    with pytest.raises(ValueError, match="nope"):
         registry.register("nope", RecordingHook())
-    except ValueError:
-        return
-    raise AssertionError("expected ValueError")
+    # A rejected hook must not be half-registered: the registry stays disabled.
+    assert not registry.enabled
 
 
 def test_shell_hook_allows_on_zero_exit(tmp_path: Path) -> None:

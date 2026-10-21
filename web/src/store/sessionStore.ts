@@ -1,6 +1,6 @@
 import { create } from "zustand"
 import type { ApprovalInfo, PlanStep, SessionRow, Status, ToolCall } from "../types"
-import { listSessions, newSession, switchSession, deleteSession, cancelTurn, respondApproval } from "../api"
+import { listSessions, newSession, switchSession, deleteSession, cancelTurn, respondApproval, forkSession } from "../api"
 import { useChatStore, historyToItems, type ChatMsg } from "./chatStore"
 import { useUiStore } from "./uiStore"
 
@@ -24,6 +24,7 @@ interface SessionState {
   handleNewSession: () => Promise<void>
   handleSwitch: (id: string) => Promise<void>
   handleDelete: (id: string) => Promise<void>
+  handleFork: (id?: string) => Promise<void>
   handleCancel: () => Promise<void>
   handleApproval: (decision: "allow" | "allow_always" | "deny") => Promise<void>
 }
@@ -111,6 +112,19 @@ export const useSessionStore = create<SessionState>((set, get) => {
         const msg = e instanceof Error ? e.message : String(e)
         void msg
         useUiStore.getState().pushToast("toast.deleteSessionFailed", "error")
+      }
+    },
+
+    handleFork: async (id) => {
+      try {
+        const data = await forkSession(id ?? get().status?.session_id)
+        set({ status: data.status, plan: data.status.plan || [] })
+        const items = historyToItems(data.messages)
+        useChatStore.getState().setItems(items)
+        useUiStore.getState().pushToast("toast.forkDone", "success")
+        await get().refreshSessions()
+      } catch {
+        useUiStore.getState().pushToast("toast.forkFailed", "error")
       }
     },
 

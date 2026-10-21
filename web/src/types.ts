@@ -14,6 +14,17 @@ export interface Status {
   mcp_errors?: string[]
   context?: { used: number; limit: number; percent: number }
   plan?: PlanStep[]
+  /** True when the configured provider degraded to the scripted mock. */
+  demo_mode?: boolean
+  demo_reason?: string
+  session_tokens?: {
+    input_tokens: number
+    output_tokens: number
+    reasoning_tokens: number
+    total_tokens: number
+    calls: number
+    cost_usd: number | null
+  }
 }
 
 export interface DisplayFlags {
@@ -34,6 +45,7 @@ export interface McpServer {
   name: string
   command: string
   args: string[]
+  env?: Record<string, string>
   readonly_tools: string[]
   transport?: "stdio" | "sse" | "streamable_http"
   allowed_tools?: string[]
@@ -181,6 +193,8 @@ export interface HistoryMessage {
   content: string
   name?: string
   images?: string[]
+  /** Database row id; present when the backend could align rows with history. */
+  id?: number
 }
 
 export interface ApprovalInfo {

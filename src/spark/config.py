@@ -15,8 +15,10 @@ from __future__ import annotations
 import logging
 import os
 import re
+import shutil
 import subprocess
 import sys
+import time
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
@@ -157,6 +159,10 @@ class McpServerConfig(BaseModel):
     name: str
     command: str = ""  # for stdio transport
     args: list[str] = Field(default_factory=list)  # for stdio transport
+    #: Extra environment variables for a stdio server, e.g. GITHUB_TOKEN. The
+    #: registry lists required ones; without a place to put them a picked
+    #: server could never start.
+    env: dict[str, str] = Field(default_factory=dict)
     readonly_tools: list[str] = Field(default_factory=list)
     transport: Literal["stdio", "sse", "streamable_http"] = "stdio"
     http: McpTransportConfig | None = None  # for the sse / streamable_http transports
@@ -307,6 +313,9 @@ class SparkConfig(BaseSettings):
     # .spark/settings.local.toml（全量）装配；评估语义见 policy.decide
     # （deny 跨层优先——任何一层 deny 即拒绝，克隆仓库无法给自己授权）。
     permission_scopes: dict[str, list[PermissionRule]] = Field(default_factory=dict)
+    #: Self-heal audit trail filled by :func:`load_config` (empty = nothing was
+    #: repaired). Runtime-only: never serialised back to TOML.
+    recovery_notes: list[str] = Field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -445,6 +454,50 @@ def _load_toml(path: Path) -> dict[str, Any]:
     if servers:
         data["mcp_servers"] = servers
     return data
+
+
+def _load_toml_soft(path: Path) -> tuple[dict[str, Any], str | None]:
+    """Like :func:`_load_toml` but never raises; returns ``(data, error)``."""
+    try:
+        return _load_toml(path), None
+    except ConfigError as exc:
+        return {}, str(exc)
+
+
+def _backup_broken_config(path: Path) -> Path:
+    """Preserve an unparsable config next to the original before rebuilding it.
+
+    Deleting a user's file without a copy is the one repair we never do: even a
+    broken config may hold an API key or a hand-tuned setting they want back.
+    """
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    target = path.with_name(f"{path.name}.broken-{stamp}")
+    shutil.copy2(path, target)
+    return target
+
+
+def _recover_global_config(path: Path, note: list[str]) -> dict[str, Any]:
+    """Rebuild a broken/unreadable global config instead of refusing to start.
+
+    A corrupted ``~/.spark/config.toml`` used to brick every surface (CLI, Web,
+    TUI) with exit code 2 and no way forward from inside the app. Defaults are
+    usable (they degrade to the mock provider), so recover and tell the user.
+    """
+    try:
+        backup = _backup_broken_config(path)
+    except OSError as exc:
+        note.append(f"配置文件损坏且无法备份（{exc}），本次按默认配置运行")
+        return {}
+    note.append(f"配置文件损坏，已备份为 {backup.name} 并按默认配置启动")
+    try:
+        path.unlink()
+    except OSError:
+        pass
+    try:
+        write_config_template(path)
+    except OSError as exc:
+        note.append(f"无法重建配置文件：{exc}")
+    return {}
 
 
 def _sanitize_project_config(raw: dict[str, Any]) -> dict[str, Any]:
@@ -600,16 +653,29 @@ def load_config(
 ) -> SparkConfig:
     raw: dict[str, Any] = {}
     chosen: Path | None = None
+    recovery_notes: list[str] = []
     if config_path is not None:
         chosen = config_path
-        raw = _load_toml(config_path)
+        if config_path.exists() and not _is_repo_local(config_path, workdir):
+            # An explicitly-passed global-style config gets the same self-heal
+            # as the default one; a repo-local file stays strict because it is
+            # untrusted input from someone else's clone.
+            raw, error = _load_toml_soft(config_path)
+            if error:
+                recovery_notes.append(f"配置文件损坏：{error}")
+                raw = _recover_global_config(config_path, recovery_notes)
+        else:
+            raw = _load_toml(config_path)
         if _is_repo_local(config_path, workdir):
             raw = _sanitize_project_config(raw)
     else:
         global_path = default_config_path()
         if global_path.exists():
             chosen = global_path
-            raw = _load_toml(global_path)
+            raw, error = _load_toml_soft(global_path)
+            if error:
+                recovery_notes.append(f"配置文件损坏：{error}")
+                raw = _recover_global_config(global_path, recovery_notes)
         repo_path = workdir / ".spark.toml"
         if repo_path.exists() and not _is_repo_local(global_path, workdir):
             raw = _merge_config(raw, _sanitize_project_config(_load_toml(repo_path)))
@@ -622,6 +688,9 @@ def load_config(
         cfg = SparkConfig.model_validate(raw)
     except Exception as exc:
         raise ConfigError(f"Invalid config file: {chosen or 'defaults'}") from exc
+    # Surfaced by the CLI/Web so a recovered config never looks like nothing
+    # happened (silent self-heal is indistinguishable from silent data loss).
+    cfg.recovery_notes = recovery_notes
 
     if approval:
         cfg.agent.approval = cast(
@@ -736,6 +805,8 @@ def save_config(cfg: SparkConfig, path: Path | None = None) -> Path:
     context.add("max_context_tokens", cfg.context.max_context_tokens)
     context.add("compact_threshold", cfg.context.compact_threshold)
     context.add("keep_recent_messages", cfg.context.keep_recent_messages)
+    context.add("repo_map_enabled", cfg.context.repo_map_enabled)
+    context.add("repo_map_max_chars", cfg.context.repo_map_max_chars)
     doc.add("context", context)
 
     # [memory]
@@ -768,6 +839,8 @@ def save_config(cfg: SparkConfig, path: Path | None = None) -> Path:
             else:
                 srv_table.add("command", server.command)
                 srv_table.add("args", list(server.args))
+                if server.env:
+                    srv_table.add("env", dict(server.env))
                 srv_table.add("readonly_tools", list(server.readonly_tools))
                 if server.allowed_tools:
                     srv_table.add("allowed_tools", list(server.allowed_tools))

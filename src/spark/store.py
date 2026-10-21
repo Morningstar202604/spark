@@ -711,7 +711,7 @@ class SessionStore:
         """时间轴用：消息 id/角色/预览/时间（honouring compact-from 截断）。"""
         with self._lock:
             rows = self._conn.execute(
-                """SELECT id, role, content, created_at FROM messages
+                """SELECT id, role, content, payload_json, created_at FROM messages
                    WHERE session_id = ?
                      AND id >= COALESCE((SELECT compact_from FROM sessions WHERE id = ?), 0)
                    ORDER BY id DESC LIMIT ?""",
@@ -720,10 +720,21 @@ class SessionStore:
         briefs: list[dict] = []
         for row in reversed(rows):
             content = row["content"] or ""
+            name = ""
+            if row["role"] == "tool":
+                # Tool rows hold the raw JSON result; the timeline is for humans,
+                # so show the tool that ran rather than a wall of escaped JSON.
+                try:
+                    payload = json.loads(row["payload_json"] or "{}")
+                    if isinstance(payload, dict):
+                        name = str(payload.get("name") or "")
+                except (TypeError, ValueError):
+                    name = ""
             briefs.append(
                 {
                     "id": int(row["id"]),
                     "role": row["role"],
+                    "name": name,
                     "preview": content[:120].replace("\n", " "),
                     "created_at": int(row["created_at"]),
                 }

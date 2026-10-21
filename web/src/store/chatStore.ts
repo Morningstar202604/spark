@@ -1,6 +1,6 @@
 import { create } from "zustand"
 import type { ChatEvent, PlanStep } from "../types"
-import { streamChat, fetchHistory } from "../api"
+import { streamChat, fetchHistory, deleteMessage as deleteMessageApi, truncateFromMessage as truncateFromMessageApi } from "../api"
 import { useSessionStore } from "./sessionStore"
 import { useUiStore } from "./uiStore"
 import { t } from "../i18n"
@@ -30,9 +30,32 @@ export interface ChatMsg {
   images?: string[]
   streaming?: boolean
   segments: Segment[]
+  /** 后端消息行 id（编辑/删除/重试需要精确锚点）；流式新消息在刷新前没有 */
+  dbId?: number
+  /** 时间戳（真实事件流画执行图用） */
+  startedAt?: number
   meta?: {
     compacted?: { before: number; after: number; summarized: number }
   }
+}
+
+/** 一轮真实执行的节点/边，供执行图渲染；由 SSE 事件累积，不是样例数据。 */
+export interface GraphNode {
+  id: string
+  label: string
+  kind: "root" | "agent" | "tool" | "result"
+  status: "running" | "done" | "error" | "pending"
+}
+
+export interface GraphEdge {
+  from: string
+  to: string
+  label?: string
+}
+
+export interface TurnGraph {
+  nodes: GraphNode[]
+  edges: GraphEdge[]
 }
 
 export function uid(): string {
@@ -49,14 +72,37 @@ interface ChatState {
   streaming: boolean
   loading: boolean
   abortController: AbortController | null
+  /** 输入框"联网搜索"开关：关闭时本轮不向模型提供 web_search/web_fetch */
+  webSearch: boolean
+  /** 当前会话真实执行轨迹（最近一轮）；空数组 = 还没有执行过 */
+  turnGraph: TurnGraph
+  setTurnGraph: (g: TurnGraph) => void
   setInput: (v: string) => void
   setStreaming: (v: boolean) => void
   setItems: (items: ChatMsg[]) => void
   setLoading: (v: boolean) => void
+  setWebSearch: (v: boolean) => void
   addErrorItem: (text: string) => void
   send: (images?: string[]) => Promise<void>
+  /** 删除单条消息（后端持久化 + 本地同步） */
+  deleteMessage: (dbId: number) => Promise<void>
+  /** 重新生成：截断到该助手消息之前，重放它对应的用户消息 */
+  regenerate: (assistantDbId: number) => Promise<void>
+  /** 编辑重发：截断到该用户消息之前，并把原文放回输入框 */
+  startEditMessage: (userDbId: number) => Promise<void>
   loadInitialHistory: () => Promise<void>
   cancel: () => void
+}
+
+const WEB_SEARCH_KEY = "spark.webSearch"
+
+function readWebSearchPref(): boolean {
+  try {
+    const raw = localStorage.getItem(WEB_SEARCH_KEY)
+    return raw === null ? true : raw === "1"
+  } catch {
+    return true
+  }
 }
 
 export const useChatStore = create<ChatState>((set, get) => ({
@@ -65,11 +111,23 @@ export const useChatStore = create<ChatState>((set, get) => ({
   streaming: false,
   loading: false,
   abortController: null,
+  webSearch: readWebSearchPref(),
+  turnGraph: { nodes: [], edges: [] },
+
+  setTurnGraph: (g) => set({ turnGraph: g }),
 
   setInput: (v) => set({ input: v }),
   setStreaming: (v) => set({ streaming: v }),
   setItems: (items) => set({ items }),
   setLoading: (v) => set({ loading: v }),
+  setWebSearch: (v) => {
+    try {
+      localStorage.setItem(WEB_SEARCH_KEY, v ? "1" : "0")
+    } catch {
+      /* storage blocked: the toggle still works for this session */
+    }
+    set({ webSearch: v })
+  },
 
   addErrorItem: (text) => set((s) => ({ items: [...s.items, { id: uid(), role: "error", text, segments: [] }] })),
 
@@ -113,6 +171,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
     const buf = { text: "", think: "" }
     let rafPending = false
+    // 真实执行轨迹：root → 每个工具调用 → 结果。事件流就是唯一事实来源，
+    // 之前执行图渲染的是写死的样例数据（"静态样例（待接 loop 事件流）"）。
+    const graphNodes: GraphNode[] = [{ id: "root", label: "Spark", kind: "root", status: "running" }]
+    const graphEdges: GraphEdge[] = []
+    set({ turnGraph: { nodes: [...graphNodes], edges: [] } })
+    const pushGraph = () => set({ turnGraph: { nodes: [...graphNodes], edges: [...graphEdges] } })
 
     /** 修改当前助手消息；无则 no-op */
     function patchLast(fn: (it: ChatMsg) => ChatMsg) {
@@ -182,6 +246,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
           break
         case "tool_start": {
           flush()
+          graphNodes.push({
+            id: `tool-${ev.tool.id}`,
+            label: ev.tool.name,
+            kind: "tool",
+            status: "running",
+          })
+          graphEdges.push({ from: "root", to: `tool-${ev.tool.id}` })
+          pushGraph()
           patchLast((it) => ({
             ...it,
             segments: [
@@ -196,6 +268,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
         }
         case "tool_end": {
           flush()
+          const node = graphNodes.find((n) => n.id === `tool-${ev.tool.id}`)
+          if (node) {
+            node.status = ev.ok ? "done" : "error"
+            pushGraph()
+          }
           patchLast((it) => ({
             ...it,
             segments: it.segments.map((seg) =>
@@ -275,6 +352,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
         }
         case "turn_end":
           flush()
+          graphNodes[0].status = "done"
+          graphNodes.push({ id: "result", label: "result", kind: "result", status: "done" })
+          for (const n of graphNodes) {
+            if (n.kind === "tool") graphEdges.push({ from: n.id, to: "result" })
+          }
+          graphEdges.push({ from: "root", to: "result" })
+          pushGraph()
           patchLast((it) => ({
             ...it,
             streaming: false,
@@ -283,6 +367,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
           break
         case "turn_error":
           flush()
+          graphNodes[0].status = "error"
+          pushGraph()
           set((s) => ({ items: [...s.items, { id: uid(), role: "error", text: ev.text || "turn error", segments: [] }] }))
           break
         case "done":
@@ -293,7 +379,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
 
     try {
-      await streamChat(prompt, onEvent, ac.signal, images)
+      await streamChat(prompt, onEvent, ac.signal, images, get().webSearch)
       flush()
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
@@ -321,12 +407,101 @@ export const useChatStore = create<ChatState>((set, get) => ({
         useSessionStore.getState().setApproval(null)
       }
       await useSessionStore.getState().refreshSessions()
+      // Attach database ids to the messages just produced. Without this the
+      // delete / edit / regenerate actions stayed disabled on every message
+      // sent in this page load, until a manual refresh. Only ids are copied:
+      // replacing the list would throw away reasoning/tool segments, which the
+      // server does not persist.
+      try {
+        const h = await fetchHistory()
+        if (!get().streaming) {
+          const ids = h.messages
+            .filter((m) => (m.role === "user" || m.role === "assistant") && m.id)
+            .map((m) => ({ role: m.role, id: m.id as number }))
+          set((s) => {
+            let cursor = 0
+            let changed = false
+            const items = s.items.map((it) => {
+              if (it.role !== "user" && it.role !== "assistant") return it
+              while (cursor < ids.length && ids[cursor].role !== it.role) cursor += 1
+              if (cursor >= ids.length) return it
+              const id = ids[cursor].id
+              cursor += 1
+              if (it.dbId === id) return it
+              changed = true
+              return { ...it, dbId: id }
+            })
+            return changed ? { items } : s
+          })
+        }
+      } catch {
+        /* ids are a convenience; the next explicit action re-reads history */
+      }
+    }
+  },
+
+  deleteMessage: async (dbId: number) => {
+    if (get().streaming) return
+    try {
+      const data = await deleteMessageApi(dbId)
+      set({ items: historyToItems(data.messages) })
+      useSessionStore.getState().setStatus(data.status)
+      await useSessionStore.getState().refreshSessions()
+      useUiStore.getState().pushToast("toast.messageDeleted", "success")
+    } catch {
+      useUiStore.getState().pushToast("toast.messageDeleteFailed", "error")
+    }
+  },
+
+  startEditMessage: async (userDbId: number) => {
+    if (get().streaming) return
+    const msg = get().items.find((m) => m.dbId === userDbId)
+    if (!msg) return
+    try {
+      // 真删而不是"只回填输入框"：否则用户改完发送后会变成同一句话的两条记录。
+      const data = await truncateFromMessageApi(userDbId)
+      set({ items: historyToItems(data.messages), input: msg.text })
+      useSessionStore.getState().setStatus(data.status)
+      await useSessionStore.getState().refreshSessions()
+    } catch {
+      useUiStore.getState().pushToast("toast.editFailed", "error")
+    }
+  },
+
+  regenerate: async (assistantDbId: number) => {
+    if (get().streaming) return
+    const items = get().items
+    const index = items.findIndex((m) => m.dbId === assistantDbId)
+    if (index < 0) return
+    let userIndex = -1
+    for (let i = index - 1; i >= 0; i -= 1) {
+      if (items[i].role === "user") {
+        userIndex = i
+        break
+      }
+    }
+    if (userIndex < 0) return
+    const user = items[userIndex]
+    if (!user.dbId) {
+      useUiStore.getState().pushToast("toast.regenerateUnavailable", "error")
+      return
+    }
+    try {
+      // 删除该轮用户消息及其后全部内容，再用同一 prompt 重跑：后端每轮都会
+      // 重新落一条 user 行，因此必须先截断而不是"只删助手回复"。
+      const data = await truncateFromMessageApi(user.dbId)
+      set({ items: historyToItems(data.messages) })
+      useSessionStore.getState().setStatus(data.status)
+      set({ input: user.text })
+      await get().send(user.images ?? [])
+    } catch {
+      useUiStore.getState().pushToast("toast.regenerateFailed", "error")
     }
   },
 }))
 
 /** 后端 history（user/assistant/tool 平铺）→ 前端分组 + 顺序片段模型 */
-export function historyToItems(msgs: { role: string; content: string; name?: string; images?: string[] }[]): ChatMsg[] {
+export function historyToItems(msgs: { role: string; content: string; name?: string; images?: string[]; id?: number }[]): ChatMsg[] {
   const out: ChatMsg[] = []
   for (const m of msgs) {
     if (m.role === "tool") {
@@ -345,9 +520,15 @@ export function historyToItems(msgs: { role: string; content: string; name?: str
         out.push({ id: uid(), role: "assistant", text: "", segments: [{ kind: "tool", tool }] })
       }
     } else if (m.role === "user") {
-      out.push({ id: uid(), role: "user", text: m.content, images: m.images, segments: [] })
+      out.push({ id: uid(), role: "user", text: m.content, images: m.images, segments: [], dbId: m.id })
     } else {
-      out.push({ id: uid(), role: "assistant", text: m.content, segments: [{ kind: "text", text: m.content }] })
+      out.push({
+        id: uid(),
+        role: "assistant",
+        text: m.content,
+        segments: [{ kind: "text", text: m.content }],
+        dbId: m.id,
+      })
     }
   }
   return out

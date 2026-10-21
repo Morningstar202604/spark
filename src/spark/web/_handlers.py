@@ -22,6 +22,10 @@ from spark.web._handlers_chat import (  # noqa: F401  (re-export for backward-co
 from spark.web._handlers_common import (  # noqa: F401
     _save_config,
 )
+from spark.web._handlers_health import (  # noqa: F401
+    _handle_diagnostics,
+    _handle_selfheal,
+)
 from spark.web._handlers_knowledge import (  # noqa: F401
     _handle_agents_md,
     _handle_memory,
@@ -35,9 +39,12 @@ from spark.web._handlers_sessions import (  # noqa: F401
     _handle_approval,
     _handle_cancel,
     _handle_checkpoints_rollback,
+    _handle_messages_delete,
     _handle_messages_truncate,
     _handle_sessions_delete,
+    _handle_sessions_fork,
     _handle_sessions_new,
+    _handle_sessions_rename,
     _handle_sessions_switch,
     _history_messages,
 )
@@ -53,13 +60,18 @@ __all__ = [
     "_handle_chat",
     "_handle_chat_stream",
     "_handle_checkpoints_rollback",
+    "_handle_diagnostics",
     "_handle_memory",
+    "_handle_messages_delete",
     "_handle_messages_truncate",
     "_handle_models_activate",
     "_handle_models_delete",
     "_handle_models_save",
+    "_handle_selfheal",
     "_handle_sessions_delete",
+    "_handle_sessions_fork",
     "_handle_sessions_new",
+    "_handle_sessions_rename",
     "_handle_sessions_switch",
     "_handle_settings",
     "_handle_test",

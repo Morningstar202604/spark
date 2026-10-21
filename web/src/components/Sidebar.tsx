@@ -1,6 +1,7 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import type { SessionRow } from "../types"
-import { IconHistory, IconMonitor, IconMoon, IconPlus, IconSearch, IconSettings, IconSun, IconTrash, IconX } from "./icons"
+import { renameSession } from "../api"
+import { IconHistory, IconMonitor, IconMoon, IconPencil, IconPlus, IconSearch, IconSettings, IconSun, IconTrash, IconX } from "./icons"
 import { cls, IconButton } from "./ui"
 import { BrandMark } from "./BrandMark"
 import { useUiStore } from "../store/uiStore"
@@ -161,6 +162,8 @@ export const Sidebar = memo(function Sidebar() {
   const handleNewSession = useSessionStore((s) => s.handleNewSession)
   const handleSwitch = useSessionStore((s) => s.handleSwitch)
   const handleDelete = useSessionStore((s) => s.handleDelete)
+  const refreshSessions = useSessionStore((s) => s.refreshSessions)
+  const pushToast = useUiStore((s) => s.pushToast)
   const sidebarOpen = useUiStore((s) => s.sidebarOpen)
   const setSidebarOpen = useUiStore((s) => s.setSidebarOpen)
   const openSettings = useUiStore((s) => s.openSettings)
@@ -172,6 +175,21 @@ export const Sidebar = memo(function Sidebar() {
 
   const [query, setQuery] = useState("")
   const [confirmId, setConfirmId] = useState<string | null>(null)
+  const [renamingId, setRenamingId] = useState<string | null>(null)
+  const [renameDraft, setRenameDraft] = useState("")
+
+  async function commitRename(sessionId: string) {
+    const title = renameDraft.trim()
+    setRenamingId(null)
+    if (!title) return
+    try {
+      await renameSession(sessionId, title)
+      pushToast("toast.sessionRenamed", "success")
+      await refreshSessions()
+    } catch {
+      pushToast("toast.renameFailed", "error")
+    }
+  }
 
   const groups = useMemo(() => {
     const q = query.trim().toLowerCase()
@@ -284,14 +302,41 @@ export const Sidebar = memo(function Sidebar() {
                   const active = s.id === currentId
                   return (
                     <li key={s.id} className="group relative">
+                      {renamingId === s.id ? (
+                        <div className="rounded-lg bg-panel px-2 py-1.5">
+                          <input
+                            autoFocus
+                            value={renameDraft}
+                            onChange={(e) => setRenameDraft(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") {
+                                e.preventDefault()
+                                void commitRename(s.id)
+                              } else if (e.key === "Escape") {
+                                e.preventDefault()
+                                setRenamingId(null)
+                              }
+                            }}
+                            onBlur={() => void commitRename(s.id)}
+                            maxLength={200}
+                            aria-label={t("sidebar.rename", lang)}
+                            className="h-7 w-full rounded border border-accent/60 bg-canvas px-2 text-[13px] text-ink outline-none"
+                          />
+                        </div>
+                      ) : (
                       <button
                         type="button"
                         onClick={() => {
                           if (s.id !== currentId) handleSwitch(s.id)
                           setSidebarOpen(false)
                         }}
+                        onDoubleClick={(e) => {
+                          e.preventDefault()
+                          setRenamingId(s.id)
+                          setRenameDraft(s.title && s.title !== "untitled" ? s.title : "")
+                        }}
                         className={cls(
-                          "w-full rounded-lg px-3 py-2 pr-8 text-left transition-colors",
+                          "w-full rounded-lg px-3 py-2 pr-14 text-left transition-colors",
                           active ? "bg-selected text-ink" : "text-ink2 hover:bg-hover",
                         )}
                       >
@@ -315,7 +360,24 @@ export const Sidebar = memo(function Sidebar() {
                           {timeLabel(s.updated_at, lang)} · {s.model}
                         </span>
                       </button>
-                      <div className="absolute top-1.5 right-1.5">
+                      )}
+                      <div className="absolute top-1.5 right-1.5 flex items-center gap-0.5">
+                        <button
+                          type="button"
+                          title={t("sidebar.rename", lang)}
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            setRenamingId(s.id)
+                            setRenameDraft(s.title && s.title !== "untitled" ? s.title : "")
+                          }}
+                          className={cls(
+                            "flex h-6 w-6 items-center justify-center rounded-md text-ink3 opacity-0 transition-all hover:bg-hover hover:text-ink focus-visible:opacity-100",
+                            active && "opacity-100",
+                            "group-hover:opacity-100",
+                          )}
+                        >
+                          <IconPencil size={12} />
+                        </button>
                         {confirmId === s.id ? (
                           <span className="anim-fade flex items-center gap-1 rounded-md border border-err/40 bg-panel p-0.5 shadow-sm">
                             <button

@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import threading
 from contextlib import AbstractAsyncContextManager, AsyncExitStack
 from typing import Any, Coroutine, cast
@@ -77,6 +78,9 @@ class _McpConnection:
             params = StdioServerParameters(
                 command=self.cfg.command,
                 args=self.cfg.args or [],
+                # Merge over the inherited environment: the server needs PATH to
+                # start at all, and per-server tokens live in cfg.env.
+                env={**os.environ, **(self.cfg.env or {})} if self.cfg.env else None,
             )
             transport = stdio_client(params)
         elif self.cfg.http is not None:

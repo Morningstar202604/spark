@@ -913,6 +913,7 @@ def doctor_cmd(
     workdir: Path = typer.Option(Path("."), "--workdir"),
     config: Path | None = typer.Option(None, "--config"),
     probe: bool = typer.Option(True, "--probe/--no-probe", help="实际调用一次模型验证"),
+    fix: bool = typer.Option(False, "--fix", help="自动修复可安全修复的问题（建目录/重建配置/备份损坏配置）"),
     as_json: bool = typer.Option(False, "--json", help="输出机器可读 JSON"),
 ) -> None:
     """Diagnose configuration and print actionable fixes."""
@@ -922,6 +923,27 @@ def doctor_cmd(
     except OSError as exc:
         typer.echo(f"工作目录无效：{exc}", err=True)
         raise typer.Exit(1) from exc
+    if fix:
+        from spark import selfheal
+
+        try:
+            repair_cfg = read_config(config, resolved)
+        except SparkError:
+            # The config itself is unreadable — repair still needs a config
+            # object, and rebuilding the file is exactly what it should do.
+            repair_cfg = SparkConfig()
+        report = selfheal.repair(
+            repair_cfg,
+            workdir=resolved,
+            config_path=config or (default_home() / "config.toml"),
+        )
+        for action in report["actions"]:
+            mark = "已修复" if action["applied"] else "未修复"
+            detail = f"（{action['detail']}）" if action.get("detail") else ""
+            error = f"：{action['error']}" if action.get("error") else ""
+            typer.echo(f"  {mark} {action['kind']} {detail}{error}")
+        if not any(a["applied"] for a in report["actions"]):
+            typer.echo("  没有需要自动修复的项")
     try:
         cfg = read_config(config, resolved)
     except SparkError as exc:

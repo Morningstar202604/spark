@@ -22,6 +22,45 @@ function base({ size = 16, ...rest }: P, children: ReactNode) {
 }
 
 export const IconPlus = (p: P) => base(p, <path d="M12 5v14M5 12h14" />)
+export const IconPencil = (p: P) =>
+  base(p, (
+    <>
+      <path d="M12 20h9" />
+      <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
+    </>
+  ))
+export const IconRefresh = (p: P) =>
+  base(p, (
+    <>
+      <path d="M3 12a9 9 0 0 1 15.5-6.2L21 8" />
+      <path d="M21 3v5h-5" />
+      <path d="M21 12a9 9 0 0 1-15.5 6.2L3 16" />
+      <path d="M3 21v-5h5" />
+    </>
+  ))
+export const IconFork = (p: P) =>
+  base(p, (
+    <>
+      <circle cx="6" cy="5" r="2.5" />
+      <circle cx="18" cy="5" r="2.5" />
+      <circle cx="12" cy="19" r="2.5" />
+      <path d="M6 7.5v2a3 3 0 0 0 3 3h6a3 3 0 0 0 3-3v-2M12 12.5v4" />
+    </>
+  ))
+export const IconStethoscope = (p: P) =>
+  base(p, (
+    <>
+      <path d="M5 3v6a4 4 0 0 0 8 0V3" />
+      <path d="M9 13v3a5 5 0 0 0 10 0v-2" />
+      <circle cx="19" cy="11" r="2" />
+    </>
+  ))
+export const IconWrench = (p: P) =>
+  base(p, (
+    <>
+      <path d="M14.7 6.3a4 4 0 1 0 5 5L21 21l-4-4-9.7-9.7a4 4 0 0 1 5-5l2.4 2.4Z" />
+    </>
+  ))
 export const IconSend = (p: P) => base(p, <path d="M12 19V5M5 12l7-7 7 7" />)
 export const IconStop = (p: P) => base(p, <rect x="7" y="7" width="10" height="10" rx="2" />)
 export const IconCopy = (p: P) =>

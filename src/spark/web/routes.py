@@ -26,16 +26,22 @@ from spark.web._handlers import (  # noqa: F401  (re-export for backward-compat)
     _handle_chat,
     _handle_chat_stream,
     _handle_checkpoints_rollback,
+    _handle_diagnostics,
     _handle_memory,
+    _handle_messages_delete,
     _handle_messages_truncate,
     _handle_models_activate,
     _handle_models_delete,
     _handle_models_save,
+    _handle_selfheal,
     _handle_sessions_delete,
+    _handle_sessions_fork,
     _handle_sessions_new,
+    _handle_sessions_rename,
     _handle_sessions_switch,
     _handle_settings,
     _handle_test,
+    _history_messages,
 )
 from spark.web._httpbase import HandlerBase
 from spark.web._routing import _route_state  # noqa: E402
@@ -301,6 +307,9 @@ def build_handler_class(html: str):
             if path == "/api/status":
                 self._json(200, state.status())
                 return
+            if path == "/api/diagnostics":
+                _handle_diagnostics(self, {})
+                return
             if path == "/api/openapi.json":
                 # P1：OpenAPI 合同层（前端 codegen 单一事实来源；见 web/api_spec.py）
                 from spark.web.api_spec import OpenApiUnavailable, openapi_schema
@@ -394,7 +403,7 @@ def build_handler_class(html: str):
                     }
                     for row in rows
                     if row["workdir"] == str(state.workdir)
-                ][:50]
+                ][:200]
                 self._json(200, {"sessions": sessions, "current": state.session_id})
                 return
             if path == "/api/checkpoints":
@@ -462,37 +471,13 @@ def build_handler_class(html: str):
                 self._json(200, {"commands": items})
                 return
             if path == "/api/history":
-                messages = []
-                if state.loop:
-                    for msg in state.loop.history:
-                        msg_entry: dict[str, Any]
-                        if msg.role == "tool":
-                            msg_entry = {
-                                "role": "tool",
-                                "name": msg.name,
-                                "content": msg.content or "",
-                            }
-                        elif msg.role == "summary":
-                            msg_entry = {
-                                "role": "assistant",
-                                "content": "[conversation summary]\n" + (msg.content or ""),
-                            }
-                        elif msg.role == "user":
-                            msg_entry = {"role": "user", "content": msg.content or ""}
-                            if msg.images:
-                                msg_entry["images"] = [
-                                    f"data:{i.media_type};base64,{i.data}" for i in msg.images
-                                ]
-                            if not msg.content:
-                                continue
-                        elif msg.role == "assistant":
-                            msg_entry = {"role": "assistant", "content": msg.content or ""}
-                            if not msg.content:
-                                continue
-                        else:
-                            continue
-                        messages.append(msg_entry)
-                self._json(200, {"session_id": state.session_id, "messages": messages})
+                self._json(
+                    200,
+                    {
+                        "session_id": state.session_id,
+                        "messages": _history_messages(state),
+                    },
+                )
                 return
             if path == "/api/fs/tree":
                 query = parse_qs(urlparse(self.path).query)
@@ -581,10 +566,14 @@ _POST_HANDLERS: dict[str, Any] = {
     "/api/cancel": _handle_cancel,
     "/api/checkpoints/rollback": _handle_checkpoints_rollback,
     "/api/messages/truncate": _handle_messages_truncate,
+    "/api/messages/delete": _handle_messages_delete,
     "/api/approval": _handle_approval,
     "/api/sessions/new": _handle_sessions_new,
     "/api/sessions/delete": _handle_sessions_delete,
     "/api/sessions/switch": _handle_sessions_switch,
+    "/api/sessions/rename": _handle_sessions_rename,
+    "/api/sessions/fork": _handle_sessions_fork,
+    "/api/selfheal": _handle_selfheal,
     "/api/chat/stream": _handle_chat_stream,
     "/api/chat": _handle_chat,
     "/api/settings": _handle_settings,

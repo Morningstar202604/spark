@@ -57,8 +57,23 @@ class ToolRegistry:
         self._registered_scopes: dict[str, set[str]] = {}
         # P1-4: 声明式子代理的工具白名单（None = 全部工具，行为不变）
         self.tool_allowlist: set[str] | None = None
+        # 单轮禁用集（如输入框"联网搜索"关闭时移除 web_search/web_fetch）。
+        # 与 allowlist 分开：这是「这一轮不给」，不是「这个 agent 永远不给」，
+        # 下一轮由调用方清空，不需要重建 loop。
+        self._disabled_tools: set[str] = set()
         # dispatch 表与实例生命周期一致（仅映射静态内置处理器），缓存避免每轮重建
         self._dispatch_cache: dict[str, Callable] | None = None
+
+    @property
+    def disabled_tools(self) -> set[str]:
+        return self._disabled_tools
+
+    @disabled_tools.setter
+    def disabled_tools(self, value: set[str]) -> None:
+        # Bump the revision so the context meter recounts tool-schema overhead;
+        # otherwise closing the web switch leaves the estimated prompt size stale.
+        self._disabled_tools = set(value)
+        self._schema_revision += 1
 
     @property
     def schema_revision(self) -> int:
@@ -331,6 +346,12 @@ class ToolRegistry:
                 for s in schemas
                 if s.get("function", {}).get("name", "") in self.tool_allowlist
             ]
+        if self.disabled_tools:
+            schemas = [
+                s
+                for s in schemas
+                if s.get("function", {}).get("name", "") not in self.disabled_tools
+            ]
         return schemas
 
     def add_mcp_schema(self, schema: dict[str, Any]) -> None:
@@ -429,6 +450,14 @@ class ToolRegistry:
     async def execute(self, call: ToolCall) -> ToolResult:
         name = call.name
         try:
+            if name in self.disabled_tools:
+                return ToolResult(
+                    ok=False,
+                    payload={
+                        "error": f"tool disabled for this turn: {name}",
+                        "hint": "该工具在本轮被用户关闭（例如联网搜索开关），不要重试",
+                    },
+                )
             if name.startswith(MCP_PREFIX) and not self._mcp_name_available(name):
                 return ToolResult(
                     ok=False,
