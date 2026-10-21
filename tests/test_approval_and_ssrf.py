@@ -141,9 +141,15 @@ def test_web_fetch_blocks_internal_targets(url: str) -> None:
     ["https://example.com/docs", "http://example.org"],
 )
 def test_web_fetch_allows_public_hosts(url: str) -> None:
-    from spark.tools.web import _assert_fetchable
+    from urllib.parse import urlparse
 
-    _assert_fetchable(url)
+    from spark.tools.web import _assert_fetchable, _is_public_host
+
+    # The guard returns None on success; assert both the return value and the
+    # underlying classification, so a regression to "allow everything" fails the
+    # block-list test while a regression to "block everything" fails this one.
+    assert _assert_fetchable(url) is None
+    assert _is_public_host(urlparse(url).hostname or "")
 
 
 def test_web_fetch_tool_reports_block_without_raising() -> None:

@@ -48,7 +48,14 @@ def test_unregister_scope_removes_schemas(tmp_path):
 def test_unregister_unknown_scope_no_error(tmp_path):
     reg = make_registry(tmp_path)
     reg.register_scope("srv1", [_mcp_schema("mcp__srv1__toolA")])
-    reg.unregister_scope("nonexistent")  # not raise
+    before = reg.schema_revision
+    reg.unregister_scope("nonexistent")
+    # Unregistering an unknown scope must be a strict no-op: the existing
+    # registration survives and the revision does not move (a bump would
+    # invalidate the token-overhead cache for nothing).
+    names = {s["function"]["name"] for s in reg.schemas()}
+    assert "mcp__srv1__toolA" in names
+    assert reg.schema_revision == before
 
 def test_stale_tools_detects_removed(tmp_path):
     reg = make_registry(tmp_path)

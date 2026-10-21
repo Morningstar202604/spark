@@ -51,12 +51,15 @@ export const ApprovalModal = memo(function ApprovalModal() {
 
   return (
     <div
-      className="fixed inset-x-0 bottom-0 z-50 flex justify-center p-2 sm:p-4"
+      // Centred dialog, not a bottom sheet: the composer is also pinned to the
+      // bottom of the viewport, so anchoring the card there put its action row
+      // underneath the input box (buttons half-covered, ugly and easy to miss).
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/35 p-3 backdrop-blur-[2px] sm:p-6"
       role="alertdialog"
       aria-live="assertive"
       aria-label={t("approval.title", lang)}
     >
-      <div className="anim-fade-up w-full max-w-2xl overflow-hidden rounded-2xl border border-line bg-panel shadow-[var(--shadow)]">
+      <div className="anim-fade-up flex max-h-[86vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-line bg-panel shadow-[var(--shadow)]">
         <div className="flex items-center gap-2 border-b border-line px-3 py-2.5 sm:px-4">
           <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-warn/15 text-warn">
             {hasDiff ? (
@@ -100,20 +103,33 @@ export const ApprovalModal = memo(function ApprovalModal() {
           )}
         </div>
 
-        <div className="flex flex-col gap-2 border-t border-line bg-panel2 px-3 py-3 sm:flex-row sm:items-center sm:px-4">
+        {/* Buttons share the row instead of each claiming w-full: with three
+            full-width buttons in a flex row the last one was pushed outside the
+            card and its text wrapped to one character per line. */}
+        <div className="flex shrink-0 flex-col gap-2 border-t border-line bg-panel2 px-3 py-3 sm:flex-row sm:items-center sm:justify-end sm:px-4">
           <button
             ref={denyRef}
             type="button"
             onClick={() => handleApproval("deny")}
             disabled={busy}
-            className="inline-flex h-8.5 w-full items-center justify-center rounded-lg px-3.5 text-sm font-medium text-ink2 transition-colors hover:bg-hover hover:text-ink disabled:pointer-events-none disabled:opacity-45 sm:w-auto"
+            className="inline-flex h-8.5 w-full shrink-0 items-center justify-center whitespace-nowrap rounded-lg px-3.5 text-sm font-medium text-ink2 transition-colors hover:bg-hover hover:text-ink disabled:pointer-events-none disabled:opacity-45 sm:w-auto"
           >
             {t("approval.deny", lang)}
           </button>
-          <Button variant="outline" full className="sm:flex-none" onClick={() => handleApproval("allow")} disabled={busy}>
+          <Button
+            variant="outline"
+            className="shrink-0 whitespace-nowrap"
+            onClick={() => handleApproval("allow")}
+            disabled={busy}
+          >
             {t("approval.allowOnce", lang)}
           </Button>
-          <Button variant="primary" full onClick={() => handleApproval("allow_always")} disabled={busy}>
+          <Button
+            variant="primary"
+            className="shrink-0 whitespace-nowrap"
+            onClick={() => handleApproval("allow_always")}
+            disabled={busy}
+          >
             {busy ? (
               <span className="flex items-center gap-1.5">
                 <Spinner size={12} /> {t("approval.busy", lang)}

@@ -2,8 +2,8 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState, type DragEvent
 import { useChatStore } from "../store/chatStore"
 import { useSessionStore } from "../store/sessionStore"
 import { useUiStore } from "../store/uiStore"
-import { fetchCommands, type SlashCommandInfo } from "../api"
-import { IconGlobe, IconImage, IconPaperclip, IconSend, IconStop, IconX } from "./icons"
+import { fetchCommands, fetchFsTree, type SlashCommandInfo } from "../api"
+import { IconFile, IconFolder, IconGlobe, IconImage, IconPaperclip, IconSend, IconStop, IconX } from "./icons"
 import { cls } from "./ui"
 import { t } from "../i18n"
 
@@ -29,6 +29,8 @@ export const Composer = memo(function Composer() {
   const [dragging, setDragging] = useState(false)
   const [commands, setCommands] = useState<SlashCommandInfo[]>([])
   const [slashIndex, setSlashIndex] = useState(0)
+  const [fileItems, setFileItems] = useState<{ name: string; type: "dir" | "file" }[]>([])
+  const [fileIndex, setFileIndex] = useState(0)
 
   const model = status?.model
 
@@ -39,6 +41,61 @@ export const Composer = memo(function Composer() {
     return commands.filter((c) => c.name.toLowerCase().includes(slashQuery))
   }, [commands, slashQuery])
   const slashOpen = slashQuery !== null && slashItems.length > 0
+
+  // @-mention: the token under the caret starts with "@" (Claude Code / Codex
+  // style file reference). Listing the workdir root is enough for the common
+  // "point the model at this file" case and needs no index.
+  const atQuery = useMemo(() => {
+    const caret = taRef.current?.selectionStart ?? input.length
+    const before = input.slice(0, caret)
+    const m = /(^|\s)@([^\s@]*)$/.exec(before)
+    return m ? m[2] : null
+  }, [input])
+
+  useEffect(() => {
+    if (atQuery === null) {
+      setFileItems([])
+      return
+    }
+    let alive = true
+    fetchFsTree("")
+      .then((data) => {
+        if (!alive) return
+        const q = atQuery.toLowerCase()
+        setFileItems(
+          (data.entries ?? [])
+            .filter((e) => !q || e.name.toLowerCase().includes(q))
+            .slice(0, 8)
+            .map((e) => ({ name: e.name, type: e.type })),
+        )
+      })
+      .catch(() => {
+        if (alive) setFileItems([])
+      })
+    return () => {
+      alive = false
+    }
+  }, [atQuery])
+
+  const fileOpen = atQuery !== null && fileItems.length > 0
+
+  const applyFile = useCallback(
+    (name: string) => {
+      const caret = taRef.current?.selectionStart ?? input.length
+      const before = input.slice(0, caret)
+      const m = /(^|\s)@([^\s@]*)$/.exec(before)
+      if (!m) return
+      const replaced = before.slice(0, before.length - m[2].length) + name + " "
+      const next = replaced + input.slice(caret)
+      setInput(next)
+      taRef.current?.focus()
+      window.setTimeout(() => {
+        const el = taRef.current
+        if (el) el.selectionStart = el.selectionEnd = replaced.length
+      }, 0)
+    },
+    [input, setInput],
+  )
 
   useEffect(() => {
     let alive = true
@@ -82,6 +139,29 @@ export const Composer = memo(function Composer() {
   }, [input, images, streaming, send])
 
   function onKey(e: KeyboardEvent<HTMLTextAreaElement>) {
+    if (fileOpen) {
+      if (e.key === "ArrowDown") {
+        e.preventDefault()
+        setFileIndex((i) => Math.min(i + 1, fileItems.length - 1))
+        return
+      }
+      if (e.key === "ArrowUp") {
+        e.preventDefault()
+        setFileIndex((i) => Math.max(i - 1, 0))
+        return
+      }
+      if (e.key === "Tab" || e.key === "Enter") {
+        e.preventDefault()
+        const pick = fileItems[fileIndex]
+        if (pick) applyFile(pick.name)
+        return
+      }
+      if (e.key === "Escape") {
+        e.preventDefault()
+        setFileItems([])
+        return
+      }
+    }
     if (slashOpen) {
       if (e.key === "ArrowDown") {
         e.preventDefault()
@@ -177,6 +257,35 @@ export const Composer = memo(function Composer() {
             dragging ? "border-accent" : "border-line",
           )}
         >
+          {fileOpen && (
+            <div
+              className="anim-fade absolute bottom-full left-0 mb-2 w-full overflow-hidden rounded-xl border border-line bg-panel shadow-[var(--shadow)]"
+              role="listbox"
+              aria-label={t("composer.fileHint", lang)}
+            >
+              {fileItems.map((f, i) => (
+                <button
+                  key={f.name}
+                  type="button"
+                  role="option"
+                  aria-selected={i === fileIndex}
+                  onMouseEnter={() => setFileIndex(i)}
+                  onMouseDown={(e) => {
+                    e.preventDefault()
+                    applyFile(f.name)
+                  }}
+                  className={cls(
+                    "flex w-full items-center gap-2 px-3 py-2 text-left text-[12.5px]",
+                    i === fileIndex ? "bg-hover text-ink" : "text-ink2",
+                  )}
+                >
+                  {f.type === "dir" ? <IconFolder size={12} className="shrink-0 text-ink3" /> : <IconFile size={12} className="shrink-0 text-ink3" />}
+                  <span className="min-w-0 flex-1 truncate font-mono">{f.name}</span>
+                  <span className="shrink-0 text-[10px] text-ink3">{t("composer.fileRef", lang)}</span>
+                </button>
+              ))}
+            </div>
+          )}
           {slashOpen && (
             <div
               className="anim-fade absolute bottom-full left-0 mb-2 w-full overflow-hidden rounded-xl border border-line bg-panel shadow-[var(--shadow)]"

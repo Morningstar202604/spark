@@ -203,8 +203,11 @@ class TestVersionConflict:
 
     def test_touch_access_nonexistent(self, tmp_path):
         store = make_store(tmp_path)
-        # Should not raise
+        before = store.stats()
         store.touch_access(9999)
+        # Must be a no-op, not a corrupted counter or a phantom row.
+        assert store.get(9999) is None
+        assert store.stats() == before
 
 
 # ---------------------------------------------------------------------------

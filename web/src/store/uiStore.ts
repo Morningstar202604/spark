@@ -21,6 +21,7 @@ interface UiState {
   terminalOpen: boolean
   graphOpen: boolean
   replayOpen: boolean
+  helpOpen: boolean
   checkpoints: CheckpointRow[]
   cpsBusy: boolean
   toasts: ToastItem[]
@@ -44,6 +45,8 @@ interface UiState {
   closeGraph: () => void
   openReplay: () => void
   closeReplay: () => void
+  openHelp: () => void
+  closeHelp: () => void
   setCheckpoints: (rows: CheckpointRow[]) => void
   setCpsBusy: (busy: boolean) => void
   pushToast: (key: TranslationKey, kind?: ToastItem["kind"]) => void
@@ -64,6 +67,7 @@ export const useUiStore = create<UiState>((set) => ({
   terminalOpen: false,
   graphOpen: false,
   replayOpen: false,
+  helpOpen: false,
   checkpoints: [],
   cpsBusy: false,
   toasts: [],
@@ -99,6 +103,8 @@ export const useUiStore = create<UiState>((set) => ({
   closeGraph: () => set({ graphOpen: false }),
   openReplay: () => set({ replayOpen: true }),
   closeReplay: () => set({ replayOpen: false }),
+  openHelp: () => set({ helpOpen: true }),
+  closeHelp: () => set({ helpOpen: false }),
   setCheckpoints: (rows) => set({ checkpoints: rows }),
   setCpsBusy: (busy) => set({ cpsBusy: busy }),
 

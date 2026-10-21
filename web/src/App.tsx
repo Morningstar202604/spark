@@ -4,6 +4,7 @@ import { Header } from "./components/Header"
 import { ChatView } from "./components/ChatView"
 import { Composer } from "./components/Composer"
 import { ApprovalModal } from "./components/ApprovalModal"
+import { ShortcutsHelp } from "./components/ShortcutsHelp"
 import Toast from "./components/Toast"
 import { fetchStatus } from "./api"
 import type { Status } from "./types"
@@ -71,6 +72,14 @@ export default function App() {
         if (s.terminalOpen) s.closeTerminal()
         else s.openTerminal()
       }
+      // `?` 打开快捷键帮助（Claude Code 习惯）；输入框内不抢键。
+      if (e.key === "?" && !e.metaKey && !e.ctrlKey && !e.altKey) {
+        const target = e.target as HTMLElement | null
+        const tag = target?.tagName?.toLowerCase()
+        if (tag === "input" || tag === "textarea" || target?.isContentEditable) return
+        e.preventDefault()
+        useUiStore.getState().openHelp()
+      }
       // Esc 停止生成。跳过输入框（用户在用 Esc 取消输入）与任何弹层
       // （它们自己处理 Esc），也跳过待审批状态（Esc 应留给审批动作）。
       if (e.key === "Escape" && !e.defaultPrevented) {
@@ -80,7 +89,8 @@ export default function App() {
         const ui = useUiStore.getState()
         const overlayOpen =
           ui.paletteOpen || ui.settingsOpen || ui.checkpointsOpen || ui.filesOpen ||
-          ui.browserOpen || ui.graphOpen || ui.replayOpen || ui.terminalOpen
+          ui.browserOpen || ui.graphOpen || ui.replayOpen || ui.terminalOpen ||
+          ui.helpOpen
         if (overlayOpen) return
         if (useSessionStore.getState().approval) return
         if (useChatStore.getState().streaming) {
@@ -126,6 +136,7 @@ export default function App() {
         <Composer />
       </div>
       <ApprovalModal />
+      <ShortcutsHelp />
       {/* Chunks are fetched on first open (keeps the initial bundle at ~140 KB),
           but each surface then stays mounted: unmounting on close threw away
           the browse URL, the file viewer's current directory and the replay
