@@ -8,6 +8,7 @@ import { ThinkingBlock } from "./ThinkingBlock"
 import { PlanCard } from "./PlanCard"
 import { IconCheck, IconCopy, IconPencil, IconRefresh, IconSpark, IconTrash } from "./icons"
 import { cls } from "./ui"
+import { useChatStore } from "../store/chatStore"
 import { useSessionStore } from "../store/sessionStore"
 import { useUiStore } from "../store/uiStore"
 import { t } from "../i18n"
@@ -213,11 +214,26 @@ const AssistantMessage = memo(function AssistantMessage({ msg, actions }: { msg:
 /* ---------------- 错误 / 通知 / 摘要 ---------------- */
 const ErrorMessage = memo(function ErrorMessage({ text }: { text: string }) {
   const lang = useUiStore((s) => s.lang)
+  const retry = useChatStore((s) => s.retryLastFailed)
+  const canRetry = useChatStore((s) => s.lastFailedPrompt !== null)
+  const streaming = useChatStore((s) => s.streaming)
   return (
     <div className="flex justify-center py-3">
       <div className="anim-msg w-full max-w-2xl rounded-xl border border-err/35 bg-err/8 px-4 py-2.5 text-[13px] text-err">
         <div className="mb-0.5 font-semibold">{t("common.error", lang)}</div>
         <p className="whitespace-pre-wrap break-words text-err/90">{text}</p>
+        {canRetry && (
+          // A transport failure used to leave the user with a dead error card:
+          // the prompt was gone and there was no way to resend without retyping.
+          <button
+            type="button"
+            disabled={streaming}
+            onClick={() => void retry()}
+            className="mt-2 inline-flex h-7 items-center gap-1.5 rounded-md border border-err/40 px-2.5 text-[12px] font-medium text-err transition-colors hover:bg-err/10 disabled:opacity-50"
+          >
+            <IconRefresh size={12} /> {t("error.retry", lang)}
+          </button>
+        )}
       </div>
     </div>
   )

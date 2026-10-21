@@ -446,6 +446,7 @@ export default function SettingsDrawer({ onClose, onSaved }: Props) {
                   key={tb.key}
                   type="button"
                   onClick={() => setTab(tb.key)}
+                  aria-current={tab === tb.key ? "page" : undefined}
                   className={cls(
                     "flex items-center gap-2.5 rounded-lg px-3 py-2 text-left text-[13px] font-medium transition-colors",
                     tab === tb.key ? "bg-selected text-ink" : "text-ink2 hover:bg-hover",

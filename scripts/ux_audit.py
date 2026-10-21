@@ -240,14 +240,36 @@ async def main() -> int:
         await cdp.click_text("设置")
         await asyncio.sleep(1.2)
         await cdp.shot(out, "06-settings-model.png")
+        # Click the nav item by exact label inside <nav>; a plain text search
+        # matched body content ("项目记忆") and left the previous tab active.
         for tab, name in (("Agent", "07-settings-agent.png"), ("权限", "08-settings-security.png"), ("展示", "09-settings-display.png"), ("记忆", "10-settings-memory.png"), ("MCP", "11-settings-mcp.png"), ("项目", "12-settings-project.png")):
-            if not await cdp.click_text(tab):
+            ok = await cdp.eval(
+                "(() => { const btns=[...document.querySelectorAll('nav button')];"
+                f" const el=btns.find(b=>(b.innerText||'').trim() === {json.dumps(tab)});"
+                " if(!el) return false; el.click(); return true; })()"
+            )
+            if not ok:
                 problems.append(f"settings tab missing: {tab}")
                 continue
-            await asyncio.sleep(0.8)
+            await asyncio.sleep(0.9)
+            active = await cdp.eval(
+                "(() => { const b=document.querySelector('nav button[aria-current=\"page\"]');"
+                " return b ? b.innerText.trim() : null; })()"
+            )
+            if active != tab:
+                problems.append(f"settings tab not activated: {tab} (active={active})")
             await cdp.shot(out, name)
-        if not await cdp.eval("document.body.innerText.includes('环境体检')"):
+        # The project tab is a long scroll; the health card lives at the bottom,
+        # so a plain innerText check reports a false negative.
+        found = await cdp.eval(
+            "(() => { const h=[...document.querySelectorAll('h3')].find(x=>x.innerText.includes('环境体检'));"
+            " if(!h) return false; h.scrollIntoView({block:'center'}); return true; })()"
+        )
+        if not found:
             problems.append("health section missing on project tab")
+        else:
+            await asyncio.sleep(0.6)
+            await cdp.shot(out, "12b-settings-health.png")
         # close
         await cdp.eval("document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}))")
         await asyncio.sleep(0.6)
@@ -259,14 +281,21 @@ async def main() -> int:
         await cdp.eval("document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}))")
         await asyncio.sleep(0.5)
 
-        # 10. execution graph should now show real nodes (root + list_dir)
+        # 10. execution graph: it must show the turn's real tool nodes, not the
+        # static sample banner. Any tool name proves live data.
         if await cdp.eval("!!document.querySelector('[title*=\"执行图\"]')"):
             await cdp.eval("document.querySelector('[title*=\"执行图\"]').click()")
             await asyncio.sleep(1.2)
             await cdp.shot(out, "14-graph.png")
-            graph_text = await cdp.eval("document.body.innerText")
-            if "list_dir" not in graph_text:
-                problems.append("execution graph did not render the real tool call")
+            graph_text = await cdp.eval("document.body.innerText") or ""
+            live = "实时" in graph_text and "主代理" in graph_text
+            tool_nodes = await cdp.eval(
+                "document.querySelectorAll('.react-flow__node').length"
+            )
+            if not live or not tool_nodes:
+                problems.append(
+                    f"execution graph not live (live={live}, nodes={tool_nodes})"
+                )
             await cdp.eval("document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}))")
             await asyncio.sleep(0.4)
         else:

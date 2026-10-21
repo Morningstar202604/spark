@@ -289,9 +289,34 @@ def test_repair_is_idempotent(tmp_path: Path, monkeypatch) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_mock_provider_never_silently_claims_real_output() -> None:
-    provider = MockProvider()
-    assert provider.__class__.__name__ == "MockProvider"
+def test_factory_falls_back_to_mock_and_status_says_so(tmp_path: Path) -> None:
+    """The fallback must be a real MockProvider *and* be reported as demo mode.
+
+    Asserting the class name of a MockProvider we just constructed proved
+    nothing; this drives the actual factory path that degrades.
+    """
+    from spark.providers.factory import create_provider
+
+    cfg = SparkConfig()
+    cfg.provider.name = "openai_compat"
+    cfg.provider.base_url = "https://example.invalid/v1"
+    cfg.provider.model = "m"
+    cfg.provider.api_key = None
+    cfg.provider.api_key_env = "SPARK_DEFINITELY_MISSING_KEY"
+    provider = create_provider(cfg)
+    assert type(provider).__name__ == "MockProvider"
+
+    store = SessionStore(tmp_path / "demo.db")
+    from spark.web.state import SparkWebState
+
+    cfg.agent.approval = "full-auto"
+    state = SparkWebState(tmp_path, cfg, store)
+    try:
+        status = state.status()
+        assert status["demo_mode"] is True
+        assert "API Key" in status["demo_reason"] or "Mock" in status["demo_reason"]
+    finally:
+        store.close()
 
 
 # ---------------------------------------------------------------------------
@@ -317,8 +342,32 @@ def test_settings_switch_to_suggest_creates_approver(tmp_path: Path) -> None:
         assert state.approver is None
         cfg.agent.approval = "suggest"
         state.rebuild_loop(session_id=state.session_id)
-        assert state.loop.approver is not None
-        assert state.approver is not None
+        approver = state.loop.approver
+        assert approver is state.approver
+        # A real approver must hold a turn until answered, then release it with
+        # the decision the user sent — not merely be a non-None placeholder.
+        import asyncio
+
+        from spark.models import ApprovalRequest, ToolCall
+
+        request = ApprovalRequest(
+            tool_call=ToolCall(id="c1", name="write_file", arguments={"path": "a", "content": "b"}),
+            summary="write a",
+        )
+
+        async def run() -> object:
+            task = asyncio.ensure_future(approver(request))
+            for _ in range(50):
+                if approver.pending:
+                    break
+                await asyncio.sleep(0.02)
+            assert approver.pending, "approver never became pending"
+            approver.respond("allow")
+            return await asyncio.wait_for(task, timeout=5)
+
+        decision = asyncio.run(run())
+        assert decision.action == "allow"
+        assert decision.tool_call_id == "c1"
     finally:
         store.close()
 
@@ -375,7 +424,6 @@ def test_subtask_events_are_emitted_for_parallel_fanout(tmp_path: Path) -> None:
 
     from spark.core.loop import AgentLoop
     from spark.models import ChatDelta, ToolCall
-    from spark.providers.mock import MockProvider
     from spark.sandbox import WorkdirSandbox
     from spark.tools.registry import ToolContext, ToolRegistry
 
@@ -451,11 +499,16 @@ def test_session_export_rejects_unknown_format(live) -> None:
 
 
 def test_subtask_tool_events_are_tagged_with_their_child(tmp_path: Path) -> None:
-    """A child's tools must carry its index, or the graph draws them as siblings."""
+    """A child's tools must carry its index, or the graph draws them as siblings.
+
+    Runs the real collector against a real child AgentLoop whose provider emits a
+    glob tool call — no fake queue writer, so deleting the tagging in
+    ``spawn_subtasks_parallel`` makes this fail.
+    """
     import asyncio
 
     from spark.core.loop import AgentLoop
-    from spark.models import ToolCall, TurnEvent
+    from spark.models import ChatDelta, ToolCall
     from spark.sandbox import WorkdirSandbox
     from spark.tools.registry import ToolContext, ToolRegistry
 
@@ -463,27 +516,25 @@ def test_subtask_tool_events_are_tagged_with_their_child(tmp_path: Path) -> None
     cfg.provider.name = "mock"
     cfg.provider.model = "m"
     cfg.agent.approval = "full-auto"
+    cfg.agent.max_tool_rounds = 2
     store = SessionStore(tmp_path / "tag.db")
     sid = store.create_session(tmp_path, "m")
     reg = ToolRegistry(ToolContext(sandbox=WorkdirSandbox(tmp_path, cfg), config=cfg))
-    loop = AgentLoop(
-        workdir=tmp_path,
-        cfg=cfg,
-        provider=__import__("spark.providers.mock", fromlist=["MockProvider"]).MockProvider(),
-        registry=reg,
-        store=store,
-        session_id=sid,
+    scripted = MockProvider(
+        rounds=[
+            [
+                ChatDelta(
+                    type="tool_call",
+                    tool_call=ToolCall(id="x1", name="glob", arguments={"pattern": "*.py"}),
+                ),
+                ChatDelta(type="end"),
+            ],
+            [ChatDelta(type="text", text="child done"), ChatDelta(type="end")],
+        ]
     )
-
-    call = ToolCall(id="x1", name="glob", arguments={"pattern": "*.py"})
-
-    async def fake_child(index, prompt, queue, **kwargs):
-        await queue.put((index, TurnEvent(type="tool_start", tool_call=call)))
-        await queue.put((index, TurnEvent(type="tool_end", tool_call=call)))
-        await queue.put((index, None))
-        return f"child-{index}"
-
-    loop._collect_subtask_events = fake_child  # type: ignore[method-assign]
+    loop = AgentLoop(
+        workdir=tmp_path, cfg=cfg, provider=scripted, registry=reg, store=store, session_id=sid
+    )
 
     async def collect():
         return [
@@ -495,9 +546,12 @@ def test_subtask_tool_events_are_tagged_with_their_child(tmp_path: Path) -> None
 
     events = asyncio.run(collect())
     tool_events = [e for e in events if e.type in {"tool_start", "tool_end"}]
-    assert len(tool_events) == 4
+    # Both children share one scripted provider, so exactly one of them gets the
+    # tool-call round; what matters is that every tool event it produces carries
+    # an index (without the tagging these would be plain, `data=None`).
+    assert tool_events, [e.type for e in events]
     assert all(e.data and "subtask_index" in e.data for e in tool_events)
-    assert {e.data["subtask_index"] for e in tool_events} == {0, 1}
+    assert {e.data["subtask_index"] for e in tool_events} <= {0, 1}
     store.close()
 
 

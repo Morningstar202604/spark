@@ -100,11 +100,48 @@ interface ChatState {
   regenerate: (assistantDbId: number) => Promise<void>
   /** 编辑重发：截断到该用户消息之前，并把原文放回输入框 */
   startEditMessage: (userDbId: number) => Promise<void>
+  /** 传输失败时记住原 prompt，供「重试」按钮一键重发 */
+  lastFailedPrompt: { prompt: string; images: string[] } | null
+  retryLastFailed: () => Promise<void>
   loadInitialHistory: () => Promise<void>
   cancel: () => void
 }
 
 const WEB_SEARCH_KEY = "spark.webSearch"
+const DRAFT_KEY = "spark.draft"
+
+let draftSession = ""
+
+/** sessionStore calls this whenever the active session changes.
+
+    Reading it lazily through getState() raced the initial status fetch: the
+    first keystrokes were stored under an empty session id and silently lost.
+*/
+export function setDraftSession(sessionId: string) {
+  draftSession = sessionId || ""
+}
+
+function draftKey(): string {
+  return `${DRAFT_KEY}:${draftSession}`
+}
+
+/** 草稿：刷新/切会话不丢，按会话分开存，避免把 A 的草稿带进 B。 */
+function readDraft(): string {
+  try {
+    return localStorage.getItem(draftKey()) ?? ""
+  } catch {
+    return ""
+  }
+}
+
+function writeDraft(text: string) {
+  try {
+    if (text) localStorage.setItem(draftKey(), text)
+    else localStorage.removeItem(draftKey())
+  } catch {
+    /* storage blocked: draft lives in memory only */
+  }
+}
 
 function readWebSearchPref(): boolean {
   try {
@@ -117,7 +154,7 @@ function readWebSearchPref(): boolean {
 
 export const useChatStore = create<ChatState>((set, get) => ({
   items: [],
-  input: "",
+  input: readDraft(),
   streaming: false,
   loading: false,
   abortController: null,
@@ -126,7 +163,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   setTurnGraph: (g) => set({ turnGraph: g }),
 
-  setInput: (v) => set({ input: v }),
+  setInput: (v) => {
+    writeDraft(v)
+    set({ input: v })
+  },
   setStreaming: (v) => set({ streaming: v }),
   setItems: (items) => set({ items }),
   setLoading: (v) => set({ loading: v }),
@@ -141,6 +181,32 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   addErrorItem: (text) => set((s) => ({ items: [...s.items, { id: uid(), role: "error", text, segments: [] }] })),
 
+  lastFailedPrompt: null,
+
+  retryLastFailed: async () => {
+    const failed = get().lastFailedPrompt
+    if (!failed || get().streaming) return
+    // Drop the failed attempt (error card + its user bubble) before resending:
+    // keeping both made a recovered turn look like the same message was sent
+    // twice, and the duplicate user row is persisted server-side too.
+    set((s) => {
+      const items = [...s.items]
+      // Remove trailing error entries.
+      while (items.length > 0 && items[items.length - 1].role === "error") items.pop()
+      // Remove the user bubble that produced them (last remaining user msg with
+      // the same text), so the retry re-adds exactly one.
+      for (let i = items.length - 1; i >= 0; i -= 1) {
+        if (items[i].role === "user" && items[i].text === failed.prompt) {
+          items.splice(i, 1)
+          break
+        }
+      }
+      return { items }
+    })
+    set({ input: failed.prompt })
+    await get().send(failed.images)
+  },
+
   cancel: () => {
     const { abortController } = get()
     if (abortController) {
@@ -154,7 +220,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
     try {
       const h = await fetchHistory()
       const items = historyToItems(h.messages)
-      set({ items, loading: false })
+      // Draft is keyed per session, and the session id is only known now, so
+      // the initial read at module load always used an empty key.
+      let draft = ""
+      try {
+        draft = localStorage.getItem(`spark.draft:${h.session_id}`) ?? ""
+      } catch {
+        draft = ""
+      }
+      set({ items, loading: false, input: draft })
       useSessionStore.getState().syncPlanFromItems(items)
     } catch {
       set({ loading: false })
@@ -491,11 +565,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
     try {
       await streamChat(prompt, onEvent, ac.signal, images, get().webSearch)
       flush()
+      set({ lastFailedPrompt: null })
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
       flush()
       const isAbort = e instanceof DOMException && e.name === "AbortError"
       if (!isAbort) {
+        set({
+          lastFailedPrompt: { prompt, images },
+        })
         set((s) => ({
           items: s.items.filter((m) => !(m.id === assistantId && !m.text && !m.segments.length)),
         }))

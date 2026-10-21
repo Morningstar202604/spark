@@ -1,7 +1,7 @@
 import { create } from "zustand"
 import type { ApprovalInfo, PlanStep, SessionRow, Status, ToolCall } from "../types"
 import { listSessions, newSession, switchSession, deleteSession, cancelTurn, respondApproval, forkSession } from "../api"
-import { useChatStore, historyToItems, type ChatMsg } from "./chatStore"
+import { useChatStore, historyToItems, setDraftSession, type ChatMsg } from "./chatStore"
 import { useUiStore } from "./uiStore"
 
 export interface ApprovalState {
@@ -38,7 +38,10 @@ export const useSessionStore = create<SessionState>((set, get) => {
     approvalBusy: false,
     plan: [],
 
-    setStatus: (s) => set({ status: s }),
+    setStatus: (s) => {
+      setDraftSession(s?.session_id ?? "")
+      set({ status: s })
+    },
     patchStatus: (patch) => set((s) => ({ status: s.status ? { ...s.status, ...patch } : s.status })),
     setApproval: (a) => set({ approval: a }),
     setPlan: (p) => set({ plan: p }),
@@ -71,6 +74,7 @@ export const useSessionStore = create<SessionState>((set, get) => {
         set({ status: st, plan: st.plan || [] })
         const chat = useChatStore.getState()
         chat.setItems([])
+        chat.setInput(localStorage.getItem(`spark.draft:${st.session_id}`) ?? "")
         await get().refreshSessions()
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e)
@@ -88,6 +92,8 @@ export const useSessionStore = create<SessionState>((set, get) => {
         const items = historyToItems(data.messages)
         const chat = useChatStore.getState()
         chat.setItems(items)
+        // Pick up this session's own draft (empty for a session never typed in).
+        chat.setInput(localStorage.getItem(`spark.draft:${id}`) ?? "")
         await get().refreshSessions()
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e)

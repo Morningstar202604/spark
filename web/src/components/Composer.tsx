@@ -16,6 +16,7 @@ export const Composer = memo(function Composer() {
   const send = useChatStore((s) => s.send)
   const webSearch = useChatStore((s) => s.webSearch)
   const setWebSearch = useChatStore((s) => s.setWebSearch)
+  const pushToast = useUiStore((s) => s.pushToast)
   // Route through the session store so the local abort and POST /api/cancel
   // happen together (chatStore.cancel only aborts the fetch).
   const cancel = useSessionStore((s) => s.handleCancel)
@@ -191,28 +192,70 @@ export const Composer = memo(function Composer() {
     }
   }
 
-  function readFiles(list: FileList | null) {
-    if (!list) return
-    for (const file of Array.from(list)) {
-      if (!file.type.startsWith("image/")) continue
-      const reader = new FileReader()
-      reader.onload = () => setImages((prev) => [...prev, String(reader.result)])
-      reader.readAsDataURL(file)
+  // Vision models cap input size and a raw 12 MP phone photo blows past it.
+  // Downscale/encode in the browser (what opencode and Codex do) instead of
+  // sending a 8 MB base64 blob the provider will reject.
+  const MAX_IMAGE_EDGE = 1568
+  const MAX_IMAGE_BYTES = 5 * 1024 * 1024
+
+  async function normalizeImage(file: File): Promise<string | null> {
+    if (file.size > MAX_IMAGE_BYTES) {
+      pushToast("toast.imageTooLarge", "error")
+      return null
     }
+    const dataUrl = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onload = () => resolve(String(reader.result))
+      reader.onerror = () => reject(reader.error)
+      reader.readAsDataURL(file)
+    })
+    if (file.type === "image/gif") return dataUrl // keep animation
+    const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const el = new Image()
+      el.onload = () => resolve(el)
+      el.onerror = () => reject(new Error("decode failed"))
+      el.src = dataUrl
+    }).catch(() => null)
+    if (!img) return dataUrl
+    const scale = Math.min(1, MAX_IMAGE_EDGE / Math.max(img.width, img.height))
+    if (scale === 1 && file.size < 1_000_000) return dataUrl
+    const canvas = document.createElement("canvas")
+    canvas.width = Math.round(img.width * scale)
+    canvas.height = Math.round(img.height * scale)
+    const ctx = canvas.getContext("2d")
+    if (!ctx) return dataUrl
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
+    return canvas.toDataURL("image/jpeg", 0.85)
+  }
+
+  async function readFiles(list: FileList | null) {
+    if (!list) return
+    const images: string[] = []
+    let skipped = 0
+    for (const file of Array.from(list)) {
+      if (!file.type.startsWith("image/")) {
+        skipped += 1
+        continue
+      }
+      const normalized = await normalizeImage(file)
+      if (normalized) images.push(normalized)
+    }
+    if (images.length > 0) setImages((prev) => [...prev, ...images])
+    if (skipped > 0) pushToast("toast.onlyImages", "info")
   }
 
   function onPaste(e: React.ClipboardEvent) {
     const files = e.clipboardData?.files
     if (files && files.length > 0 && Array.from(files).some((f) => f.type.startsWith("image/"))) {
       e.preventDefault()
-      readFiles(files)
+      void readFiles(files)
     }
   }
 
   function onDrop(e: DragEvent) {
     e.preventDefault()
     setDragging(false)
-    readFiles(e.dataTransfer.files)
+    void readFiles(e.dataTransfer.files)
   }
 
   const canSend = !streaming && (input.trim().length > 0 || images.length > 0)

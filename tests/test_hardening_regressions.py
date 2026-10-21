@@ -212,7 +212,11 @@ def test_m1_version_matches_pyproject() -> None:
         for line in text.splitlines()
         if line.startswith("version =")
     )
-    assert spark.__version__ in {declared, "0.0.0", "development build"} or spark.__version__ == declared
+    # No escape hatch: a stale/mismatched version is exactly the drift this
+    # test exists to catch, and "0.0.0"/"development build" used to slip through.
+    assert spark.__version__ == declared, (
+        f"spark.__version__={spark.__version__!r} but pyproject declares {declared!r}"
+    )
 
 
 # ---------------------------------------------------------------------------
