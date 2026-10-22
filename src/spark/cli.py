@@ -614,9 +614,18 @@ def models_cmd(
     query: str = typer.Argument("", help="关键词（供应商或模型名，留空列出少量热门）"),
     limit: int = typer.Option(20, "--limit", "-n", help="最多返回条数"),
     refresh: bool = typer.Option(False, "--refresh", help="强制刷新目录缓存（默认 24h）"),
+    probe: bool = typer.Option(
+        False, "--probe", help="不查公共目录，改为探测当前配置的端点（列出并逐个试活）"
+    ),
+    config: Path | None = typer.Option(None, "--config"),
+    workdir: Path = typer.Option(Path("."), "--workdir"),
 ) -> None:
     from spark import model_catalog
     from spark.config import default_home
+
+    if probe:
+        _probe_configured_endpoint(config, workdir)
+        return
 
     catalog = model_catalog.fetch_catalog(default_home(), force=refresh)
     rows = model_catalog.search(catalog, query, limit=limit)
@@ -633,6 +642,53 @@ def models_cmd(
         except (TypeError, ValueError):
             price_s = "-"
         typer.echo(f"{r['provider'][:16]:<16} {r['model'][:34]:<34} {ctx_s:<10} {price_s}")
+
+
+def _probe_configured_endpoint(config: Path | None, workdir: Path) -> None:
+    """List the configured endpoint's models and report which ones answer.
+
+    `spark models` alone reads a public catalogue, which says nothing about
+    whether *your* key can serve a given model — the failure mode this project
+    hit repeatedly (listed but 404, or listed but out of quota).
+    """
+    from spark.config import require_api_key
+    from spark.providers.probe import list_models, probe_provider
+
+    try:
+        resolved = workdir.resolve()
+        cfg = read_config(config, resolved)
+        key = cfg.provider.api_key or require_api_key(cfg) or ""
+    except SparkError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(exc.exit_code) from exc
+
+    if cfg.provider.name == "mock":
+        typer.echo("当前是 mock 提供方，没有可探测的端点")
+        return
+
+    ids = asyncio.run(list_models(base_url=cfg.provider.base_url, api_key=key))
+    if not ids:
+        typer.echo(f"端点未返回模型列表：{cfg.provider.base_url}", err=True)
+        typer.echo("检查 base_url 是否以 /v1 结尾、密钥是否有效", err=True)
+        raise typer.Exit(1)
+
+    typer.echo(f"端点：{cfg.provider.base_url}")
+    typer.echo(f"{'模型':<34} {'结果':<10} 首包")
+    ok_count = 0
+    for mid in ids:
+        result = asyncio.run(
+            probe_provider(
+                base_url=cfg.provider.base_url, api_key=key, model=mid, rounds=1
+            )
+        )
+        if result.ok:
+            ok_count += 1
+            typer.echo(f"{mid[:34]:<34} {'可用':<10} {result.latency_ms} ms")
+        else:
+            reason = (result.error or "unknown")[:60].replace(chr(10), " ")
+            typer.echo(f"{mid[:34]:<34} {'不可用':<10} {reason}")
+    typer.echo("")
+    typer.echo(f"{ok_count}/{len(ids)} 个模型可用")
 
 
 @app.command("replay", help="查看 turn 级重放记录（上下文合同 spark.replay/1）")

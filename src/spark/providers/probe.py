@@ -215,3 +215,42 @@ async def probe_provider(
     finally:
         if own_client:
             await client.aclose()
+
+
+async def list_models(
+    *, base_url: str, api_key: str, client: httpx.AsyncClient | None = None
+) -> list[str]:
+    """Return the model ids the endpoint advertises at ``GET /models``.
+
+    Separate from :func:`probe_provider`: listing tells you what *exists* on the
+    account, probing tells you what actually answers. Both are needed — several
+    gateways list models they cannot serve.
+    """
+    if not base_url.strip() or not api_key.strip():
+        return []
+    url = base_url.rstrip("/")
+    if not url.endswith("/v1"):
+        url += "/v1"
+    url += "/models"
+    own_client = client is None
+    client = client or httpx.AsyncClient(
+            timeout=httpx.Timeout(20.0, connect=10.0)
+        )
+    try:
+        resp = await client.get(url, headers=_headers(api_key))
+        if resp.status_code != 200:
+            return []
+        payload = resp.json()
+    except Exception:  # noqa: BLE001 - listing is best-effort
+        return []
+    finally:
+        if own_client:
+            await client.aclose()
+    data = payload.get("data") if isinstance(payload, dict) else None
+    out: list[str] = []
+    for item in data or []:
+        if isinstance(item, dict):
+            mid = item.get("id") or item.get("name")
+            if mid:
+                out.append(str(mid))
+    return out

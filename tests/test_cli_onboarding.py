@@ -369,3 +369,47 @@ def test_web_rejects_busy_port(tmp_path, monkeypatch) -> None:
         assert "占用" in out or "occupied" in out.lower()
     finally:
         holder.close()
+
+
+# ---------------------------------------------------------------------------
+# models --probe: verify the *configured* endpoint, not a public catalogue
+# ---------------------------------------------------------------------------
+
+
+def test_models_probe_requires_an_endpoint(tmp_path, monkeypatch) -> None:
+    cfg = tmp_path / "c.toml"
+    cfg.write_text('[provider]\nname = "mock"\nmodel = "m"\n', encoding="utf-8")
+    r = _invoke(
+        ["models", "--probe", "--config", str(cfg), "--workdir", str(tmp_path)],
+        monkeypatch,
+        tmp_path,
+    )
+    assert r.exit_code == 0
+    assert "mock" in r.stdout
+
+
+def test_models_probe_reports_unreachable_endpoint(tmp_path, monkeypatch) -> None:
+    cfg = tmp_path / "c.toml"
+    cfg.write_text(
+        '[provider]\nname = "openai_compat"\nbase_url = "http://127.0.0.1:1/v1"\n'
+        'model = "m"\napi_key = "sk-test"\n',
+        encoding="utf-8",
+    )
+    r = _invoke(
+        ["models", "--probe", "--config", str(cfg), "--workdir", str(tmp_path)],
+        monkeypatch,
+        tmp_path,
+    )
+    assert r.exit_code == 1
+    out = r.stdout + (r.stderr or "")
+    assert "未返回模型列表" in out or "not" in out.lower()
+
+
+def test_list_models_parses_and_degrades() -> None:
+    """`list_models` must return [] for bad input rather than raising."""
+    import asyncio
+
+    from spark.providers.probe import list_models
+
+    assert asyncio.run(list_models(base_url="", api_key="k")) == []
+    assert asyncio.run(list_models(base_url="http://127.0.0.1:1/v1", api_key="k")) == []

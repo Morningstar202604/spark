@@ -38,7 +38,7 @@ const MODEL_PRESETS: { labelKey: TranslationKey; provider: string; base_url: str
   { labelKey: "preset.kimi", provider: "openai_compat", base_url: "https://api.moonshot.cn/v1", model: "moonshot-v1-8k" },
   { labelKey: "preset.glm", provider: "openai_compat", base_url: "https://open.bigmodel.cn/api/paas/v4", model: "glm-4-flash" },
   { labelKey: "preset.doubao", provider: "openai_compat", base_url: "https://ark.cn-beijing.volces.com/api/v3", model: "doubao-pro-32k" },
-  { labelKey: "preset.agnes", provider: "openai_compat", base_url: "https://apihub.agnes-ai.com/v1", model: "agnes-2.5-flash" },
+  { labelKey: "preset.agnes", provider: "openai_compat", base_url: "https://api.agnes-ai.cn/v1", model: "agnes-2.5-flash" },
   { labelKey: "preset.ollama", provider: "ollama", base_url: "http://localhost:11434/v1", model: "qwen2.5-coder" },
   { labelKey: "preset.mock", provider: "mock", base_url: "http://localhost", model: "mock-model" },
 ]

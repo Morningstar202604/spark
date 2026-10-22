@@ -157,3 +157,37 @@ apply_routed_provider(cfg, decision)
 
 > 注：路由矩阵当前为「决策函数 + 文档」，未做自动健康检查轮询。
 > 可用性判断基于「API key 是否配置」；真实连通性由 provider 层的重试/报错承担。
+
+
+## 端点自检（2026-10-22 实测）
+
+换了 key 或端点后先跑：
+
+```bash
+spark models --probe            # 列出当前端点声明的模型，并逐个真实探活
+```
+
+它会区分三种"不可用"，这是公开模型目录给不出的信息：
+
+| 现象 | 含义 | 处理 |
+|---|---|---|
+| `HTTP 403 用户额度不足` | 账号余额为 0 | 充值或换模型 |
+| `HTTP 400 invalid_request / 模型不支持` | image/video 模型不接 chat 补全 | 换对话模型 |
+| `HTTP 404 model_not_found`（但 `/models` 列出了它） | 网关映射与实际不符 | 找网关方，或换模型 |
+
+### 实测可用模型（本机 2026-10-22）
+
+| 端点 | 可用模型 | 六阶段冒烟 | 编码闭环 |
+|---|---|---|---|
+| `https://api.agnes-ai.cn/v1` | `agnes-3.0-flash` | 6/6 | 6/6 |
+| `https://api.agnes-ai.cn/v1` | `agnes-2.5-flash` | 6/6 | 6/6 |
+| `https://token.sensenova.cn/v1` | `sensenova-6.8-flash-lite` | 6/6 | 6/6 |
+| `https://token.sensenova.cn/v1` | `glm-5.2` | 4/6（不调用工具） | 未测 |
+
+> 同一份 key 在 `apihub.agnes-ai.com`（旧文档里的域名）**完全不可达**，
+> 必须用 `api.agnes-ai.cn`。设置页的 Agnes 预设已按此修正。
+
+### 判断力提示
+
+`/models` 返回 200 不等于模型能用。本次实测 62 个模型里只有 19 个能答话，
+其中 3 个能完整跑通工具链。**以 `spark models --probe` 的结果为准。**
