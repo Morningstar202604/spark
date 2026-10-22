@@ -165,7 +165,7 @@
 1. **四档沙箱 × 六档审批正交组合**——`plan-only`/`approve-plan` 作为独立审批档位是差异化设计。
 2. **tar.gz 检查点**：不依赖 git、含 manifest 校验、非 git 目录可回滚。
 3. **任务即分支**（`task_begin/step_commit/finish`）：绿测门控自动提交、失败自动废弃——竞品无同类一等功能。
-4. **MCP 注册表搜索**：内置中国可用性评估 + Glama 评分 + 离线数据集兜底。
+4. **MCP 注册表搜索**：内置中国可用性评估 + Glama 评分 + 离线数据集兜底；stdio 与 sse/streamable_http 三种传输都能一键添加（早期只认 stdio，见 2026-10-22 审查 D-01）。
 5. **`spark mcp-serve`**：把自己反向暴露为 MCP server。
 6. **`/test` 失败回灌闭环**：traceback 自动作为 user 消息让 agent 自修。
 7. **完全本地数据面**：无任何云依赖可全功能运行（含离线 mock）。

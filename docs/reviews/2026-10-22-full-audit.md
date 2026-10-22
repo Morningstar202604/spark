@@ -235,3 +235,43 @@ fetch_page(...) → httpx.ConnectTimeout(WinError 10060)  # 已发起真实连�
 | 2 | F-007 文档同步、F-014 审计流、覆盖率 71.8→74.8、路由/CLI/helpers/TUI 四组新测试 | **918 passed** |
 
 覆盖率未达标是**事实**，不是遗漏：本轮的 44 条路由扫描 + 14 条 CLI + 36 条纯函数 + 6 条 TUI 已把最容易腐烂的面（路由表、参数校验、平台分支）覆盖到可回归的水平；剩余缺口集中在 TUI 渲染细节、desktop 壳、pty 真机路径，这些要么需要图形环境要么依赖 POSIX，性价比显著低于已补部分。
+
+---
+
+## 十、第三轮：逐界面实测（2026-10-22 深夜）
+
+不是读代码推断，是真的开浏览器/桌面窗口点出来的。每条都附证据。
+
+### 10.1 修掉的真缺陷
+
+| # | 缺陷 | 证据 | 影响 | 修复 |
+|---|---|---|---|---|
+| D-01 | 远程 MCP 全链路不可用 | registry 首屏 20 条全 `remote`，一键添加按钮 100% 禁用；手动配上后启动报 `too many values to unpack` | 注册表功能对绝大多数条目形同虚设 | 前端补 `transport` 选择 + URL 输入；`streamable_http_client` 三返回值解包修正 |
+| D-02 | 单个连不上的远程 MCP 拖垮整个 `spark web` | `spark web` 启动直接 `CancelledError` 退出（`work_ui11.log`） | 一个填错的 URL 让应用起不来 | 启动循环兜 `BaseException`（放行 KeyboardInterrupt/SystemExit），错误记为 `mcp_errors` |
+| D-03 | `_McpConnection.close()` 只吞 `RuntimeError` | anyio 在关闭 streamable_http 时抛 `BaseExceptionGroup(401)`，覆盖真实错误 | 错误信息误导 | 改吞 `BaseException`，保留原始失败原因 |
+| D-04 | 桌面产物双击进 TUI 而非窗口 | `dist/spark-desktop/spark-desktop.exe` 打出 Textual 控制序列；GUI 子系统无控制台，等于点开没反应 | 桌面版完全不可用 | 新增 `spark.desktop_main` 专用入口，spec 改为以它为入口 |
+| D-05 | diff 头被裁成裸 `+++` | 审批卡截图：`--- a/x` 下面一行孤零零 `+++` | 看不出改的哪个文件 | 解析器改按文件去重，`---`/`+++` 合并为一行文件名 |
+| D-06 | diff 增删行行号重复 | 新增行左右两栏都显示 `1` | 行号不可信 | 左栏只给删除/上下文行号，右栏只给新增/上下文行号 |
+
+### 10.2 实测通过的功能（有截图/日志）
+
+- 记忆面板：输入 → 添加 → 列表出现 → 删除 → 消失（`D05`/`D06`/`D07`）
+- MCP registry：6 秒拉回 20 条，国内可用标签、一键添加、生成的 `streamable_http` 行（`E02`/`E03`）
+- 审批卡：diff 预览、参数展开（`{"path": ..., "content": ...}`）、允许本次后弹窗关闭（`F01`/`F02`）
+- 桌面版：窗口 1292×764，Web UI 完整渲染，`/api/status` 200（`G04`）
+- 打包产物：`spark.exe` 子系统 3（CONSOLE）、`spark-desktop.exe` 子系统 2（GUI），二者前端资产哈希与源码一致
+
+### 10.3 门禁
+
+```
+pytest              931 passed, 5 skipped
+ruff check           All checks passed
+mypy                 Success: no issues found in 97 source files
+import-linter        exit 0
+bandit               0 High-confidence new findings（存量 6 Medium / 57 Low 均为已知并说明）
+```
+
+### 10.4 未验证
+
+- 远程 MCP 只测了本地起的 streamable_http server 与真实的 401（鉴权失败）；没有可用的第三方远程 MCP 凭证，未测真实第三方服务。
+- 桌面窗口截图用 CDP 截内嵌页面，未对内嵌 WebView 做像素级比对（Windows 上 PrintWindow 抓到的是不完整帧，不是产品问题）。
