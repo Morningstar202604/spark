@@ -76,3 +76,38 @@ def test_config_inline_api_key(tmp_path, monkeypatch: pytest.MonkeyPatch) -> Non
     path = save_config(cfg, tmp_path / "config.toml")
     assert path.exists()
     assert require_api_key(cfg) == "inline-secret"
+
+
+def test_probe_accepts_reasoning_only_response() -> None:
+    """Reasoning models may spend the whole budget before emitting content.
+
+    A non-empty reasoning field still proves the endpoint works; treating it as
+    failure made glm-5.2 look broken when its tool calling was fine.
+    """
+    from spark.providers.probe import _extract_reasoning, _finish_reason
+
+    payload = {
+        "choices": [
+            {
+                "message": {"content": "", "reasoning_content": "thinking hard about SPARK_OK"},
+                "finish_reason": "length",
+            }
+        ]
+    }
+    assert _extract_reasoning(payload) == "thinking hard about SPARK_OK"
+    assert _finish_reason(payload) == "length"
+
+
+def test_probe_reports_finish_reason_on_empty() -> None:
+    from spark.providers.probe import _extract_message_content, _finish_reason
+
+    payload = {"choices": [{"message": {"content": ""}, "finish_reason": "length"}]}
+    assert _extract_message_content(payload) == ""
+    assert _finish_reason(payload) == "length"
+
+
+def test_probe_token_budget_leaves_room_for_reasoning() -> None:
+    """A 120-token cap made reasoning models look dead; keep the budget large."""
+    from spark.providers.probe import PROBE_MAX_TOKENS
+
+    assert PROBE_MAX_TOKENS >= 800

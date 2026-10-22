@@ -20,6 +20,11 @@ PROBE_PROMPT = (
     "about local coding agents. Do not refuse."
 )
 MIN_CONTENT_CHARS = 8
+#: Budget for the *answer*. Reasoning models (glm-5.x, DeepSeek-R1, …) spend
+#: hundreds of tokens thinking before emitting content, so a small cap made
+#: them look broken: finish_reason=length with an empty content field.
+#: 1200 leaves room for the reasoning pass plus the answer.
+PROBE_MAX_TOKENS = 1200
 
 
 @dataclass
@@ -50,6 +55,24 @@ class ProbeResult:
 
 def _headers(api_key: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+
+
+def _extract_reasoning(payload: dict) -> str:
+    """Return reasoning_content / reasoning from the first choice, if any."""
+    choices = payload.get("choices") or []
+    if not choices:
+        return ""
+    message = choices[0].get("message") or {}
+    for key in ("reasoning_content", "reasoning"):
+        value = message.get(key)
+        if isinstance(value, str) and value:
+            return value
+    return ""
+
+
+def _finish_reason(payload: dict) -> str:
+    choices = payload.get("choices") or []
+    return str((choices[0] if choices else {}).get("finish_reason") or "?")
 
 
 def _extract_message_content(payload: dict) -> str:
@@ -97,7 +120,7 @@ async def _complete_once(client: httpx.AsyncClient, url: str, api_key: str, mode
         "model": model,
         "messages": [{"role": "user", "content": prompt}],
         "stream": False,
-        "max_tokens": 120,
+        "max_tokens": PROBE_MAX_TOKENS,
         "temperature": 0,
     }
     resp = await client.post(url, headers=_headers(api_key), json=body)
@@ -106,7 +129,16 @@ async def _complete_once(client: httpx.AsyncClient, url: str, api_key: str, mode
     payload = resp.json()
     text = _extract_message_content(payload).strip()
     if len(text) < MIN_CONTENT_CHARS:
-        raise RuntimeError("model returned empty or too-short content")
+        # A reasoning model may put everything in reasoning_content when the
+        # budget still runs out; that is a truncated answer, not a live one —
+        # but a non-empty reasoning field proves the endpoint *works*.
+        reasoning = _extract_reasoning(payload).strip()
+        if len(reasoning) < MIN_CONTENT_CHARS:
+            raise RuntimeError(
+                "model returned empty content and empty reasoning "
+                f"(finish_reason={_finish_reason(payload)})"
+            )
+        text = reasoning
     return text
 
 
@@ -115,7 +147,7 @@ async def _stream_once(client: httpx.AsyncClient, url: str, api_key: str, model:
         "model": model,
         "messages": [{"role": "user", "content": prompt}],
         "stream": True,
-        "max_tokens": 120,
+        "max_tokens": PROBE_MAX_TOKENS,
         "temperature": 0,
     }
     parts: list[str] = []

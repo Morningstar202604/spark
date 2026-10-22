@@ -779,6 +779,17 @@ class SessionStore:
         for row in reversed(rows):
             content = row["content"] or ""
             name = ""
+            if row["role"] == "assistant" and not content.strip():
+                # A turn that only requested tools has no text; without a marker
+                # the timeline row renders blank, which reads as a broken entry.
+                try:
+                    payload = json.loads(row["payload_json"] or "{}")
+                    calls = (payload.get("tool_calls") or []) if isinstance(payload, dict) else []
+                except (TypeError, ValueError):
+                    calls = []
+                if calls:
+                    names = [str(c.get("name") or "tool") for c in calls if isinstance(c, dict)]
+                    content = "调用工具：" + "、".join(names)
             if row["role"] == "tool":
                 # Tool rows hold the raw JSON result; the timeline is for humans,
                 # so show the tool that ran rather than a wall of escaped JSON.

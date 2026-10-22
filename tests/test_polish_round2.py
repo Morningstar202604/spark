@@ -788,3 +788,27 @@ def test_denied_tool_call_lands_in_audit(tmp_path: Path, monkeypatch) -> None:
     text = target.read_text(encoding="utf-8")
     assert "tool_denied" in text or "sandbox_blocked" in text
     assert "write_file" in text
+
+
+def test_tool_only_turns_have_a_timeline_marker(tmp_path: Path) -> None:
+    """A turn that only calls tools must not render as a blank timeline row."""
+    from spark.store import SessionStore
+
+    store = SessionStore(tmp_path / "tl.db")
+    try:
+        sid = store.create_session(tmp_path, "m")
+        from spark.models import ChatMessage, ToolCall
+
+        store.append_message(
+            sid,
+            ChatMessage(
+                role="assistant",
+                content="",
+                tool_calls=[ToolCall(id="c1", name="read_file", arguments={"path": "a.py"})],
+            ),
+        )
+        briefs = store.list_message_briefs(sid)
+        assert briefs and briefs[0]["preview"].strip()
+        assert "read_file" in briefs[0]["preview"]
+    finally:
+        store.close()

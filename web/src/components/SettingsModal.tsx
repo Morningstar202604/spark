@@ -433,7 +433,7 @@ export default function SettingsDrawer({ onClose, onSaved }: Props) {
         role="dialog"
         aria-label={t("settings.title", lang)}
       >
-        <div className="flex h-full">
+        <div className="flex h-full min-h-0">
           {/* 左导航（桌面） */}
           <nav className="hidden w-[200px] shrink-0 flex-col border-r border-line bg-sidebar sm:flex">
             <div className="flex items-center gap-2 px-4 py-3.5">
@@ -467,7 +467,7 @@ export default function SettingsDrawer({ onClose, onSaved }: Props) {
           </nav>
 
           {/* 右栏 */}
-          <div className="flex min-w-0 flex-1 flex-col">
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col">
             <div className="flex items-center gap-2 border-b border-line px-4 py-3">
               <span className="text-sm font-semibold text-ink">{t("settings.title", lang)}</span>
               <IconButton title={t("common.close", lang)} onClick={onClose} className="ml-auto">
