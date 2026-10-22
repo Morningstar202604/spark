@@ -181,7 +181,7 @@ const dict = {
     "display.save": "保存展示设置",
     "display.language": "语言",
 
-    "mcp.desc": "通过 stdio 启动的 MCP 服务器，其工具会以 mcp__名称__工具 注册给模型。",
+    "mcp.desc": "支持 stdio（本地命令）与 sse / streamable_http（远程 URL）三种传输，工具会以 mcp__名称__工具 注册给模型。",
     "mcp.empty": "暂未配置。",
     "mcp.commandPh": "命令 (如 npx)",
     "mcp.argsPh": "参数（空格分隔）",
@@ -189,6 +189,8 @@ const dict = {
     "mcp.envHint": "该 server 需要这些环境变量（留空的不会写入配置）",
     "mcp.envPh": "填入密钥或值",
     "mcp.add": "+ 添加服务器",
+    "mcp.transport": "传输方式",
+    "mcp.url": "服务地址（URL）",
 
     "project.memoryTitle": "项目记忆（AGENTS.md）",
     "project.memoryDesc": "每轮注入给模型的项目级指令，跨会话生效。超出片段上限会截断。",
@@ -659,7 +661,7 @@ const dict = {
     "display.save": "Save Display Settings",
     "display.language": "Language",
 
-    "mcp.desc": "MCP servers launched via stdio; their tools are registered to the model as mcp__<name>__<tool>.",
+    "mcp.desc": "Supports stdio (local command) and sse / streamable_http (remote URL); tools are registered to the model as mcp__<name>__<tool>.",
     "mcp.empty": "Not configured.",
     "mcp.commandPh": "command (e.g. npx)",
     "mcp.argsPh": "args (space-separated)",
@@ -667,6 +669,8 @@ const dict = {
     "mcp.envHint": "This server needs these environment variables (blank ones are not saved)",
     "mcp.envPh": "value or secret",
     "mcp.add": "+ Add Server",
+    "mcp.transport": "Transport",
+    "mcp.url": "Server URL",
 
     "project.memoryTitle": "Project Memory (AGENTS.md)",
     "project.memoryDesc": "Project-level instructions injected into the model every turn; persists across sessions. Truncated if exceeding fragment limit.",

@@ -4,7 +4,7 @@ import { useUiStore } from "../store/uiStore"
 import { t } from "../i18n"
 
 interface DiffLine {
-  type: "header" | "hunk" | "context" | "add" | "remove"
+  type: "file" | "header" | "hunk" | "context" | "add" | "remove"
   oldNo?: number
   newNo?: number
   text: string
@@ -18,10 +18,31 @@ function parseDiff(raw: string): DiffLine[] {
   let newBase = 0
   let oldLine = 0
   let newLine = 0
+  let currentFile = ""
+
+  // `--- a/x` / `+++ b/x` 两行指的是同一个文件，只该显示一次文件名。
+  // 早期把这两行原样当标题渲染，且对 `+++ b/x` 套用了 `b/` 后缀裁剪，
+  // 结果界面上出现一行 `--- a/x` 加一行孤零零的 `+++`。
+  const pushFile = (path: string) => {
+    if (!path || path === "/dev/null") return
+    if (currentFile === path) return
+    currentFile = path
+    out.push({ type: "file", text: path })
+  }
 
   for (const line of lines) {
-    if (line.startsWith("diff --git") || line.startsWith("index ") || line.startsWith("--- ") || line.startsWith("+++ ")) {
+    if (line.startsWith("diff --git ")) {
+      const m = line.match(/^diff --git a\/(.+?) b\//)
+      pushFile(m ? m[1] : line.slice("diff --git ".length))
+      continue
+    }
+    if (line.startsWith("index ") || line.startsWith("new file mode") || line.startsWith("deleted file mode")) {
       out.push({ type: "header", text: line })
+      continue
+    }
+    if (line.startsWith("--- ") || line.startsWith("+++ ")) {
+      const raw_path = line.slice(4).trim()
+      pushFile(raw_path.replace(/^[ab]\//, ""))
       continue
     }
     if (line.startsWith("@@")) {
@@ -33,12 +54,12 @@ function parseDiff(raw: string): DiffLine[] {
       out.push({ type: "hunk", text: line })
       continue
     }
-    if (line.startsWith("+") && !line.startsWith("+++")) {
+    if (line.startsWith("+")) {
       out.push({ type: "add", newNo: newLine, text: line.slice(1) })
       newLine += 1
       continue
     }
-    if (line.startsWith("-") && !line.startsWith("---")) {
+    if (line.startsWith("-")) {
       out.push({ type: "remove", oldNo: oldLine, text: line.slice(1) })
       oldLine += 1
       continue
@@ -80,12 +101,21 @@ export const DiffView = memo(function DiffView({ diff, maxLines = 400 }: { diff:
         <table className="w-full border-collapse">
           <tbody>
             {shown.map((r, i) => {
-              if (r.type === "header")
+              if (r.type === "file")
                 return (
                   <tr key={i} className="border-y border-line bg-panel">
                     <td className="w-10" />
                     <td colSpan={2} className="px-2 py-0.5 font-semibold text-ink3">
-                      {r.text.replace(/^diff --git a\//, "").replace(/ b\/.*$/, "")}
+                      {r.text}
+                    </td>
+                  </tr>
+                )
+              if (r.type === "header")
+                return (
+                  <tr key={i}>
+                    <td className="w-10" />
+                    <td colSpan={2} className="px-2 py-0.5 font-mono text-[10px] text-ink3/70">
+                      {r.text}
                     </td>
                   </tr>
                 )
@@ -107,10 +137,10 @@ export const DiffView = memo(function DiffView({ diff, maxLines = 400 }: { diff:
                   )}
                 >
                   <td className="w-10 select-none text-right text-ink3/70">
-                    {r.type === "add" ? r.newNo : r.type === "remove" ? r.oldNo : ""}
+                    {r.type === "remove" ? r.oldNo : r.type === "context" ? r.oldNo : ""}
                   </td>
                   <td className="w-10 select-none text-right text-ink3/70">
-                    {r.type === "remove" ? r.oldNo : r.type === "add" ? r.newNo : ""}
+                    {r.type === "add" ? r.newNo : r.type === "context" ? r.newNo : ""}
                   </td>
                   <td className={cls("px-2", r.type === "add" ? "text-ok" : r.type === "remove" ? "text-err" : "text-ink2")}>
                     <span className="select-none opacity-60">{r.type === "add" ? "+" : r.type === "remove" ? "−" : " "}</span>

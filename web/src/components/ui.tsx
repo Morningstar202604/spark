@@ -50,7 +50,10 @@ export function Button({ variant = "ghost", size = "md", full, className, childr
     <button
       type="button"
       className={cls(
-        "inline-flex select-none items-center justify-center gap-1.5 rounded-lg font-medium transition-colors disabled:pointer-events-none disabled:opacity-45",
+        "inline-flex select-none items-center justify-center gap-1.5 rounded-lg font-medium transition-colors",
+        // A disabled primary used to keep its bright fill at 45% opacity, which
+        // still reads as an active call to action. Drop to a flat grey.
+        "disabled:pointer-events-none disabled:bg-hover disabled:text-ink3 disabled:opacity-100",
         v,
         s,
         full && "w-full",

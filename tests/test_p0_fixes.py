@@ -126,6 +126,29 @@ def test_parse_mcp_servers_returns_config_models() -> None:
         parse_mcp_servers([{"name": "x"}])
 
 
+def test_parse_mcp_servers_accepts_remote_transports() -> None:
+    """registry 首屏 20 条全是 remote：只认 stdio 会让「一键添加」永久禁用。"""
+
+    parsed = parse_mcp_servers(
+        [
+            {
+                "name": "remote-http",
+                "transport": "streamable_http",
+                "http": {"url": "https://example.com/mcp", "headers": {"X-A": "1"}},
+            },
+            {"name": "remote-sse", "transport": "sse", "http": {"url": "https://example.com/sse"}},
+        ]
+    )
+    assert len(parsed) == 2
+    assert parsed[0].transport == "streamable_http"
+    assert parsed[0].http is not None and parsed[0].http.url == "https://example.com/mcp"
+    assert parsed[0].http.headers == {"X-A": "1"}
+    assert parsed[1].transport == "sse"
+
+    with pytest.raises(ValueError):
+        parse_mcp_servers([{"name": "remote-no-url", "transport": "streamable_http"}])
+
+
 def test_mcp_call_survives_loop_restart(tmp_path: Path) -> None:
     script = tmp_path / "server.py"
     script.write_text(FAKE_SERVER, encoding="utf-8")

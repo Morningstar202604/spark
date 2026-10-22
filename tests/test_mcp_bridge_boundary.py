@@ -214,6 +214,58 @@ class TestMcpBridgeLifecycle:
         assert len(bridge.errors) == 1
         assert "mock fail" in bridge.errors[0]
 
+    def test_cancelled_start_does_not_escape(self):
+        """asyncio.timeout 握手超时抛 CancelledError（BaseException），
+        不能让一个连不上的远程 server 拖垮 spark web 启动。"""
+        bridge = McpBridge()
+        configs = [McpServerConfig(name="remote", command="")]
+        registry = MagicMock()
+
+        with patch(
+            "spark.tools.mcp_bridge._McpConnection.start",
+            side_effect=asyncio.CancelledError(),
+        ):
+            _run(bridge.start(configs, registry))
+
+        assert len(bridge.errors) == 1
+        assert "握手超时" in bridge.errors[0]
+
+    def test_start_continues_after_cancelled_server(self):
+        """一个 server 超时不应影响后面的 server 注册。"""
+        bridge = McpBridge()
+        configs = [
+            McpServerConfig(name="bad", command="x"),
+            McpServerConfig(name="good", command="y"),
+        ]
+        registry = MagicMock()
+        calls: list[str] = []
+
+        async def fake_start(conn, **_kw):
+            calls.append(conn.cfg.name)
+            if conn.cfg.name == "bad":
+                raise asyncio.CancelledError()
+            conn.tools = []
+
+        with patch("spark.tools.mcp_bridge._McpConnection.start", fake_start):
+            _run(bridge.start(configs, registry))
+
+        assert calls == ["bad", "good"]
+        assert len(bridge.errors) == 1
+
+    def test_close_swallows_base_exception_group(self):
+        """anyio 的 streamable_http 关闭时抛 ExceptionGroup，不能冒出去。"""
+        from spark.tools.mcp_bridge import _McpConnection
+
+        conn = _McpConnection(McpServerConfig(name="c", command="x"))
+
+        class _Boom:
+            async def aclose(self):
+                raise BaseExceptionGroup("boom", [RuntimeError("401")])
+
+        conn._exit_stack = _Boom()  # type: ignore[assignment]
+        _run(conn.close())
+        assert conn.tools == []
+
 
 # ---------------------------------------------------------------------------
 # ToolResult creation

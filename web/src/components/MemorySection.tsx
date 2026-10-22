@@ -207,11 +207,11 @@ export default function MemorySection() {
             </Select>
           </div>
         </Field>
-        <div className="flex gap-2">
-          <Button variant="primary" full onClick={handleAdd} disabled={busy || !newContent.trim()}>
+        <div className="flex items-center gap-2">
+          <Button variant="primary" className="flex-1" onClick={handleAdd} disabled={busy || !newContent.trim()}>
             {t("common.add", lang)}
           </Button>
-          <Button variant="outline" onClick={handleOptimize} disabled={busy}>
+          <Button variant="outline" className="shrink-0 whitespace-nowrap" onClick={handleOptimize} disabled={busy}>
             {t("memory.optimize", lang)}
           </Button>
         </div>

@@ -189,9 +189,14 @@ export default function SettingsDrawer({ onClose, onSaved }: Props) {
   const dirtyRef = useRef({ cfg: false, mcp: false, md: false })
 
   function handleRegistryPick(item: McpRegistryItem) {
-    if (!item.suggested_command) return
+    // stdio 条目给 command/args；remote 条目只有 URL，走 streamable_http。
+    // 早期实现只接受 stdio，导致 registry 首页 20 条 remote 全部无法添加。
+    const remoteUrl = item.remote_url?.trim() || ""
+    if (!item.suggested_command && !remoteUrl) return
     dirtyRef.current.mcp = true
-    const derived = (item.name || item.title || "mcp").split("/").pop() || "mcp"
+    // registry 名多是反向域名（ac.inference.sh/mcp），只取最后一段会让一批
+    // server 全叫 "mcp"。整串清洗后保留，并在 set 回调里对已有行去重。
+    const base = (item.name || item.title || "mcp").replace(/[^a-zA-Z0-9_-]+/g, "-").replace(/^-+|-+$/g, "")
     // Seed required env vars as empty placeholders so the card shows what the
     // server needs; an empty value is dropped at save time instead of starting
     // a server that is guaranteed to fail.
@@ -199,16 +204,24 @@ export default function SettingsDrawer({ onClose, onSaved }: Props) {
     for (const field of item.required_env ?? []) {
       if (field.required) env[field.name] = ""
     }
-    setMcpRows((rows) => [
-      ...rows,
-      {
-        name: derived.replace(/[^a-zA-Z0-9_-]/g, "-"),
-        command: item.suggested_command!,
-        args: [...item.suggested_args],
-        env,
-        readonly_tools: [],
-      },
-    ])
+    const isRemote = !item.suggested_command
+    setMcpRows((rows) => {
+      const taken = new Set(rows.map((r) => r.name))
+      let name = base || "mcp"
+      for (let n = 2; taken.has(name); n += 1) name = `${base}-${n}`
+      return [
+        ...rows,
+        {
+          name,
+          command: isRemote ? "" : item.suggested_command!,
+          args: isRemote ? [] : [...item.suggested_args],
+          env,
+          readonly_tools: [],
+          transport: isRemote ? "streamable_http" : "stdio",
+          http: isRemote ? { url: remoteUrl, headers: {}, timeout_sec: 30 } : null,
+        },
+      ]
+    })
     setShowRegistry(false)
   }
 
@@ -857,14 +870,47 @@ export default function SettingsDrawer({ onClose, onSaved }: Props) {
                           <IconTrash size={12} />
                         </IconButton>
                       </div>
-                      <div className="grid grid-cols-2 gap-2">
-                        <Field label={t("common.command", lang)}>
-                          <TextInput value={s.command} onChange={(e) => patchMcp(i, { command: e.target.value })} placeholder={t("mcp.commandPh", lang)} />
+                      <Field label={t("mcp.transport", lang)}>
+                        <Select
+                          value={s.transport ?? "stdio"}
+                          onChange={(e) => {
+                            const transport = e.target.value as McpServer["transport"]
+                            patchMcp(i, {
+                              transport,
+                              http:
+                                transport === "stdio"
+                                  ? null
+                                  : s.http ?? { url: "", headers: {}, timeout_sec: 30 },
+                            })
+                          }}
+                        >
+                          <option value="stdio">stdio</option>
+                          <option value="sse">sse</option>
+                          <option value="streamable_http">streamable_http</option>
+                        </Select>
+                      </Field>
+                      {(s.transport ?? "stdio") === "stdio" ? (
+                        <div className="grid grid-cols-2 gap-2">
+                          <Field label={t("common.command", lang)}>
+                            <TextInput value={s.command} onChange={(e) => patchMcp(i, { command: e.target.value })} placeholder={t("mcp.commandPh", lang)} />
+                          </Field>
+                          <Field label={t("common.args", lang)}>
+                            <TextInput value={s.args.join(" ")} onChange={(e) => patchMcp(i, { args: e.target.value.split(/\s+/).filter(Boolean) })} placeholder={t("mcp.argsPh", lang)} />
+                          </Field>
+                        </div>
+                      ) : (
+                        <Field label={t("mcp.url", lang)}>
+                          <TextInput
+                            value={s.http?.url ?? ""}
+                            onChange={(e) =>
+                              patchMcp(i, {
+                                http: { url: e.target.value, headers: s.http?.headers ?? {}, timeout_sec: s.http?.timeout_sec ?? 30 },
+                              })
+                            }
+                            placeholder="https://example.com/mcp"
+                          />
                         </Field>
-                        <Field label={t("common.args", lang)}>
-                          <TextInput value={s.args.join(" ")} onChange={(e) => patchMcp(i, { args: e.target.value.split(/\s+/).filter(Boolean) })} placeholder={t("mcp.argsPh", lang)} />
-                        </Field>
-                      </div>
+                      )}
                       <Field label={t("mcp.readonly", lang)}>
                         <TextInput value={s.readonly_tools.join(" ")} onChange={(e) => patchMcp(i, { readonly_tools: e.target.value.split(/\s+/).filter(Boolean) })} placeholder={t("mcp.readonlyPh", lang)} />
                       </Field>

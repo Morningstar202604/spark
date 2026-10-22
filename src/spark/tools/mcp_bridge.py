@@ -102,7 +102,12 @@ class _McpConnection:
             )
 
         async with asyncio.timeout(timeout_sec):
-            read, write = await self._exit_stack.enter_async_context(transport)
+            # stdio_client / sse_client yield (read, write); streamable_http_client
+            # additionally yields a get_session_id callable. Unpacking it as a
+            # pair raised "too many values to unpack" and every remote server
+            # failed to start.
+            entered = await self._exit_stack.enter_async_context(transport)
+            read, write = entered[0], entered[1]
             session = await self._exit_stack.enter_async_context(
                 ClientSession(
                     read,
@@ -247,11 +252,17 @@ class _McpConnection:
         失败启动过的连接（``start`` 抛错）其 ``AsyncExitStack`` 可能已部分展开；
         ``aclose()`` 在极少数实现差异下会抛 RuntimeError，此时吞掉并继续——
         资源本已释放，调用方（``_start_on_owner``）不应因清理失败而中断整个启动流程。
+
+        anyio 的 streamable_http 客户端会在 ``aclose()`` 时把子任务里的原始错误
+        重新抛成 ``BaseExceptionGroup``（例如 401），同样不能让它冒出去覆盖
+        真正的启动失败原因。
         """
         try:
             await self._exit_stack.aclose()
-        except RuntimeError as exc:  # pragma: no cover - anyio 跨 task 清理差异
-            logger.debug("MCP %s close raised RuntimeError: %s", self.cfg.name, exc)
+        except (KeyboardInterrupt, SystemExit):
+            raise
+        except BaseException as exc:  # noqa: BLE001 — 清理失败不该中断宿主
+            logger.debug("MCP %s close raised %r", self.cfg.name, exc)
         self._session = None
         self.tools = []
 
@@ -479,6 +490,24 @@ class McpBridge:
                     "MCP server '%s' failed to start: %s", cfg.name, exc, exc_info=True
                 )
                 self.errors.append(f"MCP {cfg.name} failed: {exc}")
+                await conn.close()
+                continue
+            except BaseException as exc:
+                # asyncio.timeout 在握手阶段超时会抛 CancelledError（BaseException），
+                # 上面的 except Exception 拦不住，会一路冒到 spark web 的启动调用，
+                # 让一个连不上的远程 server 拖垮整个进程。这里兜住并记为该 server
+                # 启动失败，绝不因为单个 MCP server 影响宿主。
+                if isinstance(exc, (KeyboardInterrupt, SystemExit)):
+                    raise
+                logger.warning(
+                    "MCP server '%s' aborted during start: %r", cfg.name, exc
+                )
+                reason = (
+                    "握手超时或被取消"
+                    if isinstance(exc, asyncio.CancelledError)
+                    else type(exc).__name__
+                )
+                self.errors.append(f"MCP {cfg.name} failed: {reason}")
                 await conn.close()
                 continue
             # P1-9: 最小权限白名单（加载路径强制）。

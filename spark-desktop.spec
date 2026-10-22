@@ -39,7 +39,7 @@ if _rfc3987_spec is not None and _rfc3987_spec.origin:
             _LITELLM_DATA.append((str(_p), _dest))
 
 a = Analysis(
-    ['src/spark/__main__.py'],
+    ['src/spark/desktop_main.py'],
     pathex=[],
     binaries=[],
     datas=[
@@ -99,6 +99,7 @@ a = Analysis(
         'spark.web.sse',
         'spark.web.utils',
         'spark.desktop',
+        'spark.desktop_main',
         'spark.tools',
         'spark.tools.web',
         'spark.acp_server',

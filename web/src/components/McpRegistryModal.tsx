@@ -142,17 +142,17 @@ export const McpRegistryModal = memo(function McpRegistryModal({ onClose, onPick
                   <div className="flex items-center gap-2 text-[11px] text-ink3">
                     <span className="font-mono">{it.name}</span>
                     <span>{it.transport === "stdio" ? "stdio" : it.transport === "remote" ? "remote http" : it.transport}</span>
-                    {it.suggested_command && (
-                      <code className="rounded bg-hover px-1.5 py-0.5 font-mono text-[10.5px] text-ink2">
-                        {it.suggested_command} {it.suggested_args.join(" ")}
+                    {(it.suggested_command || it.remote_url) && (
+                      <code className="max-w-[46%] truncate rounded bg-hover px-1.5 py-0.5 font-mono text-[10.5px] text-ink2">
+                        {it.suggested_command ? `${it.suggested_command} ${it.suggested_args.join(" ")}` : it.remote_url}
                       </code>
                     )}
                     <Button
                       size="sm"
                       variant="soft"
-                      className={cls("ml-auto", !it.suggested_command && "opacity-40")}
-                      disabled={!it.suggested_command}
-                      title={it.suggested_command ? "" : t("mcpRegistry.remoteOnly", lang)}
+                      className={cls("ml-auto", !it.suggested_command && !it.remote_url && "opacity-40")}
+                      disabled={!it.suggested_command && !it.remote_url}
+                      title={it.suggested_command || it.remote_url ? "" : t("mcpRegistry.remoteOnly", lang)}
                       onClick={() => onPick(it)}
                     >
                       {t("mcpRegistry.addOneClick", lang)}
