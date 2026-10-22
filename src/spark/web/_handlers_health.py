@@ -6,7 +6,7 @@ health report the CLI prints and repair the safe subset with one click.
 
 from __future__ import annotations
 
-from spark import selfheal
+from spark import audit, selfheal
 from spark.web._httpbase import HandlerBase
 from spark.web._routing import _route_state
 
@@ -25,6 +25,8 @@ def _handle_diagnostics(handler: HandlerBase, body: dict) -> None:
             "rows": rows,
             "blocking": sum(1 for r in rows if r["level"] == "bad"),
             "warnings": sum(1 for r in rows if r["level"] == "warn"),
+            # Only present when SPARK_AUDIT_LOG is enabled; [] otherwise.
+            "audit": audit.read_recent(limit=20),
         },
     )
 

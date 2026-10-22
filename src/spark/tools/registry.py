@@ -503,9 +503,15 @@ class ToolRegistry:
                 self._dispatch_cache = self._build_dispatch_table()
             handler = self._dispatch_cache.get(name)
             if handler is not None:
-                result = handler(call.arguments)
-                if hasattr(result, "__await__"):
-                    result = await result
+                # Give the sandbox enough context to attribute a refusal to a
+                # tool in the audit trail (it only sees paths otherwise).
+                self.ctx.sandbox.current_tool = name
+                try:
+                    result = handler(call.arguments)
+                    if hasattr(result, "__await__"):
+                        result = await result
+                finally:
+                    self.ctx.sandbox.current_tool = ""
                 return result
 
         except Exception as exc:

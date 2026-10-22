@@ -154,19 +154,19 @@ class TestInputValidation:
         assert row.importance == 0.0
 
     def test_empty_content(self, tmp_path):
+        # An empty memory is invisible to search yet takes a capacity slot, so
+        # it is rejected rather than silently stored (these two tests used to
+        # *assert the bug*: empty rows were created and considered correct).
         store = make_store(tmp_path)
-        mid = store.add("")
-        row = store.get(mid)
-        assert row is not None
-        assert row.content == ""
+        with pytest.raises(ValueError):
+            store.add("")
+        assert store.stats()["active"] == 0
 
     def test_whitespace_content(self, tmp_path):
         store = make_store(tmp_path)
-        mid = store.add("   ")
-        row = store.get(mid)
-        assert row is not None
-        # strip() should make it empty
-        assert row.content == ""
+        with pytest.raises(ValueError):
+            store.add("   ")
+        assert store.stats()["active"] == 0
 
 
 # ---------------------------------------------------------------------------

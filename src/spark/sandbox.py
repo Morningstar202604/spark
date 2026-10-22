@@ -362,6 +362,9 @@ class WorkdirSandbox:
         self.cfg = cfg
         self.sandbox_mode = getattr(cfg.agent, "sandbox_mode", "workspace") if cfg else "workspace"
         self.protected_paths = list(getattr(cfg.agent, "protected_paths", []) or []) if cfg else []
+        #: Tool name of the call currently being dispatched, set by the registry.
+        #: Only used to attribute an audit entry; enforcement never reads it.
+        self.current_tool: str = ""
 
     @property
     def shell_allowed(self) -> bool:
@@ -388,6 +391,15 @@ class WorkdirSandbox:
             if self.full_access:
                 self._check_protected(path)
                 return path
+            from spark import audit
+
+            audit.record(
+                "sandbox_blocked",
+                path=str(raw),
+                matched="workdir_escape",
+                root=str(self.root),
+                tool=getattr(self, "current_tool", ""),
+            )
             raise PathEscapeError(f"Path escapes workdir: {rel}") from exc
         self._check_protected(path)
         return path
@@ -412,6 +424,15 @@ class WorkdirSandbox:
         # a hook that runs on the user's next commit.
         hit = _git_control_surface(path, self.root)
         if hit:
+            from spark import audit
+
+            audit.record(
+                "sandbox_blocked",
+                path=str(path),
+                matched=str(hit),
+                root=str(getattr(self, "root", "")),
+                tool=getattr(self, "current_tool", ""),
+            )
             raise SandboxPolicyError(f"Blocked protected path: {hit}")
         for raw in self._protected_effective():
             p = Path(raw)

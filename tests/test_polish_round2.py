@@ -684,3 +684,107 @@ def test_ask_user_without_channel_fails_gracefully(tmp_path: Path) -> None:
     )
     assert result.ok is False
     assert "no interactive channel" in result.payload["error"]
+
+
+# ---------------------------------------------------------------------------
+# Structured audit trail (audit F-014)
+# ---------------------------------------------------------------------------
+
+
+def test_audit_is_off_by_default(monkeypatch) -> None:
+    from spark import audit
+
+    monkeypatch.delenv("SPARK_AUDIT_LOG", raising=False)
+    assert audit.audit_path() is None
+    audit.record("tool_denied", tool="run_shell")  # must not raise or write
+    assert audit.read_recent() == []
+
+
+def test_audit_writes_redacted_jsonl(tmp_path: Path, monkeypatch) -> None:
+    import json as _json
+
+    from spark import audit
+
+    target = tmp_path / "audit.jsonl"
+    monkeypatch.setenv("SPARK_AUDIT_LOG", str(target))
+    audit.record(
+        "tool_denied",
+        tool="run_shell",
+        reason="blocked",
+        arguments={"command": "curl -H 'Authorization: Bearer sk-secret1234567890abcdef'"},
+    )
+    lines = target.read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 1
+    entry = _json.loads(lines[0])
+    assert entry["kind"] == "tool_denied"
+    assert entry["tool"] == "run_shell"
+    assert "sk-secret1234567890abcdef" not in lines[0]
+    assert "REDACTED" in lines[0]
+
+
+def test_audit_unknown_kind_is_ignored(tmp_path: Path, monkeypatch) -> None:
+    from spark import audit
+
+    target = tmp_path / "a.jsonl"
+    monkeypatch.setenv("SPARK_AUDIT_LOG", str(target))
+    audit.record("not_a_real_kind", foo="bar")
+    assert not target.exists()
+
+
+def test_audit_read_recent_returns_newest(tmp_path: Path, monkeypatch) -> None:
+    from spark import audit
+
+    target = tmp_path / "b.jsonl"
+    monkeypatch.setenv("SPARK_AUDIT_LOG", str(target))
+    for i in range(5):
+        audit.record("sandbox_blocked", path=f"/{i}", matched="x")
+    recent = audit.read_recent(limit=2)
+    assert len(recent) == 2
+    assert recent[-1]["path"] == "/4"
+
+
+def test_denied_tool_call_lands_in_audit(tmp_path: Path, monkeypatch) -> None:
+    """End-to-end: a policy-denied tool must produce an audit entry."""
+    import asyncio
+
+    from spark.core.loop import AgentLoop
+    from spark.models import ChatDelta, ToolCall
+    from spark.providers.mock import MockProvider
+    from spark.sandbox import WorkdirSandbox
+    from spark.tools.registry import ToolContext, ToolRegistry
+
+    target = tmp_path / "e2e-audit.jsonl"
+    monkeypatch.setenv("SPARK_AUDIT_LOG", str(target))
+    cfg = SparkConfig()
+    cfg.provider.name = "mock"
+    cfg.provider.model = "m"
+    cfg.agent.approval = "full-auto"
+    store = SessionStore(tmp_path / "aud.db")
+    sid = store.create_session(tmp_path, "m")
+    reg = ToolRegistry(ToolContext(sandbox=WorkdirSandbox(tmp_path, cfg), config=cfg))
+    provider = MockProvider(
+        rounds=[
+            [
+                ChatDelta(
+                    type="tool_call",
+                    tool_call=ToolCall(
+                        id="d1", name="write_file", arguments={"path": "/etc/passwd", "content": "x"}
+                    ),
+                ),
+                ChatDelta(type="end"),
+            ],
+            [ChatDelta(type="text", text="ok"), ChatDelta(type="end")],
+        ]
+    )
+    loop = AgentLoop(
+        workdir=tmp_path, cfg=cfg, provider=provider, registry=reg, store=store, session_id=sid
+    )
+
+    async def run():
+        return [e async for e in loop.iter_turn("go")]
+
+    asyncio.run(run())
+    store.close()
+    text = target.read_text(encoding="utf-8")
+    assert "tool_denied" in text or "sandbox_blocked" in text
+    assert "write_file" in text

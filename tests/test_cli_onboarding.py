@@ -232,3 +232,140 @@ def test_help_lists_new_commands() -> None:
     assert result.exit_code == 0
     for command in ("init", "doctor", "config", "version"):
         assert command in result.stdout
+
+
+# ---------------------------------------------------------------------------
+# CLI surface sweep (audit F-003: cli.py was at 29% line coverage)
+# ---------------------------------------------------------------------------
+
+def _invoke(args, monkeypatch, tmp_path):
+    home = tmp_path / "home"
+    home.mkdir(exist_ok=True)
+    monkeypatch.setattr(cli, "default_home", lambda: home)
+    monkeypatch.setenv("SPARK_HOME", str(home))
+    return runner.invoke(cli.app, args)
+
+
+def test_help_lists_core_commands() -> None:
+    result = runner.invoke(cli.app, ["--help"])
+    assert result.exit_code == 0
+    for cmd in ("exec", "web", "desktop", "mcp-serve", "acp", "doctor", "config"):
+        assert cmd in result.stdout, cmd
+
+
+def test_config_path_and_show(tmp_path, monkeypatch) -> None:
+    r = _invoke(["config", "path"], monkeypatch, tmp_path)
+    assert r.exit_code == 0
+    assert "config.toml" in r.stdout
+    r = _invoke(["config", "show"], monkeypatch, tmp_path)
+    assert r.exit_code == 0
+    assert "provider" in r.stdout.lower()
+
+
+def test_config_set_roundtrip(tmp_path, monkeypatch) -> None:
+    r = _invoke(["config", "set", "provider.model", "demo-model"], monkeypatch, tmp_path)
+    assert r.exit_code == 0
+    r = _invoke(["config", "show"], monkeypatch, tmp_path)
+    assert "demo-model" in r.stdout
+
+
+def test_sessions_on_empty_home(tmp_path, monkeypatch) -> None:
+    r = _invoke(["sessions"], monkeypatch, tmp_path)
+    assert r.exit_code == 0
+    assert "No sessions" in r.stdout or "暂无" in r.stdout
+
+
+def test_replay_on_empty_home(tmp_path, monkeypatch) -> None:
+    r = _invoke(["replay"], monkeypatch, tmp_path)
+    assert r.exit_code == 0
+
+
+def test_context_profile_needs_session(tmp_path, monkeypatch) -> None:
+    r = _invoke(["context-profile"], monkeypatch, tmp_path)
+    assert r.exit_code in (0, 1)
+
+
+def test_doctor_json_output(tmp_path, monkeypatch) -> None:
+    r = _invoke(["doctor", "--no-probe", "--json", "--workdir", str(tmp_path)], monkeypatch, tmp_path)
+    assert r.exit_code in (0, 1)
+    # The banner itself contains "[Ember]", so anchor on a newline-prefixed '['.
+    start = r.stdout.rindex(chr(10) + "[")
+    payload = json.loads(r.stdout[start:].strip())
+    assert isinstance(payload, list) and payload
+
+
+def test_doctor_backup_without_db_is_graceful(tmp_path, monkeypatch) -> None:
+    r = _invoke(
+        ["doctor", "--no-probe", "--backup", "--workdir", str(tmp_path)], monkeypatch, tmp_path
+    )
+    # The "skip" note goes to stderr by design (it is diagnostic, not result).
+    out = r.stdout + (r.stderr or "")
+    assert "跳过" in out or "skip" in out.lower()
+
+
+def test_doctor_backup_creates_snapshot(tmp_path, monkeypatch) -> None:
+    from spark.store import SessionStore
+
+    r = _invoke(["doctor", "--no-probe", "--backup"], monkeypatch, tmp_path)
+    home = tmp_path / "home"
+    SessionStore(home / "sessions.db").close()
+    r = _invoke(["doctor", "--no-probe", "--backup"], monkeypatch, tmp_path)
+    assert "已备份" in r.stdout
+    assert list((home / "backups").glob("sessions-*.db"))
+
+
+def test_models_command_without_network(tmp_path, monkeypatch) -> None:
+    """`spark models` hits models.dev; assert it degrades instead of crashing."""
+    r = _invoke(["models", "--limit", "3"], monkeypatch, tmp_path)
+    assert r.exit_code in (0, 1)
+
+
+def test_agent_list_and_unknown_use(tmp_path, monkeypatch) -> None:
+    r = _invoke(["agent", "list"], monkeypatch, tmp_path)
+    assert r.exit_code == 0
+    r = _invoke(["agent", "use", "ghost"], monkeypatch, tmp_path)
+    assert r.exit_code != 0
+
+
+def test_profile_list_and_unknown_use(tmp_path, monkeypatch) -> None:
+    r = _invoke(["profile", "list"], monkeypatch, tmp_path)
+    assert r.exit_code == 0
+    r = _invoke(["profile", "use", "ghost"], monkeypatch, tmp_path)
+    assert r.exit_code != 0
+
+
+def test_exec_without_key_runs_in_demo_mode(tmp_path, monkeypatch) -> None:
+    monkeypatch.delenv("SPARK_API_KEY", raising=False)
+    cfg_path = tmp_path / "c.toml"
+    cfg_path.write_text(
+        '[provider]\nname = "openai_compat"\nbase_url = "https://example.invalid/v1"\n'
+        'model = "m"\napi_key_env = "SPARK_NOPE_KEY"\n',
+        encoding="utf-8",
+    )
+    r = _invoke(
+        ["exec", "hi", "--config", str(cfg_path), "--approval", "full-auto", "--workdir", str(tmp_path)],
+        monkeypatch,
+        tmp_path,
+    )
+    assert r.exit_code == 0
+    assert "mock" in r.stdout.lower() or "演示" in r.stdout
+
+
+def test_web_rejects_busy_port(tmp_path, monkeypatch) -> None:
+    import socket
+
+    holder = socket.socket()
+    holder.bind(("127.0.0.1", 0))
+    holder.listen(1)
+    port = holder.getsockname()[1]
+    try:
+        r = _invoke(
+            ["web", "--workdir", str(tmp_path), "--port", str(port), "--provider", "mock"],
+            monkeypatch,
+            tmp_path,
+        )
+        assert r.exit_code != 0
+        out = r.stdout + (r.stderr or "")
+        assert "占用" in out or "occupied" in out.lower()
+    finally:
+        holder.close()

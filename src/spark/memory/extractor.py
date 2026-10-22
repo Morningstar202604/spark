@@ -2,43 +2,17 @@
 from __future__ import annotations
 
 import logging
-import re
 from dataclasses import dataclass
 
 from pydantic import BaseModel, Field
 
 from spark.memory.llm import chat_complete, parse_json_object
 from spark.memory.store import MemoryRow
+from spark.sanitize import redact_secrets
 from spark.structured import StructuredOutputError
 from spark.structured import complete as structured_complete
 
 logger = logging.getLogger(__name__)
-
-_SECRET_RES = [
-    re.compile(r"sk-[A-Za-z0-9_\-]{8,}"),
-    re.compile(r"ghp_[A-Za-z0-9]{8,}"),
-    re.compile(r"gho_[A-Za-z0-9]{8,}"),
-    re.compile(r"github_pat_[A-Za-z0-9_]{8,}"),
-    re.compile(r"xox[baprs]-[A-Za-z0-9\-]{8,}"),
-    re.compile(r"AKIA[0-9A-Z]{16}"),
-    re.compile(r"Bearer\s+[A-Za-z0-9\-_.~+/]{8,}", re.IGNORECASE),
-    re.compile(
-        r"(?i)(password|passwd|pwd|secret|token|api[_-]?key|authorization)\s*[=:]\s*[^\s,;'\"']{4,}"
-    ),
-    re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----"),
-]
-
-
-def redact_secrets(text: str) -> str:
-    if not text:
-        return text
-    out = text
-    for pat in _SECRET_RES:
-        if pat.groups:
-            out = pat.sub(lambda m: f"{m.group(1)}=[REDACTED]", out)
-        else:
-            out = pat.sub("[REDACTED]", out)
-    return out
 
 
 EXTRACT_SYSTEM = """你是长期记忆抽取器。从对话记录中提取值得跨会话长期记住的信息。

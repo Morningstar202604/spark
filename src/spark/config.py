@@ -490,6 +490,12 @@ def _recover_global_config(path: Path, note: list[str]) -> dict[str, Any]:
         return {}
     note.append(f"配置文件损坏，已备份为 {backup.name} 并按默认配置启动")
     try:
+        from spark import audit
+
+        audit.record("config_recovered", config=str(path), backup=str(backup))
+    except Exception:  # pragma: no cover - audit is best-effort
+        pass
+    try:
         path.unlink()
     except OSError:
         pass

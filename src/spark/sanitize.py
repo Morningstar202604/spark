@@ -13,6 +13,7 @@
 
 from __future__ import annotations
 
+import re as _re
 from pathlib import Path
 
 _REDACTED = "[REDACTED]"
@@ -102,3 +103,38 @@ def sanitize_sse_payload(payload: dict, secrets: tuple[str, ...] = ()) -> dict:
     脱敏项，必须走完整流程（线上本机令牌/API Key 缺失时同样生效）。
     """
     return _sanitize_value(payload, secrets, 0)
+
+
+# ---------------------------------------------------------------------------
+# Shared redaction (used by memory extraction and the audit trail).
+# Lives here — not in memory.extractor — so low-level modules like spark.audit
+# can use it without depending on the memory layer.
+# ---------------------------------------------------------------------------
+
+_SECRET_RES = [
+    _re.compile(r"sk-[A-Za-z0-9_\-]{8,}"),
+    _re.compile(r"ghp_[A-Za-z0-9]{8,}"),
+    _re.compile(r"gho_[A-Za-z0-9]{8,}"),
+    _re.compile(r"github_pat_[A-Za-z0-9_]{8,}"),
+    _re.compile(r"xox[baprs]-[A-Za-z0-9\-]{8,}"),
+    _re.compile(r"AKIA[0-9A-Z]{16}"),
+    _re.compile(r"Bearer\s+[A-Za-z0-9\-_.~+/]{8,}", _re.IGNORECASE),
+    _re.compile(
+        r"(?i)(password|passwd|pwd|secret|token|api[_-]?key|authorization)\s*[=:]\s*[^\s,;'\"']{4,}"
+    ),
+    _re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----"),
+]
+
+
+def redact_secrets(text: str) -> str:
+    if not text:
+        return text
+    out = text
+    for pat in _SECRET_RES:
+        if pat.groups:
+            out = pat.sub(lambda m: f"{m.group(1)}=[REDACTED]", out)
+        else:
+            out = pat.sub("[REDACTED]", out)
+    return out
+
+

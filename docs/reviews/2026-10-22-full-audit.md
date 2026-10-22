@@ -10,14 +10,14 @@
 |---|---|---|
 | F-001 SSRF 云元数据 | **已修复** | `_is_public_host` 改为 `is_global` 白名单式；8 个攻击地址全部拒绝，3 个公网地址放行；`tests/test_approval_and_ssrf.py` 新增 9 条参数化用例 |
 | F-002 依赖 CVE | **部分修复** | 27 → 9；langgraph 组清零（0.6.11→1.2.16、checkpoint-sqlite 2.0.11→3.1.2、certifi 2026.10.19）；余 chromadb（无修复版本，本地 Client 模式，暴露面低于 CVSS 假设）与 nltk（llama-index 传递依赖，spark 未直接调用） |
-| F-003 覆盖率 | 未修复 | 仍 71.8% / 63.4%，见 R3 |
+| F-003 覆盖率 | **部分修复** | 71.8%→**74.8%**，分支 63.4%→**66.4%**。新增 `test_routes_sweep.py`（44 条，覆盖全部 GET/POST 路由与 PTY）、`test_cli_onboarding.py` +14 条 CLI、`test_helpers_units.py`（36 条纯函数）、`test_tui_app.py`（6 条驱动真实 Textual app）。**仍未达 90%/85% 红线**：剩余大头是 TUI(39%)、cli(43%)、pty(34%)、desktop(36%)，见 R3 续 |
 | F-004 安全头 | **已修复** | 加 CSP + Permissions-Policy；`Server` 头改为 `spark`；新增响应头断言测试 |
 | F-005 数据备份/迁移 | **已修复** | 加 `SCHEMA_VERSION` / `PRAGMA user_version` / `backup_to()`（VACUUM INTO）/ `spark doctor --backup`；新增 2 条测试 |
 | F-006 启动耗时 | **已修复** | CLI 惰性导入 loop/probe/factory；`--version` 5 次中位数 **1.87s**（原 12.7s，冷缓存首跑仍有波动属 Windows 磁盘/杀软） |
-| F-007 文档漂移 | 未修复 | 见 R9 |
-| F-009 复杂度 | 未修复 | 见 R5 |
+| F-007 文档漂移 | **已修复** | `docs/competitive-comparison.md` 已同步 6 项（斜杠命令/消息回溯/Fork/导出/@引用/ask_user），删除 1 条重复行，新增 5 项独有能力，表头加「改代码必须同步本表」约定 |
+| F-009 复杂度 | 未修复 | 仍 7 个 E 级；本轮新增的 `audit`/`routes_sweep` 均 ≤C，未恶化 |
 | F-010 用户提问工具 | **已修复** | `ask_user` 工具 + `question` 事件 + 问答卡；无交互通道时优雅报错；新增 2 条测试，浏览器实测可选「pnpm」并回灌 |
-| F-014 审计流 | 未修复 | 见 R11 |
+| F-014 审计流 | **已修复** | 新增 `src/spark/audit.py`：默认关闭（`SPARK_AUDIT_LOG`），JSONL 追加写，写入前走 `sanitize.redact_secrets`，永不抛错。已埋点：工具被策略/审批拒绝、sandbox 路径越界、配置损坏自愈。`/api/diagnostics` 返回最近 20 条。5 条测试（含端到端：被拒的 `write_file` 落到审计） |
 
 
 ---
@@ -179,8 +179,8 @@ fetch_page(...) → httpx.ConnectTimeout(WinError 10060)  # 已发起真实连�
 
 | 指标 | 当前值 | 红线 | 判定 |
 |---|---|---|---|
-| 行覆盖率 | **71.8%** | ≥90%（核心域 ≥80%） | **不通过** |
-| 分支覆盖率 | **63.4%** | ≥85% | **不通过** |
+| 行覆盖率 | **74.8%** | ≥90%（核心域 ≥80%） | **不通过** |
+| 分支覆盖率 | **66.4%** | ≥85% | **不通过** |
 | 变异分数 | 16/16 = **100%** | ≥80% | 通过 |
 | 圈复杂度（单函数） | 97 个 ≥C，7 个 ≥E | ≤10 | **不通过** |
 | 认知复杂度 | 未测（无工具） | ≤15 | **[未确认]** |
@@ -202,7 +202,7 @@ fetch_page(...) → httpx.ConnectTimeout(WinError 10060)  # 已发起真实连�
 |---|---|---|---|---|
 | R1 | 修 SSRF：`_is_public_host` 改用 `ipaddress`，加 `100.64.0.0/10`、`169.254.0.0/16`、`fc00::/7`、`fe80::/10` | F-001 | S | 参数化测试覆盖上述 4 网段 + 十进制 IP + IPv6，全部抛异常；`test_approval_and_ssrf.py` 全绿 |
 | R2 | 依赖 CVE：升级 langgraph≥1.0.10、checkpoint-sqlite≥3.1.1、certifi；chromadb 降为可选 extra | F-002 | M | `pip-audit -s osv` 高危归零；799 测试通过；真机 6/6 复跑 |
-| R3 | 覆盖率补到 80%/分支 70%：优先 `_handlers_models.py`(11.8%)、`pty_api.py`(13.6%)、`pty/__init__.py`(16%)、`cli.py`(29%) | F-003 | L | `--cov-fail-under=80`；分支 ≥70%；CI 门槛同步 |
+| R3 | 覆盖率续：TUI(39%)、cli(43%)、pty(34%)、desktop(36%) 是大头；先补 `web/_handlers_models` 等已补到 60%+ 的余下分支 | F-003 | L | `--cov-fail-under=80`；分支 ≥70%；CI 门槛同步 |
 | R4 | 数据安全：`PRAGMA user_version` 迁移链 + `VACUUM INTO` 备份 + `doctor --backup` | F-005 | M | v1 库升级后数据完整；备份可用 `restore` 打开 |
 | R5 | 拆分 7 个 E 级函数 | F-009 | L | `radon cc -n D` 为 0；测试全绿 |
 | R6 | 加 `ask_user` 工具 + 前端输入弹层 | F-010 | M | 模型可调用并阻塞等待；E2E 断言返回值回灌 |
@@ -223,3 +223,15 @@ fetch_page(...) → httpx.ConnectTimeout(WinError 10060)  # 已发起真实连�
 3. **CVE 可利用性**只按 CVSS 与功能面判断，未逐个构造 exploit；F-002 定为 High 是因为 chromadb 越权在其网络服务模式下可直接利用，而本项目用本地 `EphemeralClient/PersistentClient`，实际暴露面**小于** CVSS 假设——明确标出，不夸大为 Critical。
 4. **竞品对标**基于公开文档与仓库（2026-10 时点），未安装竞品实测；矩阵「✅」指其文档声明支持。
 5. 本次审查未修改任何代码。
+
+
+---
+
+## 九、本轮整改记录（2026-10-22）
+
+| 轮次 | 内容 | 测试 |
+|---|---|---|
+| 1 | F-001 SSRF、F-002 依赖、F-004 安全头、F-005 备份、F-006 启动、F-010 ask_user | 813 passed |
+| 2 | F-007 文档同步、F-014 审计流、覆盖率 71.8→74.8、路由/CLI/helpers/TUI 四组新测试 | **918 passed** |
+
+覆盖率未达标是**事实**，不是遗漏：本轮的 44 条路由扫描 + 14 条 CLI + 36 条纯函数 + 6 条 TUI 已把最容易腐烂的面（路由表、参数校验、平台分支）覆盖到可回归的水平；剩余缺口集中在 TUI 渲染细节、desktop 壳、pty 真机路径，这些要么需要图形环境要么依赖 POSIX，性价比显著低于已补部分。

@@ -487,9 +487,15 @@ class MemoryStore:
         embedding_model: str | None = None,
         source_session: str | None = None,
     ) -> int:
-        """Insert a new memory, truncating content to 400 chars; returns the new id."""
+        """Insert a new memory, truncating content to 400 chars; returns the new id.
+
+        Empty content is rejected: an empty memory is invisible in search yet
+        still consumes a capacity slot and shows up in the management panel.
+        """
         now = self._now()
         content = content.strip()[:400]
+        if not content:
+            raise ValueError("memory content must not be empty")
         importance = max(0.0, min(10.0, float(importance)))
         metadata = {
             "type": type,

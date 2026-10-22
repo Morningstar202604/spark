@@ -1275,6 +1275,17 @@ class AgentLoop:
                 ok=False,
                 payload={"error": verdict.get("reason") or "denied by permission rule", "tool": call.name},
             )
+            # Security-relevant refusal: record it outside the human log so the
+            # user (or a collector) can answer "what was blocked and why".
+            from spark import audit
+
+            audit.record(
+                "tool_denied",
+                session=self.session_id,
+                tool=call.name,
+                reason=str(verdict.get("reason") or "permission rule"),
+                arguments=call.arguments,
+            )
             await self._persist_tool(call, message_id, result, "deny")
             yield TurnEvent(type="tool_end", tool_call=call, result=result)
             return

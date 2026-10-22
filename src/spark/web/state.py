@@ -278,6 +278,10 @@ class SparkWebState:
                 None,
             )
             session_id = latest["id"] if latest else None
+        # Capture the outgoing session *before* reassigning: reading it later
+        # always returned the new id, so session_switch hooks never fired and
+        # the fork/switch handlers reported the old session in their response.
+        previous_session = getattr(self, "session_id", "")
         if session_id is None:
             self.session_id = self.store.create_session(
                 self.workdir, self.cfg.provider.model, title="新对话"
@@ -294,7 +298,6 @@ class SparkWebState:
             if self.approver is None:
                 self.approver = WebApprover()
             approver = self.approver
-        previous_session = getattr(self, "session_id", "")
         self.loop = AgentLoop(
             workdir=self.workdir,
             cfg=self.cfg,

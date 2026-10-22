@@ -1,8 +1,12 @@
 # 竞品功能对比：spark vs Qoder / ZCode / opencode / Codex CLI
 
-> 调研日期：2026-10-14。来源：各产品官方文档站、官方仓库、变更日志（逐条核查，见文末来源）。
+> 调研日期：2026-10-14；**spark 侧复测 2026-10-22**（本轮逐项 grep 代码并实跑验证，
+> 见 `docs/reviews/2026-10-22-full-audit.md`）。竞品侧仍为公开文档/仓库声明。
 > 目的：给出 spark 与主流 AI 编程 agent 的功能差距矩阵，服务于后续路线规划。
 > 标注：✅ 已有 ｜ ⚠️ 部分/不完整 ｜ ❌ 缺失。
+>
+> **维护约定**：修改对应代码后必须同步本表并更新上面的复测日期；
+> 本表与实现不一致按缺陷处理（审查发现 F-007 即此类）。
 
 ## 0. 对象与形态总览
 
@@ -18,7 +22,8 @@
 
 | 功能点 | spark | Qoder | ZCode | opencode | codex |
 |---|---|---|---|---|---|
-| 一键安装脚本 | ❌（clone+venv 或 EXE） | 安装器 | dmg/exe/deb 包 | `curl … \| bash` | `curl … \| sh`（Win: irm \| iex） |
+| 一键安装脚本 | ❌（clone+venv 或解压 zip） | 安装器 | dmg/exe/deb 包 | `curl … \| bash` | `curl … \| sh`（Win: irm \| iex） |
+| 免安装绿色包 | ✅ `spark-agent-*-win64.zip` 解压即用（含 GUI 子系统 exe，双击无黑框） | 安装器 | 安装包 | — | — |
 | 包管理器 | ❌ | 安装器 | ❌ | brew/npm/choco/scoop/pacman… | npm/brew/Releases |
 | 自动更新 | ❌ | 内置 | 内置 | ✅ auto/notify 三态 | ✅ check_for_update_on_startup |
 | 卸载命令 | ❌ | 安装器 | — | ✅ `opencode uninstall` | — |
@@ -42,10 +47,10 @@
 | 功能点 | spark | 竞品代表 |
 |---|---|---|
 | TUI 快捷指令 | ⚠️ 仅 `/test`（其余透传模型） | codex 60+ slash；opencode 全量 slash（`/init /undo /share /compact /export /models /sessions /themes …`） |
-| 自定义斜杠命令 | ❌ | opencode markdown 命令（`$ARGUMENTS`/`!shell` 模板）；codex 经 hooks/skills |
+| 自定义斜杠命令 | ✅ `.spark/commands/*.md` + 输入框 `/` 补全 | opencode markdown 命令（`$ARGUMENTS`/`!shell` 模板）；codex 经 hooks/skills |
 | 内联 shell（`!cmd`） | ❌ | opencode ✅ |
 | `/editor` 外部编辑器写 prompt | ❌ | opencode / codex ✅ |
-| 消息回溯编辑 | ❌ | codex **Esc Esc** 回溯改 prompt 分支重跑；opencode timeline 回填 |
+| 消息回溯编辑 | ✅ 消息级删除 / 编辑重发 / 重新生成（`messages/delete`、`messages/truncate`） | codex **Esc Esc** 回溯改 prompt 分支重跑；opencode timeline 回填 |
 | Vim 模式 | ❌ | codex `/vim` |
 | 非交互 exec | ✅ `spark exec`（stdout 纯文本） | codex `exec --json/--output-schema/--ephemeral`；opencode `run --format` |
 | 代码审查命令 | ❌（`/test` 只跑测试） | codex `codex review --uncommitted/--base/--commit` |
@@ -57,9 +62,9 @@
 | 功能点 | spark | 竞品代表 |
 |---|---|---|
 | 新建/恢复/切换 | ✅ TUI ctrl+r、Web 侧栏、`spark resume` | 全都有 |
-| Fork | ⚠️ 存储层有 `store.fork()`，无 UI | codex `/fork`；opencode `--fork`；ZCode Edit History 分支 |
+| Fork | ✅ `POST /api/sessions/fork` + 顶栏按钮 + 侧栏入口 | codex `/fork`；opencode `--fork`；ZCode Edit History 分支 |
 | 分享链接 | ❌ | opencode `/share` → `opncd.ai/s/<id>` |
-| 导出/导入 | ❌ | opencode `/export`（md/JSON）；codex `/export`；codex `/import` 从 Claude Code 迁移 |
+| 导出/导入 | ⚠️ 导出 ✅（`POST /api/sessions/export`，md/JSON + 命令面板下载）；导入 ❌ | opencode `/export`（md/JSON）；codex `/export`；codex `/import` 从 Claude Code 迁移 |
 | 归档 | ✅ Web 删除 | codex `/archive`；ZCode 自动归档候选（窗口可配） |
 | 重命名 | ✅ 自动标题 | codex `/rename`；opencode ctrl+r |
 | 会话内 token 用量 | ✅ ContextMeter | codex `/status`；ZCode Usage Stats 面板 |
@@ -73,7 +78,7 @@
 | AGENTS.md | ✅ 项目级（可配文件名） | opencode 多级向上 + `~/.config` 全局；codex 逐级收集；ZCode 两源（全局+workspace） |
 | 全局规则文件 | ❌ | opencode `~/.config/opencode/AGENTS.md`；ZCode `~/.zcode/AGENTS.md` |
 | Claude Code 兼容（CLAUDE.md/skills） | ⚠️ 声明式 subagent 读 `.claude/agents/*.md` | opencode `CLAUDE.md` 回退 + `.claude/skills`；ZCode 一键导入 + 预装 CC marketplace |
-| `@` 文件引用补全 | ❌ | opencode `@` 模糊；codex `@` file-search；ZCode `@` 文件/文件夹 |
+| `@` 文件引用补全 | ✅ 输入框 `@` 列出工作区条目，方向键 + Tab/Enter | opencode `@` 模糊；codex `@` file-search；ZCode `@` 文件/文件夹 |
 | 外部目录/仓库引用 | ❌ | opencode `references`（别名+description）；codex `--add-dir` |
 | 图片输入 | ✅ Web 粘贴/拖拽 | opencode 自动缩放/5MB 上限；codex 剪贴板截图 + `view_image` |
 | 自动压缩 | ✅ 85% 阈值 + 保留 8 条 | opencode 三态（auto/prune/reserved）；codex 双阈值 + pre/post_compact hooks |
@@ -98,10 +103,14 @@
 | Notebook | ✅ read + edit（cell 级） | — |
 | Git 工具 | ✅ status/diff/log/branch/add/commit/worktree + run_tests（测试回灌闭环） | 多数靠 bash；codex `/diff` + `codex apply`；`--worktree` |
 | 任务即分支（绿测提交门控） | ✅ 已注册 `task_begin/task_step_commit/task_finish` | 无同类（独特能力） |
-| 用户交互（提问工具） | ❌（仅审批弹窗） | opencode `question`；codex `request_user_input` |
+| 用户交互（提问工具） | ✅ `ask_user` 工具 + 问答卡（无交互通道时优雅报错） | opencode `question`；codex `request_user_input` |
+| 子代理执行图（实时） | ✅ `主代理 → task → 子代理 → 工具 → 产出`，由 SSE 事件累积 | opencode 无（纯文本）；codex 无；ZCode 无 |
+| 会话导出 | ✅ Markdown / JSON + 命令面板下载 | opencode `/export`；codex `/export` |
+| 环境自愈 | ✅ 诊断 + 一键修复（目录/配置/运行时），`doctor --fix` | opencode/codex 仅报错 |
+| 数据备份 | ✅ `VACUUM INTO` 在线快照 + `doctor --backup` | 均无 |
+| 快捷键帮助面板 | ✅ `?` 打开 | codex `?`；opencode 无 |
 | 技能（Skills） | ✅ `.spark/skills/**` + `load_skill` | ZCode 全生态（导入 CC/Codex 等 + 插件分发）；opencode 6 目录 search；codex bundled + 动态选择器 |
 | 插件系统 | ⚠️ 仅 MCP 注册 | opencode npm 插件（可注册覆盖内建工具）；codex plugin marketplace；ZCode Public/Personal marketplace |
-| 自定义斜杠命令 | ❌ | opencode markdown 命令；ZCode `~/.zcode/commands/*.md` |
 
 ## 7. 权限 / 沙箱 / 安全
 
