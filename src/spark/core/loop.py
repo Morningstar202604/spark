@@ -1281,6 +1281,36 @@ class AgentLoop:
         approval_label = verdict["action"]
         if approval_label == "allow_always" and call.name not in NEVER_PERSIST_ALLOW:
             self.allow_always.add(call_signature(call))
+        if call.name == "ask_user" and self.registry.ctx.question_asker is not None:
+            from spark.models import ToolResult as _TR
+
+            question = str(call.arguments.get("question") or "").strip()
+            raw_options = call.arguments.get("options")
+            options = (
+                [str(o) for o in raw_options if str(o).strip()]
+                if isinstance(raw_options, list)
+                else []
+            )
+            # Emit first: the browser needs the question to render its card,
+            # and the asker blocks until the user answers.
+            yield TurnEvent(
+                type="question",
+                data={"question": question, "options": options, "tool_id": call.id},
+            )
+            answer = ""
+            try:
+                answer = await self.registry.ctx.question_asker(question, options)
+            except Exception as exc:  # noqa: BLE001
+                result = _TR(ok=False, payload={"error": f"question failed: {exc}"})
+            else:
+                result = (
+                    _TR(ok=True, payload={"question": question, "answer": answer})
+                    if answer
+                    else _TR(ok=False, payload={"error": "user dismissed the question"})
+                )
+            await self._persist_tool(call, message_id, result, "ask")
+            yield TurnEvent(type="tool_end", tool_call=call, result=result)
+            return
         if call.name == "task" and self.registry.ctx.task_runner is not None:
             # P1-4: 声明式子代理（.claude/agents/*.md）。agent 为该文件的 name，
             # 其 body 作为子代理的 system prompt，tools 字段收敛子代理工具集。

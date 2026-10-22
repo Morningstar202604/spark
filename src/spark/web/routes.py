@@ -35,6 +35,7 @@ from spark.web._handlers import (  # noqa: F401  (re-export for backward-compat)
     _handle_models_save,
     _handle_selfheal,
     _handle_session_export,
+    _handle_question_answer,
     _handle_sessions_delete,
     _handle_sessions_fork,
     _handle_sessions_new,
@@ -141,10 +142,25 @@ def build_handler_class(html: str):
     """Build a BaseHTTPRequestHandler subclass bound to *html* content."""
 
     class Handler(HandlerBase):
+        def version_string(self) -> str:
+            # Never advertise the interpreter version: it is free reconnaissance
+            # for anyone who can reach a non-loopback bind.
+            return "spark"
+
         def end_headers(self) -> None:
             self.send_header("X-Content-Type-Options", "nosniff")
             self.send_header("X-Frame-Options", "DENY")
             self.send_header("Referrer-Policy", "no-referrer")
+            self.send_header("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+            # The UI is a local SPA: everything it needs is same-origin. Inline
+            # styles are required by the diff/markdown renderers, so style-src
+            # allows 'unsafe-inline' while script-src does not.
+            self.send_header(
+                "Content-Security-Policy",
+                "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
+                "img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; "
+                "object-src 'none'; base-uri 'none'; frame-ancestors 'none'",
+            )
             super().end_headers()
 
         def log_message(self, fmt: str, *args: object) -> None:
@@ -569,6 +585,7 @@ _POST_HANDLERS: dict[str, Any] = {
     "/api/messages/truncate": _handle_messages_truncate,
     "/api/messages/delete": _handle_messages_delete,
     "/api/approval": _handle_approval,
+    "/api/question/answer": _handle_question_answer,
     "/api/sessions/new": _handle_sessions_new,
     "/api/sessions/delete": _handle_sessions_delete,
     "/api/sessions/switch": _handle_sessions_switch,

@@ -1,6 +1,6 @@
 import { create } from "zustand"
 import type { ApprovalInfo, PlanStep, SessionRow, Status, ToolCall } from "../types"
-import { listSessions, newSession, switchSession, deleteSession, cancelTurn, respondApproval, forkSession } from "../api"
+import { listSessions, newSession, switchSession, deleteSession, cancelTurn, respondApproval, forkSession, answerQuestion } from "../api"
 import { useChatStore, historyToItems, setDraftSession, type ChatMsg } from "./chatStore"
 import { useUiStore } from "./uiStore"
 
@@ -9,15 +9,23 @@ export interface ApprovalState {
   tool: ToolCall
 }
 
+export interface QuestionState {
+  question: string
+  options: string[]
+}
+
 interface SessionState {
   status: Status | null
   sessions: SessionRow[]
   approval: ApprovalState | null
   approvalBusy: boolean
+  question: QuestionState | null
   plan: PlanStep[]
   setStatus: (s: Status | null) => void
   patchStatus: (patch: Partial<Status>) => void
   setApproval: (a: ApprovalState | null) => void
+  setQuestion: (q: QuestionState | null) => void
+  handleAnswer: (answer: string) => Promise<void>
   setPlan: (p: PlanStep[]) => void
   syncPlanFromItems: (items: ChatMsg[]) => void
   refreshSessions: () => Promise<void>
@@ -36,6 +44,7 @@ export const useSessionStore = create<SessionState>((set, get) => {
     sessions: [],
     approval: null,
     approvalBusy: false,
+    question: null,
     plan: [],
 
     setStatus: (s) => {
@@ -44,6 +53,15 @@ export const useSessionStore = create<SessionState>((set, get) => {
     },
     patchStatus: (patch) => set((s) => ({ status: s.status ? { ...s.status, ...patch } : s.status })),
     setApproval: (a) => set({ approval: a }),
+    setQuestion: (q) => set({ question: q }),
+    handleAnswer: async (answer) => {
+      try {
+        await answerQuestion(answer)
+        set({ question: null })
+      } catch {
+        useUiStore.getState().pushToast("toast.answerFailed", "error")
+      }
+    },
     setPlan: (p) => set({ plan: p }),
 
     syncPlanFromItems: (items) => {

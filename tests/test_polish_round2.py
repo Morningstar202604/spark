@@ -574,3 +574,113 @@ def test_history_keeps_assistant_tool_calls_and_ids(live) -> None:
     tool_rows = [m for m in body["messages"] if m.get("role") == "tool"]
     assert any(m.get("tool_call_id") for m in tool_rows)
     _json.dumps(body)  # must be JSON-serialisable
+
+
+def test_security_headers_and_no_version_leak() -> None:
+    """Audit F-004: CSP/Permissions-Policy present, Server header hides Python."""
+    import threading
+    import urllib.request
+
+    from spark.web.server import build_web_server
+
+    cfg = SparkConfig()
+    cfg.provider.name = "mock"
+    cfg.provider.model = "m"
+    cfg.agent.approval = "full-auto"
+    store = SessionStore(_tmpdir := __import__("tempfile").mkdtemp() + "/h.db")
+    server, _ = build_web_server(
+        workdir=Path(_tmpdir), cfg=cfg, store=store, host="127.0.0.1", port=0
+    )
+    port = server.server_address[1]
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/", timeout=10) as r:
+            headers = {k.lower(): v for k, v in r.headers.items()}
+        assert "content-security-policy" in headers
+        assert "default-src 'self'" in headers["content-security-policy"]
+        assert "permissions-policy" in headers
+        assert "python" not in headers.get("server", "").lower()
+        assert "3.1" not in headers.get("server", "")
+    finally:
+        server.shutdown()
+        server.server_close()
+        store.close()
+
+
+def test_ask_user_emits_question_and_returns_answer(tmp_path: Path) -> None:
+    """Audit F-010: the agent can ask the user and receive the answer."""
+    import asyncio
+
+    from spark.core.loop import AgentLoop
+    from spark.models import ChatDelta, ToolCall
+    from spark.providers.mock import MockProvider
+    from spark.sandbox import WorkdirSandbox
+    from spark.tools.registry import ToolContext, ToolRegistry
+
+    cfg = SparkConfig()
+    cfg.provider.name = "mock"
+    cfg.provider.model = "m"
+    cfg.agent.approval = "full-auto"
+    store = SessionStore(tmp_path / "ask.db")
+    sid = store.create_session(tmp_path, "m")
+    ctx = ToolContext(sandbox=WorkdirSandbox(tmp_path, cfg), config=cfg)
+    seen: list[tuple[str, list[str]]] = []
+
+    async def asker(question: str, options: list[str]) -> str:
+        seen.append((question, options))
+        return "pnpm"
+
+    ctx.question_asker = asker
+    reg = ToolRegistry(ctx)
+    provider = MockProvider(
+        rounds=[
+            [
+                ChatDelta(
+                    type="tool_call",
+                    tool_call=ToolCall(
+                        id="q1",
+                        name="ask_user",
+                        arguments={"question": "用哪个包管理器？", "options": ["pnpm", "npm"]},
+                    ),
+                ),
+                ChatDelta(type="end"),
+            ],
+            [ChatDelta(type="text", text="好的"), ChatDelta(type="end")],
+        ]
+    )
+    loop = AgentLoop(
+        workdir=tmp_path, cfg=cfg, provider=provider, registry=reg, store=store, session_id=sid
+    )
+
+    async def collect():
+        return [e async for e in loop.iter_turn("go")]
+
+    events = asyncio.run(collect())
+    questions = [e for e in events if e.type == "question"]
+    assert len(questions) == 1
+    assert questions[0].data["question"] == "用哪个包管理器？"
+    assert questions[0].data["options"] == ["pnpm", "npm"]
+    assert seen == [("用哪个包管理器？", ["pnpm", "npm"])]
+    ends = [e for e in events if e.type == "tool_end"]
+    assert ends and ends[0].result.ok
+    assert ends[0].result.payload["answer"] == "pnpm"
+    store.close()
+
+
+def test_ask_user_without_channel_fails_gracefully(tmp_path: Path) -> None:
+    """CLI/ACP surfaces have no asker: the tool must explain, not hang."""
+    import asyncio
+
+    from spark.models import ToolCall
+    from spark.sandbox import WorkdirSandbox
+    from spark.tools.registry import ToolContext, ToolRegistry
+
+    cfg = SparkConfig()
+    cfg.provider.name = "mock"
+    ctx = ToolContext(sandbox=WorkdirSandbox(tmp_path, cfg), config=cfg)
+    reg = ToolRegistry(ctx)
+    result = asyncio.run(
+        reg.execute(ToolCall(id="q", name="ask_user", arguments={"question": "hi"}))
+    )
+    assert result.ok is False
+    assert "no interactive channel" in result.payload["error"]

@@ -35,6 +35,10 @@ const dict = {
     "common.copied": "已复制",
     "common.error": "错误",
     "error.retry": "重试这次请求",
+    "question.title": "Spark 需要你的确认",
+    "question.placeholder": "输入回答…",
+    "question.send": "提交",
+
     "common.testing": "测试中",
 
     "chat.you": "你",
@@ -321,6 +325,7 @@ const dict = {
     "palette.openReplay": "Turn 回放",
     "palette.exportChat": "导出当前会话（Markdown）",
     "toast.exported": "会话已导出",
+    "toast.answerFailed": "回答提交失败",
     "toast.imageTooLarge": "图片超过 5 MB，已跳过",
     "toast.onlyImages": "只支持图片附件（拖入的文件不是图片）",
     "toast.exportFailed": "导出失败",
@@ -508,6 +513,10 @@ const dict = {
     "common.copied": "Copied",
     "common.error": "Error",
     "error.retry": "Retry this request",
+    "question.title": "Spark needs your input",
+    "question.placeholder": "Type your answer…",
+    "question.send": "Send",
+
     "common.testing": "Testing",
 
     "chat.you": "You",
@@ -794,6 +803,7 @@ const dict = {
     "palette.openReplay": "Turn Replay",
     "palette.exportChat": "Export this chat (Markdown)",
     "toast.exported": "Chat exported",
+    "toast.answerFailed": "Failed to submit answer",
     "toast.imageTooLarge": "Image is over 5 MB — skipped",
     "toast.onlyImages": "Only image attachments are supported here",
     "toast.exportFailed": "Export failed",

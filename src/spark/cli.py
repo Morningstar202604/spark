@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import sys
 from pathlib import Path
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
 import typer
 
@@ -20,7 +20,6 @@ from spark.config import (
     save_config,
     write_config_template,
 )
-from spark.core.loop import AgentLoop
 from spark.errors import ConfigError, SparkError
 from spark.onboard import (
     SetupError,
@@ -38,12 +37,31 @@ from spark.onboard import (
     set_value,
     version_line,
 )
-from spark.providers.factory import create_provider
-from spark.providers.probe import probe_provider
 from spark.sandbox import WorkdirSandbox
-from spark.store import SessionStore
-from spark.tools.mcp_bridge import McpBridge
-from spark.tools.registry import ToolContext, ToolRegistry
+
+if TYPE_CHECKING:  # pragma: no cover - typing only, keeps CLI startup fast
+    from spark.store import SessionStore
+    from spark.tools.mcp_bridge import McpBridge
+    from spark.tools.registry import ToolRegistry
+
+
+def probe_provider(*args, **kwargs):
+    """Lazy shim: the probe pulls litellm (~6.7s), only needed by doctor/test."""
+    from spark.providers.probe import probe_provider as _probe
+
+    return _probe(*args, **kwargs)
+
+
+def _agent_loop():
+    """Import the agent loop lazily.
+
+    ``spark.core.loop`` pulls litellm + langgraph (~7.8s on this machine), which
+    made every CLI invocation — including ``spark --version`` — pay the full
+    agent start-up cost. Only commands that actually run a turn need it.
+    """
+    from spark.core.loop import AgentLoop as _AgentLoop
+
+    return _AgentLoop
 
 app = typer.Typer(
     # Typer's completion machinery is built in; keeping it off only removed the
@@ -60,7 +78,9 @@ app = typer.Typer(
 )
 
 
-def _store() -> SessionStore:
+def _store() -> "SessionStore":
+    from spark.store import SessionStore
+
     ensure_home()
     write_config_template(default_home() / "config.toml")
     return SessionStore(default_home() / "sessions.db")
@@ -78,6 +98,8 @@ def _resolve_session(
 
 
 async def _boot_mcp(cfg: SparkConfig, registry: ToolRegistry) -> McpBridge:
+    from spark.tools.mcp_bridge import McpBridge
+
     bridge = McpBridge()
     if cfg.mcp_servers:
         await bridge.start(cfg.mcp_servers, registry)
@@ -116,10 +138,13 @@ def _launch_tui(
     session_id: str,
     initial_prompt: str | None,
 ) -> None:
+    from spark.providers.factory import create_provider
     from spark.tui.app import SparkApp
 
     prov = create_provider(cfg)
     sandbox = WorkdirSandbox(workdir, cfg)
+    from spark.tools.registry import ToolContext, ToolRegistry
+
     tool_ctx = ToolContext(sandbox=sandbox, config=cfg)
     registry = ToolRegistry(tool_ctx)
     bridge = asyncio.run(_boot_mcp(cfg, registry))
@@ -222,8 +247,12 @@ def exec_cmd(
 async def _exec_async(
     prompt: str, workdir: Path, cfg: SparkConfig, store: SessionStore, session_id: str
 ) -> None:
+    from spark.providers.factory import create_provider
+
     prov = create_provider(cfg)
     sandbox = WorkdirSandbox(workdir, cfg)
+    from spark.tools.registry import ToolContext, ToolRegistry
+
     tool_ctx = ToolContext(sandbox=sandbox, config=cfg)
     registry = ToolRegistry(tool_ctx)
     bridge = await _boot_mcp(cfg, registry)
@@ -233,7 +262,7 @@ async def _exec_async(
     # One-shot CLI: the process *is* the turn, so there is nothing to resume
     # after a crash. The default in-memory saver still backs in-process
     # approval interrupts without paying for a durable DB.
-    loop = AgentLoop(
+    loop = _agent_loop()(
         workdir=workdir,
         cfg=cfg,
         provider=prov,
@@ -914,6 +943,9 @@ def doctor_cmd(
     config: Path | None = typer.Option(None, "--config"),
     probe: bool = typer.Option(True, "--probe/--no-probe", help="实际调用一次模型验证"),
     fix: bool = typer.Option(False, "--fix", help="自动修复可安全修复的问题（建目录/重建配置/备份损坏配置）"),
+    backup: bool = typer.Option(
+        False, "--backup", help="备份会话数据库到 ~/.spark/backups/（VACUUM INTO，可在线执行）"
+    ),
     as_json: bool = typer.Option(False, "--json", help="输出机器可读 JSON"),
 ) -> None:
     """Diagnose configuration and print actionable fixes."""
@@ -976,6 +1008,24 @@ def doctor_cmd(
                     "核对 base_url / 模型名 / 密钥，或运行 spark init 重新配置",
                 )
             )
+    if backup:
+        import time as _time
+
+        from spark.store import SessionStore
+
+        db = default_home() / "sessions.db"
+        if not db.exists():
+            typer.echo("  跳过：还没有会话数据库", err=True)
+        else:
+            stamp = _time.strftime("%Y%m%d-%H%M%S")
+            target = default_home() / "backups" / f"sessions-{stamp}.db"
+            store = SessionStore(db)
+            try:
+                out = store.backup_to(target)
+                typer.echo(f"  已备份：{out}（{out.stat().st_size // 1024} KB，schema v{store.schema_version()}）")
+            finally:
+                store.close()
+
     typer.echo(render_health(rows, as_json=as_json))
     raise typer.Exit(health_exit_code(rows))
 

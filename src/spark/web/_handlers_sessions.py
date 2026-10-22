@@ -295,6 +295,18 @@ def _handle_session_export(handler: HandlerBase, body: dict) -> None:
     )
 
 
+def _handle_question_answer(handler: HandlerBase, body: dict) -> None:
+    """Deliver the user's answer to a pending ``ask_user`` question."""
+    state = _route_state(handler)
+    bridge = getattr(state, "question_bridge", None)
+    if bridge is None or not bridge.pending:
+        handler._json(409, {"error": "no pending question"})
+        return
+    answer = str(body.get("answer") or "")
+    bridge.answer(answer)
+    handler._json(200, {"ok": True})
+
+
 def _handle_checkpoints_rollback(handler: HandlerBase, body: dict) -> None:
     state = _route_state(handler)
     cp_id = body.get("checkpoint_id")

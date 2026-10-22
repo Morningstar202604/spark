@@ -5,6 +5,7 @@ import { ChatView } from "./components/ChatView"
 import { Composer } from "./components/Composer"
 import { ApprovalModal } from "./components/ApprovalModal"
 import { ShortcutsHelp } from "./components/ShortcutsHelp"
+import { QuestionCard } from "./components/QuestionCard"
 import Toast from "./components/Toast"
 import { fetchStatus } from "./api"
 import type { Status } from "./types"
@@ -136,6 +137,7 @@ export default function App() {
         <Composer />
       </div>
       <ApprovalModal />
+      <QuestionCard />
       <ShortcutsHelp />
       {/* Chunks are fetched on first open (keeps the initial bundle at ~140 KB),
           but each surface then stays mounted: unmounting on close threw away

@@ -23,6 +23,8 @@ TurnEventType = Literal[
     # counters (chars, tool count) rather than the child's raw stream.
     "subtask_progress",
     "subtask_trace",
+    # Interactive question: the agent asks the user and blocks until answered.
+    "question",
     "turn_end",
     "turn_error",
 ]

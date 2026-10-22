@@ -116,24 +116,49 @@ BLOCKED_NET_HOSTS = {
 MAX_FETCH_BYTES = 8 * 1024 * 1024
 
 
+#: Cloud metadata endpoints that are *not* covered by the private/reserved
+#: ranges below. Aliyun/Tencent put theirs on 100.100.100.200 (CGNAT space),
+#: which ipaddress reports as neither private nor reserved — only non-global.
+BLOCKED_METADATA_IPS = {
+    "100.100.100.200",  # Aliyun / Tencent Cloud
+    "169.254.169.254",  # AWS / GCP / Azure (already link-local, defence in depth)
+    "169.254.170.2",    # AWS ECS task metadata
+    "fd00:ec2::254",    # AWS IMDSv6
+}
+
+
 def _is_public_host(host: str) -> bool:
-    """Reject loopback / private / link-local / reserved targets (SSRF guard)."""
+    """Reject anything that is not a globally routable unicast address.
+
+    Fail-closed by construction: instead of enumerating bad ranges (which kept
+    missing CGNAT metadata endpoints, IPv6 ULA and decimal-encoded IPv4), we
+    require ``is_global`` — the one property a legitimate public target has.
+    """
     import ipaddress
 
     name = (host or "").strip().lower().strip("[]")
-    if not name or name in BLOCKED_NET_HOSTS:
+    if not name or name in BLOCKED_NET_HOSTS or name in BLOCKED_METADATA_IPS:
         return False
+    # Decimal/octal/hex IPv4 (e.g. http://2130706433/ == 127.0.0.1) is not a
+    # valid hostname and must never reach the resolver.
     try:
+        if name.isdigit():
+            return False
         addr = ipaddress.ip_address(name)
     except ValueError:
+        # Not an IP literal: a DNS name. Resolution is re-checked in
+        # _assert_fetchable() against the same predicate.
         return True
-    return not (
-        addr.is_private
-        or addr.is_loopback
-        or addr.is_link_local
-        or addr.is_reserved
-        or addr.is_multicast
-        or addr.is_unspecified
+    if addr.version == 6 and addr.ipv4_mapped is not None:
+        addr = addr.ipv4_mapped
+    return bool(
+        addr.is_global
+        and not addr.is_private
+        and not addr.is_loopback
+        and not addr.is_link_local
+        and not addr.is_reserved
+        and not addr.is_multicast
+        and not addr.is_unspecified
     )
 
 

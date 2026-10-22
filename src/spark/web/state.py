@@ -31,6 +31,50 @@ from spark.tools.registry import ToolContext, ToolRegistry
 logger = logging.getLogger(__name__)
 
 
+class WebQuestionBridge:
+    """Carries an ``ask_user`` question from the agent thread to the browser.
+
+    Same shape as :class:`WebApprover`: the tool side awaits ``ask()`` while the
+    HTTP side calls ``answer()``. The event is emitted by the loop so the UI can
+    render the card; this class only owns the rendezvous.
+    """
+
+    def __init__(self) -> None:
+        self.pending = False
+        self._event = threading.Event()
+        self._answer = ""
+        self._question = ""
+        self._options: list[str] = []
+
+    async def ask(self, question: str, options: list[str] | None = None) -> str:
+        self.pending = True
+        self._question = question
+        self._options = list(options or [])
+        self._answer = ""
+        self._event = threading.Event()
+        deadline = time.monotonic() + 600.0
+        try:
+            while not self._event.is_set():
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                await asyncio.sleep(min(0.1, remaining))
+        finally:
+            self.pending = False
+        return self._answer
+
+    def payload(self) -> dict:
+        return {"question": self._question, "options": self._options}
+
+    def answer(self, text: str) -> None:
+        self._answer = str(text or "")
+        self._event.set()
+
+    def cancel(self) -> None:
+        self._answer = ""
+        self._event.set()
+
+
 class WebApprover:
     """Bridges approval prompts from the agent loop thread to HTTP handlers."""
 
@@ -152,6 +196,7 @@ class SparkWebState:
         self.turn_lock = threading.Lock()
         self.busy = False
         self.approver = WebApprover() if cfg.agent.approval != "full-auto" else None
+        self.question_bridge = WebQuestionBridge()
         self.mcp_bridge: McpBridge | None = None
         self.control_token = secrets.token_urlsafe(32)
         self.memory_store = MemoryStore(
@@ -213,6 +258,7 @@ class SparkWebState:
         self, session_id: str | None = None, reuse_latest: bool = False
     ) -> None:
         tool_ctx = ToolContext(sandbox=self.sandbox, config=self.cfg)
+        tool_ctx.question_asker = self.question_bridge.ask
         registry = ToolRegistry(tool_ctx)
         if self.mcp_bridge is not None:
             self.mcp_bridge.register_into(registry)

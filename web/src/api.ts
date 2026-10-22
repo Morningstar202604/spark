@@ -289,6 +289,16 @@ export async function runSelfHeal(): Promise<{
   return readJson(await fetchWithTimeout("/api/selfheal", { method: "POST" }))
 }
 
+export async function answerQuestion(answer: string): Promise<void> {
+  await readJson(
+    await fetchWithTimeout("/api/question/answer", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ answer }),
+    }),
+  )
+}
+
 export async function respondApproval(decision: "allow" | "allow_always" | "deny"): Promise<void> {
   await readJson(
     await fetchWithTimeout("/api/approval", {

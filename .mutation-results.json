@@ -1,0 +1,82 @@
+[
+ {
+  "name": "M1 受保护路径比对恒不命中",
+  "verdict": "KILLED",
+  "tail": "s='messages' or allowed_objects='core') to suppress this warning.\n    from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n=========================== short test summary info ===========================\nFAILED tests/test_hardening_regressions.py::test_h1_quoted_protected_path_is_blocked[cat /etc/hosts]\n!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!\n1 failed, 1 warning in 7.33s\n"
+ },
+ {
+  "name": "M2 去掉引号剥离",
+  "verdict": "KILLED",
+  "tail": "cts='messages' or allowed_objects='core') to suppress this warning.\n    from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n=========================== short test summary info ===========================\nFAILED tests/test_hardening_regressions.py::test_quote_stripping_layer_is_load_bearing\n!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!\n1 failed, 58 passed, 1 warning in 10.10s\n"
+ },
+ {
+  "name": "M3 去掉 IFS 清理",
+  "verdict": "KILLED",
+  "tail": "_objects='messages' or allowed_objects='core') to suppress this warning.\n    from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n=========================== short test summary info ===========================\nFAILED tests/test_hardening_regressions.py::test_ifs_cleanup_layer_is_load_bearing\n!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!\n1 failed, 59 passed, 1 warning in 7.93s\n"
+ },
+ {
+  "name": "M4 去掉嵌套 .git 保护",
+  "verdict": "KILLED",
+  "tail": "cts='core') to suppress this warning.\n    from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n=========================== short test summary info ===========================\nFAILED tests/test_hardening_regressions.py::test_nested_git_control_surfaces_are_protected[sub/.git/hooks/pre-commit]\n!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!\n1 failed, 36 passed, 1 warning in 6.73s\n"
+ },
+ {
+  "name": "M5 放行 '-' 开头的 diagnostics target",
+  "verdict": "KILLED",
+  "tail": "jects='messages' or allowed_objects='core') to suppress this warning.\n    from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n=========================== short test summary info ===========================\nFAILED tests/test_hardening_regressions.py::test_h2_diagnostics_rejects_flag_like_path\n!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!\n1 failed, 8 passed, 1 warning in 5.37s\n"
+ },
+ {
+  "name": "M6 store.touch 走 title 分支（NOT NULL）",
+  "verdict": "KILLED",
+  "tail": "bjects='messages' or allowed_objects='core') to suppress this warning.\n    from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n=========================== short test summary info ===========================\nFAILED tests/test_hardening_regressions.py::test_m3_touch_without_title_keeps_title\n!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!\n1 failed, 26 passed, 1 warning in 10.06s\n"
+ },
+ {
+  "name": "M7 delete_session 不删 FTS",
+  "verdict": "KILLED",
+  "tail": "lowed_objects='messages' or allowed_objects='core') to suppress this warning.\n    from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n=========================== short test summary info ===========================\nFAILED tests/test_hardening_regressions.py::test_m4_delete_session_purges_fts\n!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!\n1 failed, 27 passed, 1 warning in 7.93s\n"
+ },
+ {
+  "name": "M8 审批缓存退回 id-only",
+  "verdict": "KILLED",
+  "tail": "ects='messages' or allowed_objects='core') to suppress this warning.\n    from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n=========================== short test summary info ===========================\nFAILED tests/test_agent_runtime.py::test_duplicate_tool_call_ids_cannot_share_a_verdict\n!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!\n1 failed, 7 passed, 1 warning in 8.93s\n"
+ },
+ {
+  "name": "M9 去破坏性前缀匹配",
+  "verdict": "KILLED",
+  "tail": "ssages' or allowed_objects='core') to suppress this warning.\n    from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n=========================== short test summary info ===========================\nFAILED tests/test_hardening_regressions.py::test_deny_patterns_are_word_bounded[rm -rf /-True]\n!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!\n1 failed, 14 passed, 1 warning in 5.20s\n"
+ },
+ {
+  "name": "M10 不展开环境变量",
+  "verdict": "KILLED",
+  "tail": "jects='messages' or allowed_objects='core') to suppress this warning.\n    from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n=========================== short test summary info ===========================\nFAILED tests/test_hardening_regressions.py::test_env_indirection_to_config_is_blocked\n!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!\n1 failed, 41 passed, 1 warning in 6.81s\n"
+ },
+ {
+  "name": "M11 cwd 相对路径不参与比对",
+  "verdict": "KILLED",
+  "tail": "wed_objects='messages' or allowed_objects='core') to suppress this warning.\n    from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n=========================== short test summary info ===========================\nFAILED tests/test_hardening_regressions.py::test_cwd_relative_escape_is_blocked\n!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!\n1 failed, 40 passed, 1 warning in 6.80s\n"
+ },
+ {
+  "name": "M12 上下文设置不校验就写入",
+  "verdict": "KILLED",
+  "tail": "ssages' or allowed_objects='core') to suppress this warning.\n    from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n=========================== short test summary info ===========================\nFAILED tests/test_hardening_regressions.py::test_context_setting_validation_rejects_bad_values\n!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!\n1 failed, 60 passed, 1 warning in 8.86s\n"
+ },
+ {
+  "name": "M13 重定向不再拆分",
+  "verdict": "KILLED",
+  "tail": "re') to suppress this warning.\n    from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n=========================== short test summary info ===========================\nFAILED tests/test_hardening_regressions.py::test_redirection_next_to_protected_path_is_blocked[echo x>.git/hooks/pre-commit]\n!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!\n1 failed, 31 passed, 1 warning in 7.03s\n"
+ },
+ {
+  "name": "M14a git alias 快速分支不再拦截",
+  "verdict": "KILLED",
+  "tail": "objects='messages' or allowed_objects='core') to suppress this warning.\n    from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n=========================== short test summary info ===========================\nFAILED tests/test_hardening_regressions.py::test_git_alias_attached_form_is_blocked\n!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!\n1 failed, 61 passed, 1 warning in 8.63s\n"
+ },
+ {
+  "name": "M14b git alias 分离参数分支不再拦截",
+  "verdict": "KILLED",
+  "tail": "wed_objects='messages' or allowed_objects='core') to suppress this warning.\n    from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n=========================== short test summary info ===========================\nFAILED tests/test_hardening_regressions.py::test_git_alias_execution_is_blocked\n!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!\n1 failed, 43 passed, 1 warning in 7.55s\n"
+ },
+ {
+  "name": "M15 设备汇不再豁免（/dev/null 误杀回归）",
+  "verdict": "KILLED",
+  "tail": "ts='core') to suppress this warning.\n    from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n=========================== short test summary info ===========================\nFAILED tests/test_hardening_regressions.py::test_normal_commands_are_not_false_positives[python -m pytest 2>/dev/null]\n!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!\n1 failed, 52 passed, 1 warning in 6.64s\n"
+ }
+]

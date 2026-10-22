@@ -83,3 +83,35 @@ def test_search_no_hit(store: SessionStore) -> None:
     sid = store.create_session(Path("/tmp"), "mock")
     store.append_message(sid, ChatMessage(role="user", content="abc"))
     assert store.search("zzz") == []
+
+
+def test_schema_version_and_backup(tmp_path: Path) -> None:
+    """Audit F-005: a database records its schema version and can be backed up."""
+    from spark.store import SessionStore
+
+    db = tmp_path / "v.db"
+    store = SessionStore(db)
+    assert store.schema_version() == SessionStore.SCHEMA_VERSION
+    store.append_message(
+        store.create_session(tmp_path, "m"), ChatMessage(role="user", content="keep me")
+    )
+    out = store.backup_to(tmp_path / "snap.db")
+    store.close()
+
+    restored = SessionStore(out)
+    try:
+        assert restored.schema_version() == SessionStore.SCHEMA_VERSION
+        rows = restored.list_sessions()
+        assert rows and restored.load_messages(rows[0]["id"])[0].content == "keep me"
+    finally:
+        restored.close()
+
+
+def test_backup_is_a_single_file_without_wal(tmp_path: Path) -> None:
+    from spark.store import SessionStore
+
+    store = SessionStore(tmp_path / "w.db")
+    out = store.backup_to(tmp_path / "one.db")
+    store.close()
+    assert not (tmp_path / "one.db-wal").exists()
+    assert out.stat().st_size > 0

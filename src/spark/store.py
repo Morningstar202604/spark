@@ -131,6 +131,10 @@ class SessionStore:
                     ON sessions(updated_at DESC);
                 """
             )
+            # Schema version. The ad-hoc ALTERs below are idempotent, but without
+            # a recorded version there is no way to tell an old database from a
+            # half-migrated one — and no place to hang future migrations.
+            self._migrate_schema()
             try:
                 self._conn.execute(
                     "ALTER TABLE sessions ADD COLUMN compact_from INTEGER"
@@ -160,6 +164,50 @@ class SessionStore:
                 """
             )
             self._conn.commit()
+
+    #: Bump when a step in :meth:`_migrate_schema` is added.
+    SCHEMA_VERSION = 1
+
+    def _migrate_schema(self) -> None:
+        """Record/upgrade the schema version on *this* database.
+
+        Steps must be idempotent: an older database reports ``user_version = 0``
+        and re-runs everything, which the ALTER/CREATE statements tolerate.
+        """
+        current = int(self._conn.execute("PRAGMA user_version").fetchone()[0])
+        if current >= self.SCHEMA_VERSION:
+            return
+        for version, step in ((1, self._migrate_v1),):
+            if current < version:
+                step()
+                current = version
+        self._conn.execute(f"PRAGMA user_version = {int(current)}")
+        self._conn.commit()
+
+    def _migrate_v1(self) -> None:
+        """v1: the columns/indexes created by the legacy inline ALTERs.
+
+        They are already applied above by :meth:`_init`; this hook exists so the
+        version is recorded and future steps have a place to live.
+        """
+
+    def backup_to(self, target: Path | str) -> Path:
+        """Write a consistent snapshot of this database to *target*.
+
+        ``VACUUM INTO`` produces a single-file copy without the ``-wal`` sidecar,
+        so it is safe to take while the app is running (unlike a plain file copy).
+        """
+        target_path = Path(target)
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        if target_path.exists():
+            target_path.unlink()
+        with self._lock:
+            self._conn.execute("VACUUM INTO ?", (str(target_path),))
+        return target_path
+
+    def schema_version(self) -> int:
+        with self._lock:
+            return int(self._conn.execute("PRAGMA user_version").fetchone()[0])
 
     def _fts_sync_message(self, message_id: int, content: str | None) -> None:
         """Keep messages_fts aligned with the messages table (best-effort)."""

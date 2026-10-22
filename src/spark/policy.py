@@ -15,6 +15,10 @@ READONLY_TOOLS = {
     "read_file",
     "list_dir",
     "update_plan",
+    # Asking the user changes nothing on disk and must never need approval:
+    # gating it meant the question could not be shown until it was approved,
+    # which is a deadlock on the approval channel itself.
+    "ask_user",
     "grep",
     "diagnostics",
     "mcp_resources",

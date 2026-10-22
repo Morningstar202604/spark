@@ -164,3 +164,37 @@ def test_web_fetch_has_size_cap() -> None:
     from spark.tools import web
 
     assert 0 < web.MAX_FETCH_BYTES <= 64 * 1024 * 1024
+
+
+# ---------------------------------------------------------------------------
+# Audit F-001: the old predicate enumerated bad ranges and kept missing
+# metadata endpoints that are neither "private" nor "reserved".
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://100.100.100.200/latest/meta-data/",  # Aliyun / Tencent
+        "http://100.64.0.1/",                        # CGNAT space
+        "http://169.254.169.254/latest/meta-data/",  # AWS / GCP / Azure
+        "http://169.254.170.2/v2/credentials",       # AWS ECS
+        "http://2130706433/",                        # decimal 127.0.0.1
+        "http://[fd00::1]/",                         # IPv6 ULA
+        "http://[fe80::1]/",                         # IPv6 link-local
+        "http://[::ffff:127.0.0.1]/",                # IPv4-mapped loopback
+    ],
+)
+def test_web_fetch_blocks_metadata_and_encoded_targets(url: str) -> None:
+    from spark.tools.web import _assert_fetchable
+
+    with pytest.raises(ValueError):
+        _assert_fetchable(url)
+
+
+def test_public_targets_still_allowed() -> None:
+    """The guard must not become "block everything" (the other failure mode)."""
+    from spark.tools.web import _assert_fetchable
+
+    for url in ("https://example.com/docs", "http://1.1.1.1/", "https://api.github.com/"):
+        assert _assert_fetchable(url) is None

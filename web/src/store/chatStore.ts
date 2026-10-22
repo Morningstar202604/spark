@@ -331,6 +331,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
           buf.think += ev.text
           schedule()
           break
+        case "question": {
+          flush()
+          useSessionStore.getState().setQuestion({
+            question: ev.data?.question ?? "",
+            options: ev.data?.options ?? [],
+          })
+          break
+        }
         case "subtask_progress": {
           const idx = ev.data?.index ?? 0
           patchLast((it) => ({

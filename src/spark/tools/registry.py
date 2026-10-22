@@ -25,6 +25,9 @@ class ToolContext:
     mcp_bridge: Any = None
     task_runner: Any = None
     task_runner_parallel: Any = None
+    #: Awaitable(question, options) -> answer. None when the surface cannot ask
+    #: (CLI exec / ACP), in which case the tool reports that instead of hanging.
+    question_asker: Any = None
 
 
 ToolHandler = Callable[[ToolContext, dict[str, Any]], ToolResult]
@@ -233,6 +236,16 @@ class ToolRegistry:
                 {"path": {"type": "string"}, "cell_index": {"type": "integer"}, "new_source": {"type": "string"},
                  "cell_type": {"type": "string", "description": "optional: change cell to 'code' or 'markdown'"}},
                 ["path", "cell_index", "new_source"]),
+            _schema("ask_user",
+                "Ask the user a question and wait for the answer. Use this when a "
+                "decision genuinely needs their input (ambiguous requirement, a "
+                "destructive choice, missing credential) and you cannot infer it "
+                "from the repo. Pass 'options' to offer discrete choices; otherwise "
+                "the user types free text.",
+                {"question": {"type": "string", "description": "what you need to know"},
+                 "options": {"type": "array", "items": {"type": "string"},
+                             "description": "optional discrete choices"}},
+                ["question"]),
             _schema("update_plan",
                 "Maintain a visible task plan for complex multi-step work. "
                 "Replace the whole plan each time: list every step with its status "
@@ -464,6 +477,9 @@ class ToolRegistry:
                     payload={"error": f"Stale tool call: {name} is no longer available"},
                 )
 
+            if name == "ask_user":
+                return await self._handle_ask_user(call.arguments)
+
             if name == "update_plan":
                 return self._handle_update_plan(call.arguments)
 
@@ -495,6 +511,34 @@ class ToolRegistry:
         except Exception as exc:
             return ToolResult(ok=False, payload={"error": str(exc)})
         return ToolResult(ok=False, payload={"error": f"Unknown tool: {name}"})
+
+    async def _handle_ask_user(self, arguments: dict[str, Any]) -> ToolResult:
+        """Block until the user answers, or explain that this surface cannot ask."""
+        question = str(arguments.get("question") or "").strip()
+        if not question:
+            return ToolResult(ok=False, payload={"error": "question is required"})
+        raw_options = arguments.get("options")
+        options = (
+            [str(o).strip() for o in raw_options if str(o).strip()]
+            if isinstance(raw_options, list)
+            else []
+        )
+        asker = self.ctx.question_asker
+        if asker is None:
+            return ToolResult(
+                ok=False,
+                payload={
+                    "error": "no interactive channel on this surface",
+                    "hint": "ask in your final message instead, or state the assumption you took",
+                },
+            )
+        try:
+            answer = await asker(question, options)
+        except Exception as exc:  # noqa: BLE001 - surface, never crash the turn
+            return ToolResult(ok=False, payload={"error": f"question failed: {exc}"})
+        if not answer:
+            return ToolResult(ok=False, payload={"error": "user dismissed the question"})
+        return ToolResult(ok=True, payload={"question": question, "answer": answer})
 
     def _handle_update_plan(self, arguments: dict[str, Any]) -> ToolResult:
         steps = arguments.get("steps")
