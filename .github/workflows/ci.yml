@@ -58,7 +58,10 @@ jobs:
         run: ruff check src/spark tests scripts
       - name: Test (pytest + coverage)
         run: |
-          python -m pytest -q --cov=spark --cov-report=term-missing --cov-fail-under=65
+          # 门槛从 65% 提到 75%：本轮实测 76%，留 1 个点余量防止
+          # 平台差异（Windows 与 Linux 覆盖面不同）误伤。90%/85% 的红线还没到，
+          # 缺口与原因见 docs/reviews/2026-10-22-full-audit.md 第十二节。
+          python -m pytest -q --cov=spark --cov-report=term-missing --cov-fail-under=75
 
   windows-checkout:
     timeout-minutes: 10
