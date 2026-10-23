@@ -248,6 +248,9 @@ class SessionStore:
                 "INSERT INTO sessions (id, workdir, model, created_at, updated_at, title) VALUES (?, ?, ?, ?, ?, ?)",
                 (sid, str(workdir.resolve()), model, now, now, title),
             )
+            # 新会话必须立刻进标题索引：此前只靠启动时的 backfill 兜底，
+            # 本次进程内新建的会话标题在重启前一直搜不到。
+            self._fts_sync_title(sid, title)
             self._conn.commit()
         return sid
 
@@ -353,13 +356,19 @@ class SessionStore:
             )
             last_id = int(cur.lastrowid or 0)
             # 自动标题：首个 user 消息取前 24 字，替代 "untitled"（与会话搜索的标题命中配套）
+            retitled = False
             if message.role == "user" and message.content:
-                self._conn.execute(
-                    "UPDATE sessions SET title = ? WHERE id = ? AND title = 'untitled'",
-                    (message.content.strip()[:24], session_id),
+                retitled = (
+                    self._conn.execute(
+                        "UPDATE sessions SET title = ? WHERE id = ? AND title = 'untitled'",
+                        (message.content.strip()[:24], session_id),
+                    ).rowcount
+                    > 0
                 )
             self._fts_sync_message(last_id, message.content)
-            if message.role == "user" and message.content:
+            # 只有真的改过标题才同步 FTS。此前无条件写入消息前 24 字，把用户
+            # 手改的标题在索引里覆盖掉——标题命中因此永远搜不到自定义标题。
+            if retitled and message.content:
                 self._fts_sync_title(session_id, message.content.strip()[:24])
             # The message and its session timestamp must land together, otherwise a
             # crash between the two commits leaves a message with stale ordering.

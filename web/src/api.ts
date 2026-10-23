@@ -190,6 +190,20 @@ export async function listSessions(): Promise<{ sessions: SessionRow[]; current:
   return readJson(await fetchWithTimeout("/api/sessions"))
 }
 
+export interface SessionSearchHit {
+  id: string
+  workdir: string
+  title: string
+  updated_at: number
+  match: { kind: "title" | "content"; snippet: string }
+}
+
+/** 会话全文检索：FTS5 trigram（中文子串友好），搜得到消息正文。 */
+export async function searchSessions(q: string, limit = 20): Promise<{ hits: SessionSearchHit[] }> {
+  const query = encodeURIComponent(q)
+  return readJson(await fetchWithTimeout(`/api/sessions/search?q=${query}&limit=${limit}`))
+}
+
 export async function fetchHistory(): Promise<{ session_id: string; messages: HistoryMessage[] }> {
   return readJson(await fetchWithTimeout("/api/history"))
 }

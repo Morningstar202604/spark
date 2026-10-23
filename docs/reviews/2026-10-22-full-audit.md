@@ -323,3 +323,64 @@ import-linter       exit 0
 - 知识库只做了词法检索，未接 embedding（`memory` 的向量路径可用，但知识库刻意不引入 chromadb 依赖）；跨语言检索（中文查英文文档）能力有限，标 `[未确认]`
 - 快捷键改键只覆盖 6 个全局键，输入框内的 Enter / Shift+Enter / `/` / `@` 仍是固定行为
 - 插件只做发现与展示，没有插件安装/卸载（按设计：执行必须走 hooks）
+
+---
+
+## 十二、第五轮：收尾自检（2026-10-23）
+
+### 12.1 补测时又抓到三个真 bug
+
+| # | 缺陷 | 发现方式 | 影响 |
+|---|---|---|---|
+| D-09 | `delete_command` 不补 `.md` 后缀，而 `save_command` 补 | 写路由级测试时 `test_delete_command` 404 | 界面上的「删除命令」按钮永远失效（除非用户手输 `.md`） |
+| D-10 | `spark.desktop_main` 的 `except Exception` 吞掉 `typer.Exit` | `test_run_desktop_nonzero_code_propagates` 期望 2 实得 1 | 桌面版所有退出码被压成 1，pywebview 缺失与真实崩溃无法区分 |
+| D-11 | `create_session` 不写 `sessions_fts`；`append_message` 无条件用消息前 24 字覆盖 FTS 标题 | `test_search_matches_title` 搜不到自定义标题 | 新会话标题重启前搜不到；用户手改标题后标题命中永久失效 |
+
+### 12.2 补上的能力
+
+**会话全文检索接线**：`SessionStore.search()` 一直有 FTS5（trigram，中文子串友好）实现，但侧栏只在已加载的 `sessions` 行里做子串过滤，搜不到聊天正文。新增 `GET /api/sessions/search`（按 workdir 过滤、limit 上限 100、检索异常降级为空结果），侧栏改为 220ms 防抖调服务端，命中正文时在标题下显示片段。
+
+### 12.3 覆盖变化
+
+```
+轮次      用例    行覆盖   分支覆盖
+第四轮    973     74%      66%
+第五轮   1025     76%      67%
+```
+
+新增模块的质量（这是本轮主要产出的代码）：
+
+| 模块 | 行覆盖 |
+|---|---|
+| `src/spark/knowledge.py` | 92% |
+| `src/spark/web/_handlers_content.py` | 88% |
+| `src/spark/desktop_main.py` | 87% |
+
+### 12.4 门禁（最终）
+
+```
+pytest              1025 passed, 5 skipped
+pytest --cov        76% line / 67% branch
+ruff check          All checks passed
+mypy                Success: no issues found in 100 source files
+import-linter       exit 0
+```
+
+覆盖率仍**未达 90%/85% 红线**，如实记录。剩余缺口集中在 `cli.py`（43%，大量 command 分支）、`desktop.py`（36%，需要真实窗口）、`pty_api.py`（43%，需要 POSIX PTY）、`tui/`（渲染细节）。这些要么需要图形环境，要么依赖平台特性，继续堆测试的性价比低于本轮已完成的真缺陷修复。
+
+### 12.5 截图证据
+
+| 图 | 内容 |
+|---|---|
+| `assets/settings-12-tabs.png` | 设置面板 12 个页签 |
+| `assets/skills-editor.png` | 技能编辑器（frontmatter 模板 + 文件名联动） |
+| `assets/knowledge-base.png` | 知识库：导入、已导入文档、检索测试命中 |
+| `assets/mcp-registry.png` | MCP registry：20 条结果、国内可用标签、一键添加 |
+| `assets/approval-diff.png` | 审批卡：diff 预览 + 参数展开 |
+| `assets/desktop-window.png` | 桌面版窗口 |
+
+### 12.6 未验证
+
+- 知识库跨语言检索（中文查英文文档）能力有限，只有词法匹配；
+- 会话搜索的 FTS5 只测了 SQLite 内置 trigram，未在 SQLite < 3.34 的真实环境验证 LIKE 降级（代码路径有测试覆盖，但那是模拟 DROP TABLE，不是真实旧版本）；
+- 远程 MCP 仍未接真实第三方凭证。

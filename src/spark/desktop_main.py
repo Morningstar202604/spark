@@ -52,6 +52,10 @@ def main(
         finally:
             store.close()
         raise typer.Exit(code)
+    except typer.Exit:
+        # typer.Exit 是正常退出信号（含 pywebview 缺失的 2），不能被下面的
+        # 兜底 except 吞成 1——那会让所有退出码失去区分度。
+        raise
     except Exception as exc:  # noqa: BLE001 — 无控制台时只能落日志/弹窗
         # windowed 构建没有 stderr 可看，把失败写进桌面日志再以非零码退出，
         # 否则用户只会看到「点了没反应」。

@@ -82,6 +82,17 @@ export default function SkillsSection() {
     }
   }
 
+  /** 文件名决定 frontmatter 里的 name：两者不一致时列表标题会与磁盘文件名对不上，
+   *  用户改完名字回来找不到自己刚建的文件。改名时同步重写模板里的 name 行。 */
+  function rename(next: string) {
+    if (!editing) return
+    const stem = next.replace(/\.md$/i, "")
+    const synced = editing.isNew
+      ? editing.content.replace(/^name:.*$/m, stem ? `name: ${stem}` : "name: ")
+      : editing.content
+    setEditing({ ...editing, name: next, content: synced })
+  }
+
   return (
     <div className="flex flex-col gap-4">
       <section className="flex flex-col gap-2 rounded-xl border border-line bg-panel p-4">
@@ -110,6 +121,11 @@ export default function SkillsSection() {
               <div key={s.path} className="flex flex-col gap-1 rounded-lg border border-line bg-panel2 px-3 py-2.5">
                 <div className="flex items-center gap-2">
                   <span className="min-w-0 flex-1 truncate font-mono text-[12.5px] text-ink">{s.name}</span>
+                  {/* frontmatter 的 name 与文件名可以不同；只显示 name 时用户
+                      在磁盘上找不到对应文件，所以把路径一并给出。 */}
+                  {!s.path.endsWith(`${s.name}.md`) && (
+                    <span className="shrink-0 truncate font-mono text-[10px] text-ink3">{s.path}</span>
+                  )}
                   <span className="shrink-0 text-[10.5px] text-ink3">{s.chars} chars</span>
                   <IconButton title={t("skills.view", lang)} onClick={() => void open(s.path)} className="h-7 w-7">
                     <IconPencil size={12} />
@@ -142,7 +158,7 @@ export default function SkillsSection() {
           <Field label={t("skills.fileName", lang)}>
             <TextInput
               value={editing.name}
-              onChange={(e) => setEditing({ ...editing, name: e.target.value })}
+              onChange={(e) => rename(e.target.value)}
               placeholder="my-skill.md"
               spellCheck={false}
             />

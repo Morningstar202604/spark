@@ -1,6 +1,6 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import type { SessionRow } from "../types"
-import { renameSession } from "../api"
+import { renameSession, searchSessions, type SessionSearchHit } from "../api"
 import { IconHistory, IconMonitor, IconMoon, IconPencil, IconPlus, IconSearch, IconSettings, IconSun, IconTrash, IconX } from "./icons"
 import { cls, IconButton } from "./ui"
 import { BrandMark } from "./BrandMark"
@@ -174,6 +174,9 @@ export const Sidebar = memo(function Sidebar() {
   const showKeywords = useSessionStore((s) => s.status?.display?.show_keywords ?? true)
 
   const [query, setQuery] = useState("")
+  // 服务端全文检索结果（FTS5）。本地过滤只覆盖标题/keywords/model，
+  // 搜不到消息正文；这里在输入后防抖查一次补充正文命中。
+  const [contentHits, setContentHits] = useState<SessionSearchHit[]>([])
   const [confirmId, setConfirmId] = useState<string | null>(null)
   const [renamingId, setRenamingId] = useState<string | null>(null)
   const [renameDraft, setRenameDraft] = useState("")
@@ -193,16 +196,46 @@ export const Sidebar = memo(function Sidebar() {
 
   const groups = useMemo(() => {
     const q = query.trim().toLowerCase()
-    const filtered = q
+    const local = q
       ? sessions.filter((s) => (s.title + " " + (s.keywords ?? "") + " " + (s.model ?? "")).toLowerCase().includes(q))
       : sessions
+    // 正文命中但本地过滤没选中的会话，补进来（按 updated_at 排序）。
+    const localIds = new Set(local.map((s) => s.id))
+    const fromContent = contentHits
+      .filter((h) => !localIds.has(h.id))
+      .map((h) => sessions.find((s) => s.id === h.id))
+      .filter((s): s is SessionRow => Boolean(s))
+    const filtered = q ? [...local, ...fromContent].sort((a, b) => b.updated_at - a.updated_at) : local
     const map = new Map<string, SessionRow[]>()
     for (const s of filtered) {
       const k = groupKey(s.updated_at)
       map.set(k, [...(map.get(k) ?? []), s])
     }
     return GROUP_ORDER.filter((k) => map.has(k)).map((k) => ({ key: k, items: map.get(k)! }))
-  }, [sessions, query])
+  }, [sessions, query, contentHits])
+
+  // 防抖查全文索引；只在 2 字符以上才查（更短的前缀几乎必然全量命中）。
+  useEffect(() => {
+    const q = query.trim()
+    if (q.length < 2) {
+      setContentHits([])
+      return
+    }
+    let alive = true
+    const timer = setTimeout(() => {
+      void searchSessions(q, 30)
+        .then((data) => {
+          if (alive) setContentHits(data.hits ?? [])
+        })
+        .catch(() => {
+          if (alive) setContentHits([])
+        })
+    }, 220)
+    return () => {
+      alive = false
+      clearTimeout(timer)
+    }
+  }, [query])
 
   const currentId = status?.session_id
   const themeLabel = t(theme === "light" ? "display.light" : theme === "dark" ? "display.dark" : "display.system", lang)
@@ -356,6 +389,15 @@ export const Sidebar = memo(function Sidebar() {
                               ))}
                           </span>
                         )}
+                        {(() => {
+                          const hit = contentHits.find((h) => h.id === s.id)
+                          if (!hit || hit.match.kind !== "content") return null
+                          return (
+                            <span className="mt-0.5 block truncate text-[10px] text-ink3">
+                              {hit.match.snippet}
+                            </span>
+                          )
+                        })()}
                         <span className="mt-0.5 block text-[10px] text-ink3">
                           {timeLabel(s.updated_at, lang)} · {s.model}
                         </span>

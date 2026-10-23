@@ -14,12 +14,14 @@
 | 让模型操作 Git | `tools/gitops.py` | status/diff/log/branch/add/commit；push/pull 明确不提供 |
 | 任务即分支（自动提交） | `git_memory.py` | `task_begin` → 绿测后 `task_step_commit` → `task_finish` |
 | 联网查资料 | `tools/web.py` | `web_search` / `web_fetch`，含 SSRF 防护 |
-| 接第三方能力 | `tools/mcp_bridge.py` | 配置 `[[mcp_servers]]`，工具以 `mcp__<server>__<tool>` 出现 |
+| 接第三方能力 | `tools/mcp_bridge.py` | stdio / sse / streamable_http 三种传输；也可从内置 registry 一键添加，工具以 `mcp__<server>__<tool>` 出现 |
 | 子代理并行 | `core/loop.py:spawn_subtasks_parallel` | 模型调用 `task`，最多 4 路并行 |
 | 声明式专家代理 | `agents.py` + `.claude/agents/*.md` | 放一个 md 文件即多一个可委派的专家 |
-| 项目技能 | `skills.py` + `.spark/skills/*.md` | 放文件即生效，模型按需 `load_skill` |
-| 自定义斜杠命令 | `slash.py` + `.spark/commands/*.md` | `/name 参数` 展开为提示词 |
+| 项目技能 | `skills.py` + `.spark/skills/*.md` | 放文件即生效，模型按需 `load_skill`；设置→技能可增删改 |
+| 自定义斜杠命令 | `slash.py` + `.spark/commands/*.md` | `/name 参数` 展开为提示词；设置→提示词可管理 |
 | 长期记忆 | `memory/` | 自动抽取 + 关键词/可选向量检索 + 网页面板管理 |
+| 项目知识库 | `knowledge.py` | 导入文档（md/txt/rst/json/yaml/csv/toml），BM25 检索后按轮注入只读参考 |
+| 会话全文检索 | `store.search()` + FTS5 | 侧栏搜索命中聊天正文，结果带片段 |
 | 回滚 | `core/checkpoints.py` | 每轮写操作后自动快照，可整体回滚 |
 | 崩溃恢复 | `core/turn_store.py` + `core/runtime.py` | 审批中断的 turn 落盘，重启后仍可列出并恢复 |
 | 可观测 | `otel.py` | `SPARK_OTEL_ENDPOINT=...` 后 trace=turn / span=tool |
@@ -84,10 +86,14 @@ spark --version           # 版本号（与 pyproject / PyPI 同源）
 - **按需加载**：终端（xterm）、执行图（xyflow）、设置、回放等重面板首次打开才加载；
   首屏 JS 从 680 KB 降到 141 KB。
 - **键盘**：`Ctrl+K` 命令面板、`Ctrl+N` 新会话、`Ctrl+\` 切换侧栏、
-  `Ctrl+`` ` 终端、`Esc` 停止生成。
+  `Ctrl+` 加反引号开终端、`Esc` 停止生成、`?` 帮助。六个全局键均可在
+  设置→快捷键里改键并做冲突检测。
 - **审批卡片**：展示工具名、摘要、diff，并可展开查看完整参数。
-- **多级导航**：会话侧栏 → 会话 → 消息内工具块折叠 → 设置分 7 页签，
-  默认只呈现一层。
+- **多级导航**：会话侧栏 → 会话 → 消息内工具块折叠 → 设置分 12 页签
+  （模型 / Agent / 权限 / 展示 / 记忆 / MCP / 技能 / 提示词 / 插件 / 快捷键 /
+  知识库 / 项目），默认只呈现一层。
+- **会话检索**：侧栏搜索走 FTS5（trigram，中文子串友好），命中消息正文时
+  在标题下显示片段。
 
 ## 六、如何验证它真的能用
 

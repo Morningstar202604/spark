@@ -252,6 +252,10 @@ def _handle_prompts(handler: HandlerBase, body: dict) -> None:
         if name is None:
             handler._json(400, {"error": "invalid name"})
             return
+        # 与 save_command 保持一致：允许传 "review" 或 "review.md"。
+        # 早期只按原样拼接，传裸名时永远 404，界面上的删除按钮等于失效。
+        if not name.endswith(".md"):
+            name = f"{name}.md"
         target = state.workdir / COMMANDS_DIR / name
         try:
             resolved = target.resolve()

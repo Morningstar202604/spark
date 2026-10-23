@@ -427,6 +427,30 @@ def build_handler_class(html: str):
                 ][:200]
                 self._json(200, {"sessions": sessions, "current": state.session_id})
                 return
+            if path == "/api/sessions/search":
+                # 全文检索（FTS5 trigram，中文子串友好）。侧栏此前只在已加载的
+                # 会话标题/keywords/model 里过滤，搜不到消息正文；store 里早就有
+                # 这套检索能力，只是没接线。
+                qs = parse_qs(urlparse(self.path).query)
+                q = (qs.get("q", [""])[0] or "").strip()
+                try:
+                    limit = int((qs.get("limit", ["20"])[0] or "20").strip())
+                except ValueError:
+                    limit = 20
+                limit = max(1, min(limit, 100))
+                if not q:
+                    self._json(200, {"hits": []})
+                    return
+                try:
+                    hits = state.store.search(q, limit=limit)
+                except Exception as exc:  # noqa: BLE001 — 检索失败给空结果而非 500
+                    logger.debug("session search failed: %s", exc)
+                    hits = []
+                self._json(
+                    200,
+                    {"hits": [h for h in hits if h.get("workdir") == str(state.workdir)]},
+                )
+                return
             if path == "/api/checkpoints":
                 cps = state.store.list_checkpoints(state.session_id)
                 self._json(200, {"checkpoints": cps})

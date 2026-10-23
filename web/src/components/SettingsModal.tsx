@@ -1078,7 +1078,7 @@ export default function SettingsDrawer({ onClose, onSaved }: Props) {
               {busy === "save" ? (
                 <span className="flex items-center gap-1.5"><Spinner size={12} /> {t("settings.saving", lang)}</span>
               ) : (
-                t("common.save", lang)
+                t("settings.saveAll", lang)
               )}
             </Button>
           </div>

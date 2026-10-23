@@ -4,6 +4,55 @@
 
 ## [Unreleased]
 
+### 新增（设置面板对齐 Codex / Claude Code）
+
+- **技能**：设置→技能可列出 `.spark/skills/**/*.md`（与模型侧 `load_skill`
+  工具同源），支持新建（带 frontmatter 模板）、查看、删除；改文件名时
+  自动同步 frontmatter 的 `name`。
+- **提示词**：设置→提示词编辑系统提示词（附内置提示词对照与一键清空），
+  并管理 `.spark/commands/*.md` 斜杠命令模板。
+- **插件**：设置→插件发现 `.spark/plugins/<name>/plugin.json`，并列出真正
+  会执行代码的 hooks。插件本身不提供执行入口——执行一律经 hooks，避免出现
+  第二条绕过审批的代码通道。
+- **快捷键**：设置→快捷键可逐项改键、冲突检测、单项/全部恢复；绑定存
+  localStorage，运行时经 `matchesBinding` 读取（此前 6 个键写死在 App.tsx）。
+- **知识库**：新增 `spark.knowledge`（分块 + 中文 bigram BM25，索引 JSON 存
+  spark home）。设置→知识库支持导入/删除/检索测试/开关/top-k；每轮按输入
+  检索并以 `<knowledge_base>` 只读围栏注入。**不引入 chromadb**：向量路径的
+  冷启动 1.5s 不值得，代码/规范类文档上词法足够。
+
+### 修复（远程 MCP 端到端）
+
+- registry 首屏 20 条全是 remote，但一键添加只认 stdio、行编辑器没有 URL
+  输入框，且 `streamable_http_client` 返回三元组被按二元解包——远程 server
+  从界面到运行全链路不可用。前端补 transport 选择与 URL 输入，解包修正。
+- 握手超时抛 `CancelledError`（BaseException），`except Exception` 拦不住，
+  一个连不上的远程 server 会让 `spark web` 启动直接崩溃；`close()` 也只吞
+  `RuntimeError`，anyio 抛的 `BaseExceptionGroup` 会覆盖真实错误。两处改成
+  兜 `BaseException` 并放行 KeyboardInterrupt/SystemExit。
+- 新增真实 streamable_http 集成测试（起 HTTP server、发现工具、调用）。
+
+### 修复（桌面产物）
+
+- `spark-desktop.exe`（GUI 子系统、无控制台）双击走的是 `__main__` → TUI，
+  等于点开没反应。新增 `src/spark/desktop_main.py` 专用入口直连 `run_desktop`，
+  spec 改指向它；失败写 `desktop-crash.log`（windowed 构建没有 stderr 可看）。
+- 该入口的 `except Exception` 会吞掉 `typer.Exit`，把所有退出码压成 1；
+  已放行。
+
+### 修复（diff 渲染）
+
+- `--- a/x` / `+++ b/x` 被渲染成两行且 `+++` 被裁成裸 `+++`；增删行左右
+  两栏行号相同。改为按文件去重合并、左右栏各给自己的行号。
+
+### 修复（会话搜索）
+
+- 侧栏搜索此前只在已加载的会话标题/keywords/model 里过滤，搜不到聊天正文。
+  接上 store 里已有的 FTS5（trigram，中文子串友好），命中显示片段。
+- `create_session` 从不写 `sessions_fts`，新会话标题在重启前搜不到。
+- `append_message` 无条件用消息前 24 字覆盖 FTS 标题，把用户手改的标题在
+  索引里冲掉，自定义标题永远搜不到。
+
 ### 新增（消息级操作与分支）
 
 - **消息级删除 / 编辑重发 / 重新生成**：历史接口现在返回真实数据库 id，

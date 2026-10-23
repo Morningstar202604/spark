@@ -27,7 +27,8 @@ const dict = {
 
     "common.reset": "重置",
     "common.close": "关闭",
-    "common.save": "保存设置",
+    "common.save": "保存",
+    "settings.saveAll": "保存设置",
     "common.cancel": "取消",
     "skills.title": "技能",
     "skills.desc": "把可复用的工作流写成 Markdown（frontmatter 里写 name / description / when_to_use）。模型在 <available_skills> 里看到摘要，需要时调用 load_skill 读取全文。",
@@ -582,7 +583,8 @@ const dict = {
 
     "common.reset": "Reset",
     "common.close": "Close",
-    "common.save": "Save Settings",
+    "common.save": "Save",
+    "settings.saveAll": "Save Settings",
     "common.cancel": "Cancel",
     "skills.title": "Skills",
     "skills.desc": "Reusable workflows as Markdown with name / description / when_to_use frontmatter. The model sees the summary in <available_skills> and calls load_skill for the full text.",

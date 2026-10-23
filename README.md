@@ -116,10 +116,11 @@ dist\spark\spark.exe web                    # or just double-click dist\spark.ex
 | Approval | Six approval modes (incl. plan-only / approve-plan), `[[permissions]]` wildcard rule engine, three-way approval dialog |
 | Permissions | Four-level sandbox, protected paths, credential-path protection, token-level shell checks, MCP least-privilege allowlists |
 | Memory | AGENTS.md injection, vector long-term memory (embeddings + optional reranker), auto-extraction, web-based management |
+| Knowledge | Project knowledge base: import docs, BM25 retrieval injected per turn as read-only reference (no extra vector store) |
 | Persistence | Sessions, checkpoint rollback (works without git), hot config reload, token usage stats |
 | Models | Any OpenAI-compatible endpoint, local Ollama, multi-profile switching, `spark test` probe |
-| Extension | MCP client (stdio/SSE/HTTP + OAuth), MCP registry search (with China-availability ratings), project skills `.spark/skills/`, lifecycle hooks |
-| UI | Chinese/English, light/dark themes, command palette (Ctrl+K), file viewer, built-in terminal, web reader, execution graph, checkpoint panel |
+| Extension | MCP client (stdio/SSE/HTTP + OAuth), MCP registry search with one-click add for both stdio and remote servers, skills `.spark/skills/`, slash-command templates, plugins, lifecycle hooks |
+| UI | Chinese/English, light/dark themes, command palette (Ctrl+K), rebindable shortcuts, file viewer, built-in terminal, web reader, execution graph, checkpoint panel, full-text session search |
 
 ## Architecture
 
