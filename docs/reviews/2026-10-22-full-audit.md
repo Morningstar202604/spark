@@ -275,3 +275,51 @@ bandit               0 High-confidence new findings（存量 6 Medium / 57 Low �
 
 - 远程 MCP 只测了本地起的 streamable_http server 与真实的 401（鉴权失败）；没有可用的第三方远程 MCP 凭证，未测真实第三方服务。
 - 桌面窗口截图用 CDP 截内嵌页面，未对内嵌 WebView 做像素级比对（Windows 上 PrintWindow 抓到的是不完整帧，不是产品问题）。
+
+---
+
+## 十一、第四轮：设置面板对齐 Codex / Claude Code（2026-10-23）
+
+用户指出设置里缺 skill / prompt / plugin / 快捷键 / 知识库。核实结果：前四项
+后端已有能力或部分能力但**没有任何 UI 入口**；知识库是**真缺口**（只有长期记忆，
+没有用户文档库）。
+
+### 11.1 五项现状与落地
+
+| 项 | 落地前 | 现在 |
+|---|---|---|
+| 技能 | `.spark/skills/*.md` 已被 `load_skill` 工具读取，但界面上看不到、不能建 | 设置→技能：列表 / 新建（带 frontmatter 模板）/ 查看 / 删除 |
+| 提示词 | `cfg.agent.system_prompt` 可改但埋在 Agent 页；`.spark/commands` 只能靠手写文件 | 设置→提示词：系统提示词编辑 + 内置提示词对照 + 斜杠命令模板增删 |
+| 插件 | 无 | 设置→插件：发现 `.spark/plugins/<name>/plugin.json`，并列出真正会执行代码的 hooks（不新开第二条免审批执行通道） |
+| 快捷键 | 6 个键写死在 `App.tsx`，只有只读帮助面板 | 设置→快捷键：逐项改键、冲突检测、单项/全部恢复；运行时经 `matchesBinding` 读取 |
+| 知识库 | 无 | 新建 `spark.knowledge`：分块 + 中文 bigram BM25、索引存 spark home；设置→知识库支持导入 / 删除 / 检索测试 / 开关 / top-k；每轮检索注入 `<knowledge_base>` 只读围栏 |
+
+### 11.2 真机证据
+
+- 12 个设置 tab 全部渲染（`H00`–`H07` 截图）：模型 / Agent / 权限 / 展示 / 记忆 / MCP / 技能 / 提示词 / 插件 / 快捷键 / 知识库 / 项目
+- 技能：写入 `code-review.md` → 列表出现 → 读出正文 → 删除（后端 200）
+- 知识库：导入 `architecture.md` → 检索 `鉴权 权限` 命中 score 0.58 → **向模型提问「鉴权用了几层权限作用域？deny 冲突时谁优先？」得到「三层权限作用域，deny 优先」**，该信息只存在于导入文档中，证明注入链路真实生效
+- 路径安全：`../../etc/passwd`、`C:/Windows/x.md` 均被 400 拒绝
+
+### 11.3 过程中修掉的缺陷
+
+| # | 缺陷 | 影响 |
+|---|---|---|
+| D-07 | `spark.knowledge` 从 `spark.memory.store` 导入 `tokenize`，把 chromadb 拖进每轮对话路径 | ACP e2e 从 23s 变 100s+ 超时；`import spark.knowledge` 4.7s → 1.1s（分词器移入 `spark.textutil`） |
+| D-08 | Toast 只能显示 i18n key | API 报错统一显示成「错误」，真实原因丢失；改为可携带原文 |
+
+### 11.4 门禁
+
+```
+pytest              973 passed, 5 skipped
+ruff check          All checks passed
+mypy                Success: no issues found in 100 source files
+import-linter       exit 0
+产物                spark.exe(console) / spark-desktop.exe(GUI) 重建通过，打包版 /api/skills /api/knowledge 实测 200
+```
+
+### 11.5 未验证
+
+- 知识库只做了词法检索，未接 embedding（`memory` 的向量路径可用，但知识库刻意不引入 chromadb 依赖）；跨语言检索（中文查英文文档）能力有限，标 `[未确认]`
+- 快捷键改键只覆盖 6 个全局键，输入框内的 Enter / Shift+Enter / `/` / `@` 仍是固定行为
+- 插件只做发现与展示，没有插件安装/卸载（按设计：执行必须走 hooks）
