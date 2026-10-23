@@ -151,6 +151,29 @@ class AgentLoop:
             # hook 失败不应阻塞主循环，但需保留调试信息
             logger.warning("hook %s 执行失败", event, exc_info=True)
 
+    def _knowledge_context(self, query: str) -> str | None:
+        """按本轮用户输入检索项目知识库；任何异常都降级为「无知识库」。"""
+        try:
+            if not getattr(self.cfg.context, "knowledge_enabled", True):
+                return None
+            from spark.config import ensure_home
+            from spark.knowledge import KnowledgeBase, build_context_block, project_key
+
+            kb = KnowledgeBase(ensure_home() / "knowledge" / project_key(self.workdir))
+            if not kb.docs():
+                return None
+            hits = kb.search(
+                query,
+                top_k=int(getattr(self.cfg.context, "knowledge_top_k", 6)),
+            )
+            if not hits:
+                return None
+            block = build_context_block(hits, max_chars=self.cfg.context.knowledge_max_chars)
+            return block or None
+        except Exception as exc:  # noqa: BLE001 — 知识库失败不能影响对话
+            logger.debug("Knowledge retrieve failed: %s", exc)
+            return None
+
     def _end_otel_turn(self, started: float, *, resumed: bool) -> None:
         """turn 终态观测：补 usage/延迟 attributes 并结束 span（NoOp 安全）。"""
         from spark.otel import end_turn_span
@@ -637,6 +660,11 @@ class AgentLoop:
             except Exception as exc:
                 logger.debug("Memory retrieve failed: %s", exc)
                 memory_block = None
+        # 项目知识库：与记忆同槽注入，但独立配置、独立开关。检索失败只降级，
+        # 不能影响本轮对话（知识库是增强项，不是依赖）。
+        knowledge_block = self._knowledge_context(user_text)
+        if knowledge_block:
+            memory_block = f"{memory_block}\n\n{knowledge_block}" if memory_block else knowledge_block
         user = ChatMessage(role="user", content=user_text, images=images)
         self._append_history(user)
         self.store.append_message(self.session_id, user)

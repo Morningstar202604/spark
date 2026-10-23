@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import logging
 import math
-import re
 import sqlite3 as _sqlite3_module
 import threading
 import time
@@ -15,23 +14,13 @@ import chromadb
 
 from spark.config import MemoryConfig
 
+# 分词器移入 spark.textutil 以便知识库复用而不牵连 chromadb；此处保留原名导出，
+# 既有 import 路径（tests / memory 内部）不变。
+from spark.textutil import tokenize  # noqa: F401
+
 logger = logging.getLogger(__name__)
 
 _DEFAULT_DIM = 1536  # placeholder dim for memories without real embeddings
-
-
-def tokenize(text: str) -> list[str]:
-    tokens: list[str] = []
-    for raw in re.findall(r"[a-zA-Z0-9_]+|[\u4e00-\u9fff]+", text.lower()):
-        if raw.isascii():
-            if len(raw) > 1:
-                tokens.append(raw)
-        else:
-            if len(raw) == 1:
-                tokens.append(raw)
-            else:
-                tokens.extend(raw[i : i + 2] for i in range(len(raw) - 1))
-    return tokens
 
 
 def pack_vector(vec: list[float]) -> bytes:

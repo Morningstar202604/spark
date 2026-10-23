@@ -145,6 +145,10 @@ class ContextConfig(BaseModel):
     # P0-10: tree-sitter repo-map 代码索引注入
     repo_map_enabled: bool = True
     repo_map_max_chars: int = Field(default=6000, ge=500, le=60_000)
+    #: 项目知识库：每轮按用户输入检索，命中的片段以 untrusted 围栏注入。
+    knowledge_enabled: bool = True
+    knowledge_top_k: int = Field(default=6, ge=1, le=50)
+    knowledge_max_chars: int = Field(default=6000, ge=500, le=60_000)
 
 
 class McpTransportConfig(BaseModel):

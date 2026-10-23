@@ -12,6 +12,7 @@ import type { Status } from "./types"
 import { useChatStore } from "./store/chatStore"
 import { useSessionStore } from "./store/sessionStore"
 import { useUiStore } from "./store/uiStore"
+import { loadBindings, matchesBinding } from "./shortcuts"
 
 // Heavy, rarely-first-action surfaces are split out of the initial bundle:
 // xterm, xyflow and the diff/checkpoint/replay UIs would otherwise all load
@@ -47,37 +48,34 @@ export default function App() {
     loadInitialHistory()
   }, [setStatus, refreshSessions, loadInitialHistory])
 
-  // Ctrl+N 新建会话 / Ctrl+\ 切换侧边栏 / Esc 停止生成
+  // 全局快捷键（可在设置 → 快捷键里改，绑定存 localStorage）
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "n") {
+      const b = loadBindings()
+      if (matchesBinding(e, b.newSession)) {
         e.preventDefault()
         if (!useChatStore.getState().streaming) void useSessionStore.getState().handleNewSession()
       }
       // Ctrl+K must live here, not in CommandPalette: that component is only
       // mounted while the palette is open, so a shortcut defined inside it can
       // never open it.
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+      if (matchesBinding(e, b.palette)) {
         e.preventDefault()
         const ui = useUiStore.getState()
         ui.setPaletteOpen(!ui.paletteOpen)
       }
-      if ((e.metaKey || e.ctrlKey) && e.key === "\\") {
+      if (matchesBinding(e, b.toggleSidebar)) {
         e.preventDefault()
         useUiStore.getState().toggleSidebar()
       }
-      // Ctrl+` 切换内置终端（P1-5）
-      if ((e.metaKey || e.ctrlKey) && e.key === "`") {
+      if (matchesBinding(e, b.terminal)) {
         e.preventDefault()
         const s = useUiStore.getState()
         if (s.terminalOpen) s.closeTerminal()
         else s.openTerminal()
       }
       // `?` 打开快捷键帮助（Claude Code 习惯）；输入框内不抢键。
-      if (e.key === "?" && !e.metaKey && !e.ctrlKey && !e.altKey) {
-        const target = e.target as HTMLElement | null
-        const tag = target?.tagName?.toLowerCase()
-        if (tag === "input" || tag === "textarea" || target?.isContentEditable) return
+      if (matchesBinding(e, b.help)) {
         e.preventDefault()
         useUiStore.getState().openHelp()
       }

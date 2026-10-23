@@ -745,3 +745,104 @@ export async function streamChat(
     }
   }
 }
+
+/* ------------------------------------------------------------------ */
+/* 技能 / 提示词 / 插件 / 知识库                                        */
+/* ------------------------------------------------------------------ */
+
+export interface SkillItem {
+  name: string
+  description: string
+  when_to_use: string
+  path: string
+  chars: number
+}
+
+export interface CommandItem {
+  name: string
+  description: string
+  path: string
+}
+
+export async function skillsAction(body: Record<string, unknown>): Promise<Record<string, unknown>> {
+  return readJson(
+    await fetchWithTimeout("/api/skills", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  )
+}
+
+export async function promptsAction(body: Record<string, unknown>): Promise<{
+  system_prompt?: string
+  default_prompt?: string
+  commands?: CommandItem[]
+  ok?: boolean
+  error?: string
+}> {
+  return readJson(
+    await fetchWithTimeout("/api/prompts", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  )
+}
+
+export interface PluginItem {
+  name: string
+  description: string
+  path: string
+  has_manifest: boolean
+  entry: string
+}
+
+export async function fetchPlugins(): Promise<{
+  items: PluginItem[]
+  hooks: Array<Record<string, unknown>>
+  plugins_dir: string
+}> {
+  return readJson(
+    await fetchWithTimeout("/api/plugins", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "list" }),
+    }),
+  )
+}
+
+export interface KnowledgeDoc {
+  id: string
+  name: string
+  path: string
+  size: number
+  chunks: number
+  added_at: number
+}
+
+export interface KnowledgeHit {
+  doc_name: string
+  index: number
+  text: string
+  score: number
+}
+
+export async function knowledgeAction(body: Record<string, unknown>): Promise<{
+  items?: KnowledgeDoc[]
+  added?: KnowledgeDoc[]
+  errors?: string[]
+  hits?: KnowledgeHit[]
+  enabled?: boolean
+  top_k?: number
+  ok?: boolean
+  error?: string
+}> {
+  return readJson(
+    await fetchWithTimeout("/api/knowledge", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  )
+}

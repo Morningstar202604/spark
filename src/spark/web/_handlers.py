@@ -22,6 +22,12 @@ from spark.web._handlers_chat import (  # noqa: F401  (re-export for backward-co
 from spark.web._handlers_common import (  # noqa: F401
     _save_config,
 )
+from spark.web._handlers_content import (  # noqa: F401
+    _handle_knowledge,
+    _handle_plugins,
+    _handle_prompts,
+    _handle_skills,
+)
 from spark.web._handlers_health import (  # noqa: F401
     _handle_diagnostics,
     _handle_selfheal,

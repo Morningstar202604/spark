@@ -2,11 +2,16 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import type { FullConfig, HookEntry, McpServer, ModelProfile, ProbeResult, SettingsPayload, Status } from "../types"
 import { fetchConfig, fetchAgentsMd, saveAgentsMd, saveSettings, testConnection, listModelProfiles, saveModelProfile, deleteModelProfile, activateModelProfile, fetchDiagnostics, runSelfHeal, type HealthRow } from "../api"
 import MemorySection from "./MemorySection"
+import SkillsSection from "./SkillsSection"
+import PromptsSection from "./PromptsSection"
+import PluginsSection from "./PluginsSection"
+import ShortcutsSection from "./ShortcutsSection"
+import KnowledgeSection from "./KnowledgeSection"
 import { McpRegistryModal } from "./McpRegistryModal"
 import type { McpRegistryItem } from "../api"
 import type { Theme } from "../theme"
 import { Badge, Button, Field, IconButton, Select, Spinner, TextArea, TextInput, Toggle, cls } from "./ui"
-import { IconBrain, IconCheck, IconGlobe, IconKey, IconLayers, IconMoon, IconPlus, IconRefresh, IconSettings, IconStethoscope, IconSun, IconTerminal, IconTrash, IconWrench, IconX } from "./icons"
+import { IconBrain, IconCheck, IconCommand, IconFile, IconFolder, IconGlobe, IconKey, IconLayers, IconMoon, IconPlus, IconRefresh, IconSettings, IconSpark, IconStethoscope, IconSun, IconTerminal, IconTrash, IconWrench, IconX } from "./icons"
 import { useSessionStore } from "../store/sessionStore"
 import { useUiStore } from "../store/uiStore"
 import { t, type TranslationKey } from "../i18n"
@@ -29,7 +34,19 @@ const HOOK_EVENTS = [
   "turn_error", "provider_error",
 ]
 
-type Tab = "model" | "agent" | "security" | "display" | "memory" | "mcp" | "project"
+type Tab =
+  | "model"
+  | "agent"
+  | "security"
+  | "display"
+  | "memory"
+  | "mcp"
+  | "skills"
+  | "prompts"
+  | "plugins"
+  | "shortcuts"
+  | "knowledge"
+  | "project"
 
 // 预装模型预设：国内可用优先，用户选一个自动填 provider/base_url/model，只需填 API Key
 const MODEL_PRESETS: { labelKey: TranslationKey; provider: string; base_url: string; model: string }[] = [
@@ -50,6 +67,11 @@ const TABS: { key: Tab; labelKey: TranslationKey; icon: React.ReactNode }[] = [
   { key: "display", labelKey: "tab.display", icon: <IconSun size={14} /> },
   { key: "memory", labelKey: "tab.memory", icon: <IconBrain size={14} /> },
   { key: "mcp", labelKey: "tab.mcp", icon: <IconGlobe size={14} /> },
+  { key: "skills", labelKey: "tab.skills", icon: <IconSpark size={14} /> },
+  { key: "prompts", labelKey: "tab.prompts", icon: <IconFile size={14} /> },
+  { key: "plugins", labelKey: "tab.plugins", icon: <IconFolder size={14} /> },
+  { key: "shortcuts", labelKey: "tab.shortcuts", icon: <IconCommand size={14} /> },
+  { key: "knowledge", labelKey: "tab.knowledge", icon: <IconBrain size={14} /> },
   { key: "project", labelKey: "tab.project", icon: <IconSettings size={14} /> },
 ]
 
@@ -165,7 +187,8 @@ function HealthSection({ lang }: { lang: "zh" | "en" }) {
 export default function SettingsDrawer({ onClose, onSaved }: Props) {
   const lang = useUiStore((s) => s.lang)
   const setLang = useUiStore((s) => s.setLang)
-  const [tab, setTab] = useState<Tab>("model")
+  const requestedTab = useUiStore((s) => s.settingsTab)
+  const [tab, setTab] = useState<Tab>((requestedTab as Tab) || "model")
   const [cfg, setCfg] = useState<FullConfig | null>(null)
   const [mcpRows, setMcpRows] = useState<McpServer[]>([])
   const [agentsMd, setAgentsMd] = useState<{ filename: string; content: string; chars: number; max_fragment_chars: number } | null>(null)
@@ -852,6 +875,16 @@ export default function SettingsDrawer({ onClose, onSaved }: Props) {
 
           {tab === "memory" && <MemorySection />}
 
+          {tab === "skills" && <SkillsSection />}
+
+          {tab === "prompts" && <PromptsSection />}
+
+          {tab === "plugins" && <PluginsSection />}
+
+          {tab === "shortcuts" && <ShortcutsSection />}
+
+          {tab === "knowledge" && <KnowledgeSection />}
+
           {tab === "mcp" && (
             <div className="flex flex-col gap-4">
               <section className="flex flex-col gap-3 rounded-xl border border-line bg-panel p-4">
@@ -1039,7 +1072,7 @@ export default function SettingsDrawer({ onClose, onSaved }: Props) {
         </div>
 
         {/* 底部保存：memory 页有自己的即时操作，其余页（含 project）都可保存 */}
-        {tab !== "memory" && (
+        {tab !== "memory" && tab !== "skills" && tab !== "prompts" && tab !== "plugins" && tab !== "shortcuts" && tab !== "knowledge" && (
           <div className="border-t border-line bg-panel2 px-4 py-3">
             <Button variant="primary" full onClick={handleSave} disabled={busy === "save"}>
               {busy === "save" ? (

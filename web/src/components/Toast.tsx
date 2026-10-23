@@ -18,7 +18,7 @@ const kindIcon: Record<Kind, React.ReactNode> = {
   success: <IconCheck size={13} />,
 }
 
-export default function Toast({ toasts, onDismiss }: { toasts: Array<{ id: number; key: TranslationKey; kind: Kind }>; onDismiss: (id: number) => void }) {
+export default function Toast({ toasts, onDismiss }: { toasts: Array<{ id: number; key: TranslationKey; kind: Kind; message?: string }>; onDismiss: (id: number) => void }) {
   const timersRef = useRef<Map<number, ReturnType<typeof setTimeout>>>(new Map())
   const lang = useUiStore((s) => s.lang)
 
@@ -63,7 +63,7 @@ export default function Toast({ toasts, onDismiss }: { toasts: Array<{ id: numbe
           )}
         >
           <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-ink3/10">{kindIcon[toast.kind]}</span>
-          <span className="flex-1">{t(toast.key, lang)}</span>
+          <span className="flex-1">{toast.message || t(toast.key, lang)}</span>
         </button>
       ))}
     </div>

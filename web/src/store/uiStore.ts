@@ -4,10 +4,26 @@ import type { Theme } from "../theme"
 import { applyTheme, getStoredTheme, initTheme } from "../theme"
 import type { CheckpointRow } from "../api"
 
+export type SettingsTab =
+  | "model"
+  | "agent"
+  | "security"
+  | "display"
+  | "memory"
+  | "mcp"
+  | "skills"
+  | "prompts"
+  | "plugins"
+  | "shortcuts"
+  | "knowledge"
+  | "project"
+
 export interface ToastItem {
   id: number
   key: TranslationKey
   kind: "error" | "success" | "info"
+  /** 原文消息（API 返回的具体错误）。有它时优先显示，避免只弹一个 "错误"。 */
+  message?: string
 }
 
 interface UiState {
@@ -29,7 +45,10 @@ interface UiState {
   setTheme: (t: Theme) => void
   cycleTheme: () => void
   openSettings: () => void
+  openSettingsAt: (tab: SettingsTab) => void
   closeSettings: () => void
+  settingsTab: SettingsTab | null
+  setSettingsTab: (tab: SettingsTab | null) => void
   toggleSidebar: () => void
   setSidebarOpen: (open: boolean) => void
   setPaletteOpen: (open: boolean) => void
@@ -49,7 +68,7 @@ interface UiState {
   closeHelp: () => void
   setCheckpoints: (rows: CheckpointRow[]) => void
   setCpsBusy: (busy: boolean) => void
-  pushToast: (key: TranslationKey, kind?: ToastItem["kind"]) => void
+  pushToast: (key: TranslationKey, kind?: ToastItem["kind"], message?: string) => void
   dismissToast: (id: number) => void
   setLang: (lang: Lang) => void
 }
@@ -85,8 +104,11 @@ export const useUiStore = create<UiState>((set) => ({
     set({ theme: next })
   },
 
-  openSettings: () => set({ settingsOpen: true, checkpointsOpen: false, replayOpen: false, graphOpen: false, terminalOpen: false }),
+  openSettings: () => set({ settingsOpen: true, settingsTab: null, checkpointsOpen: false, replayOpen: false, graphOpen: false, terminalOpen: false }),
+  openSettingsAt: (tab) => set({ settingsOpen: true, settingsTab: tab, checkpointsOpen: false, replayOpen: false, graphOpen: false, terminalOpen: false }),
   closeSettings: () => set({ settingsOpen: false }),
+  settingsTab: null,
+  setSettingsTab: (tab) => set({ settingsTab: tab }),
   toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen })),
   setSidebarOpen: (open) => set({ sidebarOpen: open }),
   setPaletteOpen: (open) => set({ paletteOpen: open }),
@@ -108,10 +130,10 @@ export const useUiStore = create<UiState>((set) => ({
   setCheckpoints: (rows) => set({ checkpoints: rows }),
   setCpsBusy: (busy) => set({ cpsBusy: busy }),
 
-  pushToast: (key, kind = "error") => {
+  pushToast: (key, kind = "error", message) => {
     toastCounter += 1
     const id = toastCounter
-    set((s) => ({ toasts: [...s.toasts.slice(-3), { id, key, kind }] }))
+    set((s) => ({ toasts: [...s.toasts.slice(-3), { id, key, kind, message }] }))
   },
   dismissToast: (id) => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })),
 
