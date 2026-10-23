@@ -45,10 +45,20 @@
 - `--- a/x` / `+++ b/x` 被渲染成两行且 `+++` 被裁成裸 `+++`；增删行左右
   两栏行号相同。改为按文件去重合并、左右栏各给自己的行号。
 
+### 修复（设置面板）
+
+- `delete_command` 只按传入的裸名拼路径，而 `save_command` 会自动补 `.md`，
+  于是界面上「删除命令」按钮永远 404。两端统一。
+- 技能列表显示 frontmatter 的 `name`，与磁盘文件名可以不同，用户找不到对应
+  文件；文件名与 `name` 不一致时补显路径，且新建时改文件名会同步 frontmatter。
+- 所有保存按钮共用 `common.save`，其字面量是「保存设置」，导致技能/提示词
+  编辑器里也显示「保存设置」；拆出 `settings.saveAll` 只给底部全局按钮用。
+
 ### 修复（会话搜索）
 
 - 侧栏搜索此前只在已加载的会话标题/keywords/model 里过滤，搜不到聊天正文。
   接上 store 里已有的 FTS5（trigram，中文子串友好），命中显示片段。
+  `/api/sessions/search` 已补进 OpenAPI 合同（`/api/openapi.json`）。
 - `create_session` 从不写 `sessions_fts`，新会话标题在重启前搜不到。
 - `append_message` 无条件用消息前 24 字覆盖 FTS 标题，把用户手改的标题在
   索引里冲掉，自定义标题永远搜不到。

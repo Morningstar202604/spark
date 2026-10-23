@@ -9,8 +9,9 @@ FastAPI 是**可选依赖**（``pip install 'spark-agent[openapi]'``）：只为
 schema 而把完整 ASGI 框架塞进必装依赖不划算。未安装时
 :func:`openapi_schema` 抛 :class:`OpenApiUnavailable`，路由层降级为 503。
 
-对齐对象：``web/routes.py`` 中 status / config / models / memory / sessions /
-checkpoints / history 七个只读端点的真实返回结构。
+对齐对象：``web/routes.py`` 中的只读端点——status / config / models / memory /
+sessions / checkpoints / history，以及会话全文检索 sessions/search。
+（写操作的 POST 端点尚未纳入合同；它们需要请求体模型，属于下一阶段。）
 """
 from __future__ import annotations
 
@@ -113,6 +114,22 @@ def _get_history() -> Any:  # pragma: no cover
     ...
 
 
+class SessionSearchHit(BaseModel):
+    id: str
+    workdir: str
+    title: str
+    updated_at: int
+    match: dict[str, str]
+
+
+class SessionSearchResponse(BaseModel):
+    hits: list[SessionSearchHit] = Field(default_factory=list)
+
+
+def _get_session_search(q: str = "", limit: int = 20) -> Any:  # pragma: no cover
+    ...
+
+
 _ROUTES: tuple[tuple[str, Any, str, str, Any], ...] = (
     ("/api/status", StatusInfo, "runtime", "运行态快照（会话/循环/用量）", _get_status),
     ("/api/config", dict[str, Any], "runtime", "完整配置（已脱敏）", _get_config),
@@ -121,6 +138,13 @@ _ROUTES: tuple[tuple[str, Any, str, str, Any], ...] = (
     ("/api/sessions", SessionsResponse, "sessions", "当前 workdir 的会话列表（≤50）", _get_sessions),
     ("/api/checkpoints", CheckpointsResponse, "checkpoints", "当前会话检查点", _get_checkpoints),
     ("/api/history", list[dict[str, Any]], "sessions", "当前会话消息历史", _get_history),
+    (
+        "/api/sessions/search",
+        SessionSearchResponse,
+        "sessions",
+        "会话全文检索（FTS5 trigram；命中消息正文时带片段）",
+        _get_session_search,
+    ),
 )
 
 _APP: Any = None

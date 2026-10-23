@@ -33,9 +33,31 @@ bash scripts/build.sh            # 产物：dist/spark/spark
 ./dist/spark/spark web
 ```
 
+### 桌面版（原生窗口）
+
+另有一份 GUI 产物，双击直接开窗口，不经过终端：
+
+```powershell
+pyinstaller spark-desktop.spec --distpath dist --workpath build
+# 产物：dist\spark-desktop\spark-desktop.exe
+```
+
+两者的区别：
+
+| | `spark.exe` | `spark-desktop.exe` |
+|---|---|---|
+| Windows 子系统 | Console（3） | GUI（2，无黑框） |
+| 双击行为 | 进 TUI | 直接开原生窗口 |
+| 入口模块 | `spark.__main__` | `spark.desktop_main` |
+| 适用 | 命令行 / 服务器 / 脚本 | 普通用户日常使用 |
+
+桌面版启动失败时会写 `~/.spark/desktop-crash.log`（GUI 子系统没有 stderr
+可看，不写日志的话用户只会觉得「点了没反应」）。
+
 ### 打包内容
 
 - `spark` 可执行文件 —— CLI + Web 服务（前端资源已内嵌）
+- `spark-desktop` 可执行文件 —— 同一套后端 + pywebview 原生窗口
 - 全部数据本地化，运行于 `~/.spark/`
 - 无需额外浏览器依赖，浏览器打开打印的 `http://127.0.0.1:端口` 即可（服务默认仅监听 `127.0.0.1`（本机访问；如需外部预览请显式 `spark web --host 0.0.0.0`，并自行承担暴露风险））
 - 可选能力（MCP / 嵌入 / TUI）缺失时优雅降级
