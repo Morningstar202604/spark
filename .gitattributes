@@ -1,5 +1,5 @@
 # 换行规范：仓库内一律 LF（core.autocrlf 已在检出时按平台处理；此处仅为显式声明）
-* text=auto
+* text=auto eol=lf
 
 # 二进制文件不做换行转换
 *.png binary
