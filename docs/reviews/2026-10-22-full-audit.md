@@ -559,3 +559,19 @@ build-exe、mirror。
 - 桌面通知只在 Chromium 下验证；Firefox/Safari 权限模型差异未测。
 - 本轮 Linux 侧结论来自 CI 实跑，本机无 Linux 环境（Docker daemon 不可用、
   WSL 未安装），无法在本地复现同一时序。
+
+### 14.6 收尾：远端同步与行尾规范化（2026-10-24）
+
+CI 首次全绿后又做了三件收尾工作，均已推送并复查：
+
+| 项 | 说明 |
+|---|---|
+| 文档债 | §14.4 原先只写"见 §14.5"而无数据，已补实测门禁与 GitHub Actions 7/7 结果；§14.5 列出本轮修掉的 5 个 CI 级缺陷（D-12 SSE Linux 空流 / D-13 install.sh CRLF / D-14 冒烟 grep 锚定 / D-15 OpenAPI 快照过期 / D-16 dist 陈旧 chunk） |
+| 宣传脚本可复现 | `scripts/build_promo.py` 原先只渲染标题帧，视频靠一次性命令合成；现补齐整条链路（帧→xfade→mp4→gif→预览帧）并自清理中间帧，实测重建产物字节数与已发布文件完全一致 |
+| 行尾 | `core.autocrlf=true` 的 Windows 检出把文本写成 CRLF，而**已含 CRLF 的文件会被原样提交**——`install.sh` 就是这样进 CI 的。`.gitattributes` 现为 `* text=auto eol=lf`，对象库统一 LF，Windows 工作区仍可用 CRLF |
+
+**最终状态**：GitHub / GitCode / 本地三端同一提交 `b4888b9`；GitHub Actions
+CI、Security、docs、Evals、build-exe、mirror 全部 success。
+
+**仍需人工验证**（不因 CI 绿而消失）：安装脚本端到端下载（需先发 Release 资产）、
+`spark update` 的 frozen 自替换、桌面通知在 Firefox/Safari 下的权限行为。
