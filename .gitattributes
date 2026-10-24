@@ -17,3 +17,7 @@ uv.lock linguist-generated=true
 
 # build artifacts compared byte-for-byte
 src/spark/web/dist/** -text
+# Shell/PS1 scripts must stay LF on every platform: `sh -n` under dash (CI)
+# fails on CRLF with "Syntax error: word unexpected (expecting \"in\")".
+*.sh text eol=lf
+*.ps1 text eol=crlf
