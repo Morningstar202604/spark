@@ -328,9 +328,14 @@ def _extract_member(
         archive.extract(member, workdir)
 
 
-def restore_workdir(workdir: Path, snapshot_id: str) -> dict:
-    """Restore a snapshot over the workdir. Returns counts; refuses unknown/unsafe ids."""
-    workdir = workdir.resolve()
+def _restore_plan(
+    workdir: Path, snapshot_id: str
+) -> tuple[list[str], dict | None, dict | None, str | None, set[str]]:
+    """校验快照 id / manifest / 基线，返回 (archive_ids, manifest, baseline, baseline_id, archived)。
+
+    archive_ids 已按恢复顺序排好（基线在前）；archived 仅在带 manifest 时有值，
+    无 manifest 路径由调用方从实际成员计算。
+    """
     if not _valid_snapshot_id(snapshot_id):
         raise ValueError("invalid snapshot id")
     src = _snapshot_dir() / f"{snapshot_id}.tar.gz"
@@ -338,8 +343,9 @@ def restore_workdir(workdir: Path, snapshot_id: str) -> dict:
         raise FileNotFoundError(f"snapshot not found: {snapshot_id}")
     manifest = _load_manifest(snapshot_id)
     archive_ids = [snapshot_id]
-    baseline_id = None
+    baseline_id: str | None = None
     baseline: dict | None = None
+    archived: set[str] = set()
     if manifest is not None:
         if manifest["root"] != _root_key(workdir):
             raise ValueError("snapshot belongs to a different workdir")
@@ -355,50 +361,69 @@ def restore_workdir(workdir: Path, snapshot_id: str) -> dict:
                 raise FileNotFoundError(f"snapshot baseline not found: {baseline_id}")
             _manifest_archived_paths(workdir, baseline)
             archive_ids.insert(0, baseline_id)
+    return archive_ids, manifest, baseline, baseline_id, archived
+
+
+def _open_archives(
+    workdir: Path,
+    archive_ids: list[str],
+    stack: ExitStack,
+) -> list[tuple[str, tarfile.TarFile, list[tarfile.TarInfo]]]:
+    """按顺序打开归档并校验 tar 成员安全；句柄注册到 *stack*（调用方持有生命周期）。"""
+    opened: list[tuple[str, tarfile.TarFile, list[tarfile.TarInfo]]] = []
+    for archive_id in archive_ids:
+        archive_path = _snapshot_dir() / f"{archive_id}.tar.gz"
+        if not archive_path.is_file():
+            raise FileNotFoundError(f"snapshot baseline not found: {archive_id}")
+        archive = stack.enter_context(tarfile.open(archive_path, "r:gz"))
+        opened.append((archive_id, archive, _validated_tar_members(workdir, archive)))
+    return opened
+
+
+def _verify_archive_contents(
+    opened: list[tuple[str, tarfile.TarFile, list[tarfile.TarInfo]]],
+    manifest: dict | None,
+    baseline: dict | None,
+    baseline_id: str | None,
+) -> None:
+    if manifest is None:
+        return
+    for archive_id, _archive, members in opened:
+        archive_manifest = baseline if archive_id == baseline_id else manifest
+        comparison = None if archive_id == baseline_id else baseline
+        actual = {member.name for member in members if member.isfile()}
+        if actual != _expected_archive_names(archive_manifest, comparison):
+            raise ValueError(f"snapshot archive does not match manifest: {archive_id}")
+
+
+def _extract_members(
+    opened: list[tuple[str, tarfile.TarFile, list[tarfile.TarInfo]]], workdir: Path
+) -> tuple[int, list[str]]:
+    """逐成员恢复；单文件失败只记录不中断，返回 (restored, errors)。"""
     restored = 0
     restore_errors: list[str] = []
-    with ExitStack() as stack:
-        opened: list[tuple[str, tarfile.TarFile, list[tarfile.TarInfo]]] = []
-        for archive_id in archive_ids:
-            archive_path = _snapshot_dir() / f"{archive_id}.tar.gz"
-            if not archive_path.is_file():
-                raise FileNotFoundError(f"snapshot baseline not found: {archive_id}")
-            archive = stack.enter_context(tarfile.open(archive_path, "r:gz"))
-            opened.append(
-                (archive_id, archive, _validated_tar_members(workdir, archive))
-            )
-        if manifest is not None:
-            for archive_id, _archive, members in opened:
-                archive_manifest = baseline if archive_id == baseline_id else manifest
-                comparison = None if archive_id == baseline_id else baseline
-                actual = {member.name for member in members if member.isfile()}
-                if actual != _expected_archive_names(archive_manifest, comparison):
-                    raise ValueError(
-                        f"snapshot archive does not match manifest: {archive_id}"
-                    )
-        for _archive_id, archive, members in opened:
-            for member in members:
-                if member.isfile():
-                    try:
-                        _extract_member(archive, member, workdir)
-                    except (OSError, tarfile.TarError) as exc:
-                        # 单文件恢复失败（被占用/权限）不应让整次回滚崩溃；
-                        # 收集进 errors 由调用方呈现（其余文件继续恢复）。
-                        logger.warning(
-                            "checkpoint restore skipped %s: %s", member.name, exc
-                        )
-                        restore_errors.append(f"{member.name}: {exc}")
-                        continue
-                    restored += 1
-        if manifest is None:
-            archived = {
-                member.name
-                for _archive_id, _archive, members in opened
-                for member in members
-                if member.isfile()
-            }
-    # Files the snapshot could not read are deliberately left out of the archive;
-    # deleting them here would turn a capture failure into user data loss.
+    for _archive_id, archive, members in opened:
+        for member in members:
+            if not member.isfile():
+                continue
+            try:
+                _extract_member(archive, member, workdir)
+            except (OSError, tarfile.TarError) as exc:
+                # 单文件恢复失败（被占用/权限）不应让整次回滚崩溃；
+                # 收集进 errors 由调用方呈现（其余文件继续恢复）。
+                logger.warning("checkpoint restore skipped %s: %s", member.name, exc)
+                restore_errors.append(f"{member.name}: {exc}")
+                continue
+            restored += 1
+    return restored, restore_errors
+
+
+def _remove_unarchived(workdir: Path, archived: set[str], manifest: dict | None) -> int:
+    """删除快照中不存在的现存文件，返回删除数。
+
+    Files the snapshot could not read are deliberately left out of the archive;
+    deleting them here would turn a capture failure into user data loss.
+    """
     keep_unarchived = set(manifest["unarchived"]) if manifest else set()
     removed = 0
     for path, rel, _metadata in _iter_workdir_files(workdir, _snapshot_dir()):
@@ -410,6 +435,29 @@ def restore_workdir(workdir: Path, snapshot_id: str) -> dict:
             removed += 1
         except OSError:
             continue
+    return removed
+
+
+def restore_workdir(workdir: Path, snapshot_id: str) -> dict:
+    """Restore a snapshot over the workdir. Returns counts; refuses unknown/unsafe ids."""
+    workdir = workdir.resolve()
+    archive_ids, manifest, baseline, baseline_id, archived = _restore_plan(
+        workdir, snapshot_id
+    )
+    restored = 0
+    restore_errors: list[str] = []
+    with ExitStack() as stack:
+        opened = _open_archives(workdir, archive_ids, stack)
+        _verify_archive_contents(opened, manifest, baseline, baseline_id)
+        restored, restore_errors = _extract_members(opened, workdir)
+        if manifest is None:
+            archived = {
+                member.name
+                for _archive_id, _archive, members in opened
+                for member in members
+                if member.isfile()
+            }
+    removed = _remove_unarchived(workdir, archived, manifest)
     return {
         "snapshot_id": snapshot_id,
         "restored_files": restored,

@@ -29,7 +29,7 @@ nav:
   - 开始:
       - 安装: INSTALL.md
       - 配置: CONFIG.md
-      - 配置参考: CONFIGURATION.md
+      - 配置参考: CONFIG.md
   - 深入:
       - 架构: ARCHITECTURE.md
       - API: API.md

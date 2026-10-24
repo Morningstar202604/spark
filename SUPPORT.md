@@ -1,7 +1,7 @@
 # 支持
 
 - **快速开始**：`pip install -e ".[dev]"` 后运行 `spark web`（详见 [README](README.md)）
-- **文档**：`docs/` — [安装](docs/INSTALL.md) / [配置](docs/CONFIGURATION.md) / [API](docs/API.md) / [架构](docs/ARCHITECTURE.md)
+- **文档**：`docs/` — [安装](docs/INSTALL.md) / [配置](docs/CONFIG.md) / [API](docs/API.md) / [架构](docs/ARCHITECTURE.md)
 - **问题反馈**：使用本仓库的 Issues 页（附 bug_report 模板）
 - **功能建议**：使用 feature_request 模板
 

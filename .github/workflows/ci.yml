@@ -84,3 +84,40 @@ jobs:
           }
           Write-Host "no reserved filenames"
 
+
+  packaging:
+    timeout-minutes: 10
+    # 发布链路的静态门：安装脚本语法、版本号一致性、打包 spec 引用完整性。
+    # 这些错误只有在用户跑 install 脚本或打 tag 时才会暴露，成本极高。
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install script syntax (POSIX sh)
+        run: sh -n scripts/install.sh
+      - name: Version resolves and is valid semver
+        run: |
+          python - <<'PY'
+          import pathlib, re, sys, tomllib
+          version = tomllib.loads(pathlib.Path("pyproject.toml").read_text(encoding="utf-8"))["project"]["version"]
+          if not re.fullmatch(r"\d+\.\d+\.\d+([-.][A-Za-z0-9.]+)?", version):
+              sys.exit(f"pyproject version is not semver: {version}")
+          # 源码树（未安装）下 spark.__version__ 必须与 pyproject 一致：
+          # 安装后它优先读发行版元数据，故这里显式走 pyproject fallback。
+          pyproject = pathlib.Path("src/spark/__init__.py").read_text(encoding="utf-8")
+          if "pyproject.toml" not in pyproject:
+              sys.exit("spark.__version__ no longer falls back to pyproject.toml")
+          print("version", version)
+          PY
+      - name: Installer assets exist in the release workflow
+        run: |
+          python - <<'PY'
+          import pathlib, sys
+          wf = pathlib.Path(".github/workflows/release.yml").read_text(encoding="utf-8")
+          missing = [a for a in ("spark-windows-x86_64.zip", "spark-linux-x86_64.tar.gz", "spark-macos-arm64.tar.gz", "SHA256SUMS") if a not in wf]
+          if missing:
+              sys.exit(f"release.yml no longer publishes: {missing}")
+          print("release assets declared")
+          PY

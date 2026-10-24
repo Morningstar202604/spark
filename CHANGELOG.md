@@ -2,7 +2,63 @@
 
 本项目遵循语义化版本。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)。
 
-## [Unreleased]
+## [0.10.0] - 2026-10-23
+
+### 新增（第七轮：分发、审查、协作闭环）
+
+- **一键安装**：`scripts/install.sh`（Linux/macOS）与 `scripts/install.ps1`（Windows）。
+  取最新 Release → 强制校验 `SHA256SUMS` → 解压到用户目录 → 建软链/PATH。
+  支持 `SPARK_VERSION` 固定版本、`SPARK_MIRROR` 内网镜像、`SPARK_INSTALL_DIR` 自定义目录；
+  不 sudo、不改系统目录，校验缺失或不匹配立即中止。
+- **自动更新**：`spark update [--check] [--force]`（新模块 `src/spark/updater.py`）。
+  https-only、SHA256 强校验、原子替换并保留 `*.old` 备份；`doctor` 默认带 24h 缓存的
+  新版本提示，`[updater] mode = "off"` 可关。源码/pip 安装会明确引导到 `pip install -U`。
+- **`spark exec --json`**：NDJSON 事件流，每行一个 `TurnEvent`，末行
+  `{"type":"final","text":…}`；错误行 `{"type":"turn_error"}`。对齐全 `codex exec --json`。
+- **`spark review`**：AI 审 AI。默认审未提交 diff，支持 `--commit` / `--base`；
+  审查回合强制 `plan-only` + `sandbox-only`，输出 severity-ranked findings，`--json`
+  供 CI，存在 high 时退出码 2。新增 `src/spark/review.py`（diff 收集/截断、JSON 解析降级、渲染）。
+- **`!cmd` 内联 shell**：Web 输入框以 `!` 开头直接在工作目录执行（`POST /api/shell`），
+  复用 run_shell 的 workdir 限定 + 策略检查 + bwrap，结果渲染为本地卡片、**不进模型上下文**。
+- **会话分享与导入**：`format=html` 生成零 JS/零外链的自包含分享文件（消息内容全部
+  `html.escape`）；`POST /api/sessions/import` 支持导出 JSON 回灌（仅恢复 user/assistant
+  文本，拒绝悬空 tool_call，限 500 条/1MB）。
+- **桌面通知**：回合结束或等待审批时发 Web Notification，仅页面不可见时提醒；
+  设置 → 展示可开（默认关），权限被拒有明确提示。
+- **模型热键**：`Ctrl+Alt+M` 循环模型档案（对齐全 opencode `F2/Shift+F2`）。
+- **small_model 接线标题生成**：会话标题/关键词走 `provider.small_model`（压缩摘要此前已接）。
+
+### 改进（工程门禁）
+
+- CI 新增 `packaging` job：`sh -n` 校验安装脚本、pyproject 与 `spark.__version__`
+  一致性、release.yml 产物清单（含 `SHA256SUMS`）完整性。
+- `release.yml`：Windows 同时构建 `spark-desktop.spec` 并打进同一个 zip；新增
+  `SHA256SUMS` 生成；构建后对产物跑 `--version` 冒烟（此前只有 build-exe 有）。
+- 文档：README / README_zh 重写（一键安装、六形态、Why Spark、质量门禁说明）；
+  `docs/competitive-comparison.md` 同步第七轮 12 项并标注剩余真实差距。
+
+
+### 新增（首次使用引导与帮助入口）
+
+- **首次使用引导**：新组件 Onboarding——三步（配置模型 / 审批模式 / 开始对话），
+  第 1、2 步可直达对应设置页；跳过、开始使用或关闭任意路径都会写入
+  `spark.onboarding.done`，此后不再出现。服务端启动即自动创建「新对话」会话，
+  "无会话"不构成新用户信号，故门条件为 localStorage 标记（老用户升级后见一次）。
+- **帮助入口**：Header 新增 `?` 按钮；此前快捷键面板只能按 `?` 键唤起。
+
+### 重构（E/F 级复杂度清零，行为不变）
+
+- 7 个 E/F 级函数全部拆分至 C 级以下（`radon cc -n E` 由 7 → 0，D 级 29 → 22）：
+  `save_config`、`restore_workdir`、`AgentLoop._run_tool_body`、`record_turn`、
+  `_stream_impl`、`_handle_chat_stream`、`_handle_settings`。deny 审计、密钥脱敏、
+  恢复路径校验等安全逻辑逐行原位搬移，1020 条测试回归网全绿。
+- `/test` 接线见证测试随拆分升级为模块级源码见证（意图不变）。
+
+### 修复（门禁与协作）
+
+- 上一轮 `api_spec.py` 改动未重新生成 OpenAPI 快照，`export_openapi.py --check`
+  在 main 上即失败；补跑 export + orval（`web/openapi.json` +102 行、
+  `schema.ts` +75 行）。
 
 ### 新增（设置面板对齐 Codex / Claude Code）
 

@@ -20,6 +20,28 @@ import {
 } from "./icons"
 import type { Theme } from "../theme"
 
+/** 会话分享：单文件 HTML（零外链、零 JS），下载后可直接发给别人。 */
+async function downloadShareHtml(lang: Lang) {
+  const ui = useUiStore.getState()
+  try {
+    const data = await exportSession("html")
+    const stamp = new Date().toISOString().slice(0, 16).replace(/[:T]/g, "-")
+    const blob = new Blob([data.content], { type: "text/html;charset=utf-8" })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement("a")
+    a.href = url
+    a.download = `spark-share-${stamp}.html`
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    URL.revokeObjectURL(url)
+    ui.pushToast("toast.shareExported", "success")
+  } catch {
+    ui.pushToast("toast.exportFailed", "error")
+  }
+  void lang
+}
+
 /** 会话导出：走 /api/sessions/export，用浏览器下载 Markdown 文件。 */
 async function downloadTranscript(lang: Lang) {
   const ui = useUiStore.getState()
@@ -148,6 +170,17 @@ export const CommandPalette = memo(function CommandPalette() {
         run: () => {
           setOpen(false)
           void downloadTranscript(lang)
+        },
+      },
+      {
+        id: "share-html",
+        group: t("palette.groupGeneral", lang),
+        title: t("palette.shareChat", lang),
+        hint: "html",
+        icon: <IconDownload size={15} />,
+        run: () => {
+          setOpen(false)
+          void downloadShareHtml(lang)
         },
       },
       {

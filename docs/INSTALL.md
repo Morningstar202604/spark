@@ -1,5 +1,39 @@
 # 安装与打包（Windows EXE / macOS / Linux）
 
+## 方式 0 — 一键安装（推荐普通用户）
+
+Linux / macOS（自动取最新 Release，校验 SHA256，装到 `~/.local/share/spark`）：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/badhope/spark/main/scripts/install.sh | sh
+```
+
+Windows PowerShell（装到 `%LOCALAPPDATA%\Spark`，自动加用户 PATH）：
+
+```powershell
+irm https://raw.githubusercontent.com/badhope/spark/main/scripts/install.ps1 | iex
+```
+
+两者都支持：
+
+| 环境变量 | 作用 |
+|---|---|
+| `SPARK_VERSION` | 固定版本，例如 `v0.9.12` |
+| `SPARK_MIRROR` | 内网镜像根地址（需同时提供产物与 `SHA256SUMS`） |
+| `SPARK_INSTALL_DIR` | 覆盖安装目录 |
+
+**校验不是可选项**：Release 缺少 `SHA256SUMS` 或哈希不符时脚本直接中止。
+装完升级：
+
+```bash
+spark update --check     # 只看有没有新版
+spark update             # 下载 → 校验 → 原子替换（旧版备份为 *.old）
+```
+
+`spark update` 只对打包版有效；pip/源码安装用 `pip install -U spark-agent`。
+不想被检查打扰可在 `config.toml` 设 `[updater] mode = "off"`。
+
+
 ## 方式 A — 源码运行（最快）
 
 ```bash

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import cast
+from typing import Literal, cast
 
 from spark.models import ApprovalAction
 from spark.web._httpbase import HandlerBase
@@ -277,8 +277,8 @@ def _tool_snippet(raw: str, limit: int = 400) -> str:
 def _handle_session_export(handler: HandlerBase, body: dict) -> None:
     state = _route_state(handler)
     fmt = str(body.get("format") or "markdown").strip().lower()
-    if fmt not in {"markdown", "md", "json"}:
-        handler._json(400, {"error": "format must be markdown or json"})
+    if fmt not in {"markdown", "md", "json", "html"}:
+        handler._json(400, {"error": "format must be markdown, json or html"})
         return
     if fmt == "json":
         payload = {
@@ -289,9 +289,161 @@ def _handle_session_export(handler: HandlerBase, body: dict) -> None:
         }
         handler._json(200, {"ok": True, "format": "json", "content": json.dumps(payload, ensure_ascii=False, indent=2)})
         return
+    if fmt == "html":
+        handler._json(
+            200,
+            {"ok": True, "format": "html", "content": _session_html(state)},
+        )
+        return
     handler._json(
         200,
         {"ok": True, "format": "markdown", "content": _session_markdown(state)},
+    )
+
+
+def _session_html(state) -> str:
+    """自包含单文件 HTML 分享（opencode /share 的本地无服务版）。
+
+    零 JS、零外链：打开即完整对话记录；工具调用折叠为 <details>；自动适配
+    深浅色。内容全部经 html.escape —— 分享文件是"数据"，任何一方的消息
+    内容都不能在里面执行。
+    """
+    import html as _html
+    from datetime import datetime
+
+    session = state.store.get_session(state.session_id) or {}
+    title = session.get("title") or "untitled"
+    messages = _history_messages(state)
+    parts: list[str] = []
+    for m in messages:
+        role = m.get("role")
+        content = str(m.get("content") or "")
+        if role == "user":
+            parts.append(
+                f'<div class="msg user"><div class="role">用户</div>'
+                f'<div class="text">{_html.escape(content)}</div></div>'
+            )
+        elif role == "assistant":
+            parts.append(
+                f'<div class="msg assistant"><div class="role">助手</div>'
+                f'<div class="text">{_html.escape(content)}</div></div>'
+            )
+        else:
+            name = _html.escape(str(m.get("name") or "tool"))
+            parts.append(
+                f'<details class="tool"><summary>工具 {name}</summary>'
+                f"<pre>{_html.escape(content[:4000])}</pre></details>"
+            )
+    stamp = datetime.now().strftime("%Y-%m-%d %H:%M")
+    return (
+        '<!doctype html><html lang="zh"><head><meta charset="utf-8">'
+        '<meta name="viewport" content="width=device-width, initial-scale=1">'
+        f"<title>{_html.escape(str(title))} · Spark 会话分享</title><style>"
+        ":root{color-scheme:light dark}"
+        "body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',sans-serif;"
+        "background:#f6f7f9;color:#1c1e21}"
+        "@media(prefers-color-scheme:dark){body{background:#14171c;color:#e6e8eb}}"
+        "main{max-width:860px;margin:0 auto;padding:32px 20px 64px}"
+        "h1{font-size:22px;margin:0 0 4px}"
+        ".meta{color:#8a8f98;font-size:13px;margin-bottom:28px}"
+        ".msg{margin:14px 0;padding:12px 16px;border-radius:12px;background:#fff;"
+        "border:1px solid #e3e6ea}"
+        ".assistant{background:transparent;border-style:dashed}"
+        "@media(prefers-color-scheme:dark){.msg{background:#1d2229;border-color:#2c333d}}"
+        ".role{font-size:12px;font-weight:600;color:#5a8de0;margin-bottom:6px}"
+        ".text{white-space:pre-wrap;word-break:break-word;line-height:1.65;font-size:14.5px}"
+        ".tool{margin:10px 0;font-size:13px}"
+        ".tool summary{cursor:pointer;color:#8a8f98}"
+        ".tool pre{overflow:auto;background:#0f1115;color:#cfe3ff;padding:10px;"
+        "border-radius:8px;font-size:12px;max-height:320px}"
+        ".foot{margin-top:40px;color:#8a8f98;font-size:12px;text-align:center}"
+        "</style></head><body><main>"
+        f"<h1>{_html.escape(str(title))}</h1>"
+        f'<div class="meta">模型 {_html.escape(str(session.get("model") or ""))}'
+        f" · 导出于 {_html.escape(stamp)} · 内容已脱敏（不含本机路径与会话 id）</div>"
+        + "".join(parts)
+        + '<div class="foot">由 Spark 本地导出 · 数据完全离线</div>'
+        "</main></body></html>"
+    )
+
+
+_MAX_IMPORT_MESSAGES = 500
+_MAX_IMPORT_CHARS = 1_000_000
+
+
+def _handle_session_import(handler: HandlerBase, body: dict) -> None:
+    """导入会话 JSON（spark 导出格式，round-trip 对齐 /api/sessions/export json）。
+
+    只恢复 user/assistant 文本消息：tool 载体行引用活动 tool_call id，
+    脱离原会话恢复它们会产生悬空 tool_call（打挂下一次 provider 请求）。
+    """
+    state = _route_state(handler)
+    raw = body.get("content")
+    payload = raw
+    if isinstance(raw, str):
+        try:
+            payload = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            handler._json(400, {"error": f"content is not valid JSON: {exc}"})
+            return
+    if not isinstance(payload, dict):
+        handler._json(
+            400, {"error": "content must be a session export object or JSON string"}
+        )
+        return
+    messages = payload.get("messages")
+    if not isinstance(messages, list) or not messages:
+        handler._json(400, {"error": "messages must be a non-empty list"})
+        return
+    if len(messages) > _MAX_IMPORT_MESSAGES:
+        handler._json(400, {"error": f"too many messages (max {_MAX_IMPORT_MESSAGES})"})
+        return
+    restored: list[tuple[Literal["user", "assistant"], str]] = []
+    skipped = 0
+    total = 0
+    for m in messages:
+        if not isinstance(m, dict):
+            skipped += 1
+            continue
+        role = m.get("role")
+        content = str(m.get("content") or "").strip()
+        if role not in {"user", "assistant"} or not content:
+            skipped += 1
+            continue
+        typed_role: Literal["user", "assistant"] = (
+            "user" if role == "user" else "assistant"
+        )
+        total += len(content)
+        if total > _MAX_IMPORT_CHARS:
+            handler._json(400, {"error": "session too large to import"})
+            return
+        restored.append((typed_role, content))
+    if not restored:
+        handler._json(400, {"error": "no user/assistant text messages to import"})
+        return
+    if state.busy:
+        handler._json(409, {"error": "agent is busy"})
+        return
+    title = str(payload.get("title") or "导入会话").strip()[:80] or "导入会话"
+    with state.turn_lock:
+        sid = state.store.create_session(
+            state.workdir, state.cfg.provider.model, title=title
+        )
+        from spark.models import ChatMessage
+
+        for role, content in restored:
+            state.store.append_message(sid, ChatMessage(role=role, content=content))
+        state.rebuild_loop(session_id=sid)
+    handler._json(
+        200,
+        {
+            "ok": True,
+            "session_id": sid,
+            "imported": len(restored),
+            "skipped": skipped,
+            "status": state.status(),
+            "messages": _history_messages(state),
+        },
     )
 
 

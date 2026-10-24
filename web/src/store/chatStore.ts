@@ -1,6 +1,6 @@
 import { create } from "zustand"
 import type { ChatEvent, PlanStep } from "../types"
-import { streamChat, fetchHistory, deleteMessage as deleteMessageApi, truncateFromMessage as truncateFromMessageApi } from "../api"
+import { streamChat, fetchHistory, deleteMessage as deleteMessageApi, truncateFromMessage as truncateFromMessageApi, runInlineShell } from "../api"
 import { useSessionStore } from "./sessionStore"
 import { useUiStore } from "./uiStore"
 import { t } from "../i18n"
@@ -34,7 +34,7 @@ export type Segment =
 
 export interface ChatMsg {
   id: string
-  role: "user" | "assistant" | "error" | "notice" | "summary"
+  role: "user" | "assistant" | "error" | "notice" | "summary" | "shell"
   /** 全文（复制用），与 segments 中的文本一致 */
   text: string
   images?: string[]
@@ -46,6 +46,14 @@ export interface ChatMsg {
   startedAt?: number
   meta?: {
     compacted?: { before: number; after: number; summarized: number }
+    /** `!cmd` 内联 shell 的执行结果（本地卡片，不进模型上下文） */
+    shell?: {
+      command: string
+      exitCode: number
+      stdout: string
+      stderr: string
+      truncated?: boolean
+    }
   }
 }
 
@@ -94,6 +102,8 @@ interface ChatState {
   setWebSearch: (v: boolean) => void
   addErrorItem: (text: string) => void
   send: (images?: string[]) => Promise<void>
+  /** `!cmd` 内联 shell：本地执行并渲染结果卡片，不进入对话历史 */
+  runShell: (command: string) => Promise<void>
   /** 删除单条消息（后端持久化 + 本地同步） */
   deleteMessage: (dbId: number) => Promise<void>
   /** 重新生成：截断到该助手消息之前，重放它对应的用户消息 */
@@ -633,6 +643,46 @@ export const useChatStore = create<ChatState>((set, get) => ({
       } catch {
         /* ids are a convenience; the next explicit action re-reads history */
       }
+    }
+  },
+
+  runShell: async (command: string) => {
+    const { streaming } = get()
+    if (streaming || !command.trim()) return
+    const id = uid()
+    set((s) => ({
+      input: "",
+      items: [...s.items, { id, role: "shell", text: `!${command}`, segments: [], meta: { shell: { command, exitCode: -1, stdout: "", stderr: "" } } }],
+    }))
+    try {
+      const res = await runInlineShell(command)
+      set((s) => ({
+        items: s.items.map((it) =>
+          it.id === id
+            ? {
+                ...it,
+                meta: {
+                  shell: {
+                    command,
+                    exitCode: res.result.exit_code ?? -1,
+                    stdout: res.result.stdout ?? "",
+                    stderr: res.result.stderr ?? "",
+                    truncated: res.result.truncated,
+                  },
+                },
+              }
+            : it,
+        ),
+      }))
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      set((s) => ({
+        items: s.items.map((it) =>
+          it.id === id
+            ? { ...it, meta: { shell: { command, exitCode: -1, stdout: "", stderr: msg } } }
+            : it,
+        ),
+      }))
     }
   },
 

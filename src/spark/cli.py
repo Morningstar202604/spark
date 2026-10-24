@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import sys
+import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
@@ -224,6 +225,11 @@ def exec_cmd(
         "--sandbox-mode",
         help="sandbox-only | workspace | full-access | unrestricted",
     ),
+    as_json: bool = typer.Option(
+        False,
+        "--json",
+        help="输出 NDJSON 事件流（每行一个 JSON 对象，最后一行为 {\"type\":\"final\"}）；错误行 type=turn_error",
+    ),
 ) -> None:
     try:
         workdir = workdir.resolve()
@@ -238,14 +244,20 @@ def exec_cmd(
         session_id = store.create_session(
             workdir, cfg.provider.model, title=prompt[:80]
         )
-        asyncio.run(_exec_async(prompt, workdir, cfg, store, session_id))
+        asyncio.run(_exec_async(prompt, workdir, cfg, store, session_id, as_json=as_json))
     except SparkError as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(exc.exit_code) from exc
 
 
 async def _exec_async(
-    prompt: str, workdir: Path, cfg: SparkConfig, store: SessionStore, session_id: str
+    prompt: str,
+    workdir: Path,
+    cfg: SparkConfig,
+    store: SessionStore,
+    session_id: str,
+    *,
+    as_json: bool = False,
 ) -> None:
     from spark.providers.factory import create_provider
 
@@ -272,26 +284,48 @@ async def _exec_async(
         approver=None,
     )
     try:
+        import json as _json
+
         from spark.slash import handle_test, parse_slash
+
+        def _emit(payload: dict) -> None:
+            typer.echo(_json.dumps(payload, ensure_ascii=False))
 
         slash = parse_slash(prompt)
         if slash is not None and slash.name == "test":
             # spark exec /test [目录]：脚本化跑测试，失败则把 traceback 回灌进 loop
             result = await asyncio.to_thread(handle_test, sandbox, slash.args)
-            typer.echo(result.summary)
-            if result.output:
-                typer.echo(result.output)
+            if as_json:
+                _emit(
+                    {
+                        "type": "test",
+                        "ok": bool(result.ok),
+                        "summary": result.summary,
+                    }
+                )
+            else:
+                typer.echo(result.summary)
+                if result.output:
+                    typer.echo(result.output)
             if result.ok or not result.feedback:
                 raise typer.Exit(0)
             final = ""
             async for event in loop.iter_turn(result.feedback):
+                if as_json:
+                    _emit(event.model_dump(mode="json", exclude_none=True))
                 if event.type == "turn_end" and event.text:
                     final = event.text
                 if event.type == "turn_error" and event.text:
-                    typer.echo(event.text, err=True)
+                    if as_json:
+                        _emit({"type": "turn_error", "text": event.text})
+                    else:
+                        typer.echo(event.text, err=True)
                     raise typer.Exit(1)
             if final:
-                typer.echo(final)
+                if as_json:
+                    _emit({"type": "final", "text": final})
+                else:
+                    typer.echo(final)
             raise typer.Exit(1)
 
         # H5：自定义命令展开（.spark/commands/*.md）
@@ -301,18 +335,203 @@ async def _exec_async(
             expanded = expand_command(str(workdir), prompt)
         except Exception:
             expanded = None
-        events = await loop.run(expanded or prompt)
-        final = ""
-        for event in events:
-            if event.type == "turn_end" and event.text:
-                final = event.text
-            if event.type == "turn_error" and event.text:
-                typer.echo(event.text, err=True)
-                raise typer.Exit(1)
-        typer.echo(final)
+        if as_json:
+            final = ""
+            async for event in loop.iter_turn(expanded or prompt):
+                _emit(event.model_dump(mode="json", exclude_none=True))
+                if event.type == "turn_end" and event.text:
+                    final = event.text
+                if event.type == "turn_error" and event.text:
+                    _emit({"type": "turn_error", "text": event.text})
+                    raise typer.Exit(1)
+            _emit({"type": "final", "text": final})
+        else:
+            events = await loop.run(expanded or prompt)
+            final = ""
+            for event in events:
+                if event.type == "turn_end" and event.text:
+                    final = event.text
+                if event.type == "turn_error" and event.text:
+                    typer.echo(event.text, err=True)
+                    raise typer.Exit(1)
+            typer.echo(final)
     finally:
         await bridge.close()
         store.close()
+
+
+@app.command("review", help="AI 审查代码变更（默认未提交 diff；--commit/--base 可选范围），只读不改动")
+def review_cmd(
+    workdir: Path = typer.Option(Path("."), "--workdir"),
+    commit: str | None = typer.Option(None, "--commit", help="审查指定 commit/branch（git show）"),
+    base: str | None = typer.Option(None, "--base", help="审查 base...HEAD 的全部提交"),
+    model: str | None = typer.Option(None, "--model"),
+    provider: str | None = typer.Option(None, "--provider"),
+    config: Path | None = typer.Option(None, "--config"),
+    as_json: bool = typer.Option(False, "--json", help="输出机器可读 JSON（summary + findings）"),
+) -> None:
+    try:
+        workdir = workdir.resolve()
+        cfg = _common_cfg(workdir, config, None, model, provider)
+        if cfg.provider.name == "mock":
+            raise ConfigError(
+                "spark review needs a real model; pass --provider openai_compat and --base-url"
+            )
+        key = require_api_key(cfg)
+        if not key:
+            raise ConfigError("spark review requires an API key")
+        from spark.review import (
+            ReviewError,
+            ReviewTarget,
+            build_review_prompt,
+            collect_diff,
+            diff_stats,
+            parse_review,
+            render_review,
+        )
+
+        if commit:
+            target = ReviewTarget(mode="commit", commit=commit)
+        elif base:
+            target = ReviewTarget(mode="base", base=base)
+        else:
+            target = ReviewTarget(mode="staged")
+        try:
+            diff = collect_diff(workdir, target)
+        except ReviewError as exc:
+            typer.echo(str(exc), err=True)
+            raise typer.Exit(1) from exc
+        stats = diff_stats(workdir, target) if target.mode == "staged" else {}
+
+        # 审查轮强制只读：无论用户配置如何，review 都不允许写/执行。
+        cfg.agent.approval = "plan-only"
+        cfg.agent.sandbox_mode = "sandbox-only"
+        store = _store()
+        session_id = store.create_session(workdir, cfg.provider.model, title="review")
+        review = asyncio.run(
+            _review_async(build_review_prompt(diff), workdir, cfg, store, session_id)
+        )
+        result = parse_review(review)
+        result.stats = stats
+        if as_json:
+            import json as _json
+
+            typer.echo(
+                _json.dumps(
+                    {
+                        "summary": result.summary,
+                        "findings": [
+                            {
+                                "severity": f.severity,
+                                "file": f.file,
+                                "line": f.line,
+                                "comment": f.comment,
+                            }
+                            for f in result.findings
+                        ],
+                        "stats": stats,
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                )
+            )
+        else:
+            header = f"◆ Spark Review（{target.mode}）"
+            if stats:
+                header += f" — {stats.get('files', 0)} 文件 +{stats.get('added', 0)}/-{stats.get('removed', 0)}"
+            typer.echo(render_review(result, header))
+        high = any(f.severity == "high" for f in result.findings)
+        raise typer.Exit(2 if high else 0)
+    except SparkError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(exc.exit_code) from exc
+
+
+async def _review_async(
+    prompt: str, workdir: Path, cfg: SparkConfig, store: SessionStore, session_id: str
+) -> str:
+    from spark.providers.factory import create_provider
+
+    prov = create_provider(cfg)
+    sandbox = WorkdirSandbox(workdir, cfg)
+    from spark.tools.registry import ToolContext, ToolRegistry
+
+    tool_ctx = ToolContext(sandbox=sandbox, config=cfg)
+    registry = ToolRegistry(tool_ctx)
+    bridge = await _boot_mcp(cfg, registry)
+    tool_ctx.mcp_call = bridge.call
+    tool_ctx.mcp_bridge = bridge
+    bridge.set_sampling_handler(prov)
+    loop = _agent_loop()(
+        workdir=workdir,
+        cfg=cfg,
+        provider=prov,
+        registry=registry,
+        store=store,
+        session_id=session_id,
+        approver=None,
+    )
+    try:
+        final = ""
+        async for event in loop.iter_turn(prompt):
+            if event.type == "turn_end" and event.text:
+                final = event.text
+            if event.type == "turn_error" and event.text:
+                raise ConfigError(f"review turn failed: {event.text}")
+        return final
+    finally:
+        await bridge.close()
+        store.close()
+
+
+@app.command("update", help="检查并安装新版本（校验 SHA256；--check 只看不装）")
+def update_cmd(
+    check: bool = typer.Option(False, "--check", help="只检查是否有新版本，不下载"),
+    force: bool = typer.Option(False, "--force", help="即使已是新版也重新安装"),
+    api_url: str | None = typer.Option(None, "--api-url", help="自定义 Release API（内网镜像）"),
+) -> None:
+    from spark import updater
+
+    try:
+        release = updater.fetch_latest(api_url or updater.RELEASE_API)
+    except updater.UpdateError as exc:
+        typer.echo(f"检查更新失败：{exc}", err=True)
+        raise typer.Exit(1) from exc
+    local = _installed_version()
+    typer.echo(f"当前版本：{local}")
+    typer.echo(f"最新版本：{release.version}")
+    newer = updater.is_newer(release.version, local)
+    if not newer and not force:
+        typer.echo("已是最新版本。")
+        return
+    if check:
+        typer.echo(f"有新版本可用：{updater.release_page_url(release.tag)}")
+        return
+    if getattr(sys, "frozen", False) is False:
+        typer.echo(
+            "当前是源码/pip 安装，请用 `pip install -U spark-agent` 升级；"
+            "打包版可直接 `spark update`。"
+        )
+        raise typer.Exit(2)
+    try:
+        asset = updater.select_asset(release)
+        sums_asset = next(
+            (a for a in release.assets if a["name"].lower() == "sha256sums"), None
+        )
+        if sums_asset is None:
+            raise updater.UpdateError("该 Release 未提供 SHA256SUMS，拒绝安装未校验的产物")
+        with tempfile.TemporaryDirectory(prefix="spark-update-") as tmp:
+            tmpdir = Path(tmp)
+            sums_path = updater.download(sums_asset["url"], tmpdir / "SHA256SUMS")
+            sums = updater.parse_sha256sums(sums_path.read_text(encoding="utf-8"))
+            archive = updater.download(asset["url"], tmpdir / asset["name"])
+            updater.verify(archive, sums, asset["name"])
+            backup = updater.install_archive(archive, updater.current_executable())
+        typer.echo(f"已更新到 {release.version}（旧版本备份：{backup}）")
+        typer.echo("重新启动 spark 以使用新版本。")
+    except updater.UpdateError as exc:
+        typer.echo(f"更新失败：{exc}", err=True)
+        raise typer.Exit(1) from exc
 
 
 @app.command("web")
@@ -1003,6 +1222,9 @@ def doctor_cmd(
         False, "--backup", help="备份会话数据库到 ~/.spark/backups/（VACUUM INTO，可在线执行）"
     ),
     as_json: bool = typer.Option(False, "--json", help="输出机器可读 JSON"),
+    check_updates: bool = typer.Option(
+        True, "--check-updates/--no-check-updates", help="检查是否有新版本（24h 缓存）"
+    ),
 ) -> None:
     """Diagnose configuration and print actionable fixes."""
     typer.echo(banner("配置体检"))
@@ -1081,6 +1303,22 @@ def doctor_cmd(
                 typer.echo(f"  已备份：{out}（{out.stat().st_size // 1024} KB，schema v{store.schema_version()}）")
             finally:
                 store.close()
+
+    if check_updates:
+        from spark import updater
+
+        try:
+            latest = updater.check_cached(default_home())
+        except Exception:  # aqg: top-level boundary — 更新检查永不影响 doctor 结果
+            latest = None
+        if latest:
+            rows.append(
+                (
+                    "warn",
+                    f"有新版本可用：{latest}（当前 {_installed_version()}）",
+                    "运行 spark update 升级（打包版），或 pip install -U spark-agent",
+                )
+            )
 
     typer.echo(render_health(rows, as_json=as_json))
     raise typer.Exit(health_exit_code(rows))

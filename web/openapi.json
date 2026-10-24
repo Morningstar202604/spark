@@ -181,6 +181,59 @@
           }
         }
       }
+    },
+    "/api/sessions/search": {
+      "get": {
+        "tags": [
+          "sessions"
+        ],
+        "summary": "会话全文检索（FTS5 trigram；命中消息正文时带片段）",
+        "operationId": "_get_session_search_api_sessions_search_get",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "Q"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 20,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionSearchResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -394,6 +447,55 @@
           "id"
         ],
         "title": "SessionRow"
+      },
+      "SessionSearchHit": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "workdir": {
+            "type": "string",
+            "title": "Workdir"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "updated_at": {
+            "type": "integer",
+            "title": "Updated At"
+          },
+          "match": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Match"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "workdir",
+          "title",
+          "updated_at",
+          "match"
+        ],
+        "title": "SessionSearchHit"
+      },
+      "SessionSearchResponse": {
+        "properties": {
+          "hits": {
+            "items": {
+              "$ref": "#/components/schemas/SessionSearchHit"
+            },
+            "type": "array",
+            "title": "Hits"
+          }
+        },
+        "type": "object",
+        "title": "SessionSearchResponse"
       },
       "SessionsResponse": {
         "properties": {

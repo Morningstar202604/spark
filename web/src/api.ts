@@ -85,7 +85,7 @@ export async function fetchCommands(): Promise<{ commands: SlashCommandInfo[] }>
 
 /** 导出当前会话（opencode/codex 的 /export 等价物）。 */
 export async function exportSession(
-  format: "markdown" | "json" = "markdown",
+  format: "markdown" | "json" | "html" = "markdown",
 ): Promise<{ ok: boolean; format: string; content: string }> {
   return readJson(
     await fetchWithTimeout("/api/sessions/export", {
@@ -859,4 +859,45 @@ export async function knowledgeAction(body: Record<string, unknown>): Promise<{
       body: JSON.stringify(body),
     }),
   )
+}
+
+/** `!cmd` 内联 shell：直接在工作目录执行一条命令（不进对话历史）。 */
+export async function runInlineShell(command: string): Promise<{
+  ok: boolean
+  result: {
+    command: string
+    exit_code: number
+    stdout: string
+    stderr: string
+    truncated?: boolean
+  }
+}> {
+  return readJson(
+    await fetchWithTimeout("/api/shell", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ command }),
+    }),
+  )
+}
+
+/** 导入会话 JSON（导出文件原样回灌）。 */
+export async function importSession(content: unknown): Promise<{
+  ok: boolean
+  session_id: string
+  imported: number
+  skipped: number
+}> {
+  return readJson(
+    await fetchWithTimeout("/api/sessions/import", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ content }),
+    }),
+  )
+}
+
+/** 生成单文件 HTML 分享（本地下载，无服务端上传）。 */
+export async function exportSessionHtml(): Promise<{ ok: boolean; content: string }> {
+  return exportSession("html")
 }

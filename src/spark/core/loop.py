@@ -1240,227 +1240,203 @@ class AgentLoop:
                 latency_ms=int((time.monotonic() - started) * 1000),
             )
 
-    async def _run_tool_body(
-        self, call: ToolCall, message_id: int, verdict: dict[str, Any] | None = None
-    ):
-        """工具执行主体。
+    async def _resolve_direct_verdict(
+        self, call: ToolCall
+    ) -> tuple[dict[str, Any], TurnEvent | None]:
+        """直调路径（测试/兼容）：公共判定后按路径落定 prompt——
 
-        *verdict* 由 approve 节点预先生成（graph 路径）：
-        ``{"action": "allow"|"allow_always"|"deny"|"hook_block"|"plan_only", "reason": str}``。
-        提供时跳过判定段（判定已完成，本方法只做副作用与事件）。
-        缺省（None，测试/兼容直调路径）走 :meth:`_classify_call` 公共判定，
-        prompt 经 approver 回调落定，随后与 graph 路径共用同一执行分派。
+        审批经 approver 回调（graph 路径则由 approve 节点 interrupt）。
+        返回 (verdict, approval_event)：event 需由调用方在判定后补发。
         """
-        yield TurnEvent(type="tool_start", tool_call=call)
-        _tool_call_start = time.monotonic()
-        _tool_args_summary = json.dumps(call.arguments, ensure_ascii=False, default=str)[:200]
-        if verdict is None:
-            # 直调路径（测试/兼容）：公共判定后按路径落定 prompt——
-            # 审批经 approver 回调（graph 路径则由 approve 节点 interrupt）。
-            classified = self._classify_call(call)
-            if classified["action"] == "prompt":
-                summary, diff = self.registry.approval_summary(call)
-                request = ApprovalRequest(tool_call=call, summary=summary, diff=diff)
-                self._notify_safe(
-                    "approval_needed",
-                    {
-                        "tool_call": call.name,
-                        "arguments": call.arguments,
-                        "summary": summary,
-                    },
-                )
-                yield TurnEvent(type="approval_needed", approval=request, tool_call=call)
-                if self.approver is None:
-                    verdict = {"action": "deny", "reason": "no approver"}
-                else:
-                    decision = await self.approver(request)
-                    verdict = {
-                        "action": decision.action,
-                        # 与 graph 路径 approver-deny 的 payload 文案保持一致
-                        "reason": "denied" if decision.action == "deny" else "",
-                    }
-            else:
-                verdict = classified
-        # ── 统一执行分派（两条路径在此收敛：判定已完成，只做副作用与事件）──
-        if verdict["action"] == "hook_block":
-            result = ToolResult(ok=False, payload={"error": verdict.get("reason") or "blocked by hook"})
-            await self._persist_tool(call, message_id, result, "hook_block")
-            yield TurnEvent(type="tool_end", tool_call=call, result=result)
-            return
-        if verdict["action"] == "plan_only":
-            result = ToolResult(
+        classified = self._classify_call(call)
+        if classified["action"] != "prompt":
+            return classified, None
+        summary, diff = self.registry.approval_summary(call)
+        request = ApprovalRequest(tool_call=call, summary=summary, diff=diff)
+        self._notify_safe(
+            "approval_needed",
+            {
+                "tool_call": call.name,
+                "arguments": call.arguments,
+                "summary": summary,
+            },
+        )
+        event = TurnEvent(type="approval_needed", approval=request, tool_call=call)
+        if self.approver is None:
+            return {"action": "deny", "reason": "no approver"}, event
+        decision = await self.approver(request)
+        verdict = {
+            "action": decision.action,
+            # 与 graph 路径 approver-deny 的 payload 文案保持一致
+            "reason": "denied" if decision.action == "deny" else "",
+        }
+        return verdict, event
+
+    def _refusal_result(self, call: ToolCall, verdict: dict[str, Any]) -> ToolResult:
+        """hook_block / plan_only / deny 三种拒绝的统一结果构造；deny 记结构化审计。"""
+        action = verdict["action"]
+        if action == "hook_block":
+            return ToolResult(
+                ok=False, payload={"error": verdict.get("reason") or "blocked by hook"}
+            )
+        if action == "plan_only":
+            return ToolResult(
                 ok=False,
                 payload={
                     "error": "plan-only: write/execute tools are disabled; output the plan and ask the user to switch to auto modes",
                     "tool": call.name,
                 },
             )
-            await self._persist_tool(call, message_id, result, "plan_only")
-            yield TurnEvent(type="tool_end", tool_call=call, result=result)
-            return
-        if verdict["action"] == "deny":
-            result = ToolResult(
-                ok=False,
-                payload={"error": verdict.get("reason") or "denied by permission rule", "tool": call.name},
-            )
-            # Security-relevant refusal: record it outside the human log so the
-            # user (or a collector) can answer "what was blocked and why".
-            from spark import audit
+        result = ToolResult(
+            ok=False,
+            payload={
+                "error": verdict.get("reason") or "denied by permission rule",
+                "tool": call.name,
+            },
+        )
+        # Security-relevant refusal: record it outside the human log so the
+        # user (or a collector) can answer "what was blocked and why".
+        from spark import audit
 
-            audit.record(
-                "tool_denied",
-                session=self.session_id,
-                tool=call.name,
-                reason=str(verdict.get("reason") or "permission rule"),
-                arguments=call.arguments,
-            )
-            await self._persist_tool(call, message_id, result, "deny")
-            yield TurnEvent(type="tool_end", tool_call=call, result=result)
-            return
-        approval_label = verdict["action"]
-        if approval_label == "allow_always" and call.name not in NEVER_PERSIST_ALLOW:
-            self.allow_always.add(call_signature(call))
-        if call.name == "ask_user" and self.registry.ctx.question_asker is not None:
-            from spark.models import ToolResult as _TR
+        audit.record(
+            "tool_denied",
+            session=self.session_id,
+            tool=call.name,
+            reason=str(verdict.get("reason") or "permission rule"),
+            arguments=call.arguments,
+        )
+        return result
 
-            question = str(call.arguments.get("question") or "").strip()
-            raw_options = call.arguments.get("options")
-            options = (
-                [str(o) for o in raw_options if str(o).strip()]
-                if isinstance(raw_options, list)
-                else []
-            )
-            # Emit first: the browser needs the question to render its card,
-            # and the asker blocks until the user answers.
-            yield TurnEvent(
-                type="question",
-                data={"question": question, "options": options, "tool_id": call.id},
-            )
-            answer = ""
+    @staticmethod
+    def _parse_question_args(arguments: dict) -> tuple[str, list[str]]:
+        question = str(arguments.get("question") or "").strip()
+        raw_options = arguments.get("options")
+        options = (
+            [str(o) for o in raw_options if str(o).strip()]
+            if isinstance(raw_options, list)
+            else []
+        )
+        return question, options
+
+    @staticmethod
+    def _question_result(
+        question: str, answer: str, exc: Exception | None
+    ) -> ToolResult:
+        if exc is not None:
+            return ToolResult(ok=False, payload={"error": f"question failed: {exc}"})
+        if answer:
+            return ToolResult(ok=True, payload={"question": question, "answer": answer})
+        return ToolResult(ok=False, payload={"error": "user dismissed the question"})
+
+    @staticmethod
+    def _single_task_params(item) -> tuple[str, str, list[str] | None]:
+        """单个子任务派发参数：prompt / system_extra / allowlist。"""
+        from spark.agents import subagent_system_prompt
+
+        prompt, agent = item
+        system_extra = subagent_system_prompt(agent) if agent else ""
+        allowlist = list(agent.tools) if agent and agent.tools else None
+        return prompt, system_extra, allowlist
+
+    @staticmethod
+    def _parallel_task_params(items) -> tuple[list[str], list[str], list[list[str] | None]]:
+        """并行子任务派发参数（最多 4 路）。"""
+        from spark.agents import subagent_system_prompt
+
+        if len(items) > 4:
+            items = items[:4]
+        prompts = [p for p, _ in items]
+        system_extras = [
+            subagent_system_prompt(a) if a else "" for _, a in items
+        ]
+        allowlists = [
+            list(a.tools) if a and a.tools else None for _, a in items
+        ]
+        return prompts, system_extras, allowlists
+
+    @staticmethod
+    def _single_task_result(summaries: list[str], errors: list[str]) -> ToolResult:
+        if errors:
+            return ToolResult(ok=False, payload={"error": errors[-1]})
+        return ToolResult(
+            ok=True, payload={"summary": summaries[-1] if summaries else ""}
+        )
+
+    def _collect_task_items(self, call_arguments: dict) -> tuple[list, str]:
+        """P1-4：声明式子代理（.claude/agents/*.md）参数解析。
+
+        agent 为该文件的 name，其 body 作为子代理的 system prompt，
+        tools 字段收敛子代理工具集。返回 (items, error)。
+        """
+        from spark.agents import AgentFileError, DeclaredAgent, get_declared_agent
+
+        items: list[tuple[str, DeclaredAgent | None]] = []
+        task_error = ""
+
+        def _resolve_agent(agent_name: str) -> tuple[DeclaredAgent | None, str]:
             try:
-                answer = await self.registry.ctx.question_asker(question, options)
-            except Exception as exc:  # noqa: BLE001
-                result = _TR(ok=False, payload={"error": f"question failed: {exc}"})
-            else:
-                result = (
-                    _TR(ok=True, payload={"question": question, "answer": answer})
-                    if answer
-                    else _TR(ok=False, payload={"error": "user dismissed the question"})
-                )
-            await self._persist_tool(call, message_id, result, "ask")
-            yield TurnEvent(type="tool_end", tool_call=call, result=result)
-            return
-        if call.name == "task" and self.registry.ctx.task_runner is not None:
-            # P1-4: 声明式子代理（.claude/agents/*.md）。agent 为该文件的 name，
-            # 其 body 作为子代理的 system prompt，tools 字段收敛子代理工具集。
-            from spark.agents import (
-                AgentFileError,
-                DeclaredAgent,
-                get_declared_agent,
-                subagent_system_prompt,
-            )
+                resolved = get_declared_agent(self.workdir, agent_name)
+            except AgentFileError as exc:
+                return None, f"invalid agent file '{agent_name}': {exc}"
+            if resolved is None:
+                return None, f"unknown declared agent: {agent_name}"
+            return resolved, ""
 
-            items: list[tuple[str, DeclaredAgent | None]] = []
-            task_error = ""
-
-            def _resolve_agent(agent_name: str) -> tuple[DeclaredAgent | None, str]:
-                try:
-                    resolved = get_declared_agent(self.workdir, agent_name)
-                except AgentFileError as exc:
-                    return None, f"invalid agent file '{agent_name}': {exc}"
-                if resolved is None:
-                    return None, f"unknown declared agent: {agent_name}"
-                return resolved, ""
-
-            raw_tasks = call.arguments.get("tasks")
-            if isinstance(raw_tasks, list):
-                for t in raw_tasks:
-                    if not isinstance(t, dict):
-                        continue
-                    prompt = str(t.get("prompt") or "").strip()
-                    if not prompt:
-                        continue
-                    agent = None
-                    agent_name = str(t.get("agent") or "").strip()
-                    if agent_name:
-                        agent, err = _resolve_agent(agent_name)
-                        if err:
-                            task_error = err
-                            break
-                    items.append((prompt, agent))
-            else:
-                prompt = str(call.arguments.get("prompt") or "").strip()
+        raw_tasks = call_arguments.get("tasks")
+        if isinstance(raw_tasks, list):
+            for t in raw_tasks:
+                if not isinstance(t, dict):
+                    continue
+                prompt = str(t.get("prompt") or "").strip()
+                if not prompt:
+                    continue
                 agent = None
-                agent_name = str(call.arguments.get("agent") or "").strip()
-                if prompt and agent_name:
-                    agent, task_error = _resolve_agent(agent_name)
-                if prompt and not task_error:
-                    items.append((prompt, agent))
-            if task_error:
-                result = ToolResult(ok=False, payload={"error": task_error})
-            elif not items:
-                result = ToolResult(ok=False, payload={"error": "prompt required"})
-            elif len(items) == 1:
-                prompt, agent = items[0]
-                system_extra = subagent_system_prompt(agent) if agent else ""
-                allowlist = list(agent.tools) if agent and agent.tools else None
-                summary_text = ""
-                error_text = ""
-                async for sub_event in self.spawn_subtask(
-                    prompt, system_extra=system_extra, tools_allowlist=allowlist
-                ):
-                    if sub_event.type in {
-                        "tool_start",
-                        "tool_end",
-                        "plan",
-                        "approval_needed",
-                        "subtask_start",
-                        "subtask_end",
-                        "subtask_progress",
-                        "subtask_trace",
-                    }:
-                        yield sub_event
-                    elif sub_event.type == "turn_end":
-                        summary_text = sub_event.text or ""
-                    elif sub_event.type == "turn_error":
-                        error_text = sub_event.text or ""
-                result = (
-                    ToolResult(ok=True, payload={"summary": summary_text})
-                    if not error_text
-                    else ToolResult(ok=False, payload={"error": error_text})
-                )
-            else:
-                if len(items) > 4:
-                    items = items[:4]
-                prompts = [p for p, _ in items]
-                system_extras = [
-                    subagent_system_prompt(a) if a else "" for _, a in items
-                ]
-                allowlists = [
-                    list(a.tools) if a and a.tools else None for _, a in items
-                ]
-                summary_parts: list[str] = []
-                async for sub_event in self.spawn_subtasks_parallel(
-                    prompts,
-                    system_extras=system_extras,
-                    tools_allowlists=allowlists,
-                ):
-                    if sub_event.type in {
-                        "tool_start",
-                        "tool_end",
-                        "plan",
-                        "approval_needed",
-                        "subtask_start",
-                        "subtask_end",
-                        "subtask_progress",
-                        "subtask_trace",
-                    }:
-                        yield sub_event
-                    elif sub_event.type == "turn_end":
-                        summary_parts.append(sub_event.text or "")
-                result = ToolResult(ok=True, payload={"summaries": summary_parts})
+                agent_name = str(t.get("agent") or "").strip()
+                if agent_name:
+                    agent, err = _resolve_agent(agent_name)
+                    if err:
+                        task_error = err
+                        break
+                items.append((prompt, agent))
         else:
-            result = await self.registry.execute(call)
+            prompt = str(call_arguments.get("prompt") or "").strip()
+            agent = None
+            agent_name = str(call_arguments.get("agent") or "").strip()
+            if prompt and agent_name:
+                agent, task_error = _resolve_agent(agent_name)
+            if prompt and not task_error:
+                items.append((prompt, agent))
+        return items, task_error
+
+    _SUBTASK_FORWARD_TYPES = frozenset(
+        {
+            "tool_start",
+            "tool_end",
+            "plan",
+            "approval_needed",
+            "subtask_start",
+            "subtask_end",
+            "subtask_progress",
+            "subtask_trace",
+        }
+    )
+
+    async def _forward_subtask_events(
+        self, stream, summaries: list[str], errors: list[str]
+    ):
+        """实时转发子任务事件；turn_end/turn_error 分别收集（错误取最后一条）。"""
+        async for sub_event in stream:
+            if sub_event.type in self._SUBTASK_FORWARD_TYPES:
+                yield sub_event
+            elif sub_event.type == "turn_end":
+                summaries.append(sub_event.text or "")
+            elif sub_event.type == "turn_error":
+                errors.append(sub_event.text or "")
+
+    def _finish_tool_execution(
+        self, call: ToolCall, result: ToolResult, started: float, args_summary: str
+    ) -> None:
+        """执行收尾：错误通知 / post_tool 通知 / 系统提示缓存失效 / 访问日志。"""
         if not result.ok:
             self._notify_safe(
                 "tool_error",
@@ -1470,13 +1446,13 @@ class AgentLoop:
                     "error": result.payload.get("error", ""),
                 },
             )
-        _elapsed = time.monotonic() - _tool_call_start
+        elapsed = time.monotonic() - started
         self._notify_safe(
             "post_tool",
             {
                 "tool": call.name,
                 "ok": result.ok,
-                "elapsed_ms": int(_elapsed * 1000),
+                "elapsed_ms": int(elapsed * 1000),
             },
         )
         if result.ok and (
@@ -1489,10 +1465,91 @@ class AgentLoop:
         logger.info(
             "tool_call name=%s args=%s elapsed=%.3fs ok=%s",
             call.name,
-            _tool_args_summary,
-            _elapsed,
+            args_summary,
+            elapsed,
             result.ok,
         )
+
+    async def _run_tool_body(
+        self, call: ToolCall, message_id: int, verdict: dict[str, Any] | None = None
+    ):
+        """工具执行主体。
+
+        *verdict* 由 approve 节点预先生成（graph 路径）：
+        ``{"action": "allow"|"allow_always"|"deny"|"hook_block"|"plan_only", "reason": str}``。
+        提供时跳过判定段（判定已完成，本方法只做副作用与事件）。
+        缺省（None，测试/兼容直调路径）走 :meth:`_resolve_direct_verdict` 公共判定，
+        prompt 经 approver 回调落定，随后与 graph 路径共用同一执行分派。
+        """
+        yield TurnEvent(type="tool_start", tool_call=call)
+        started = time.monotonic()
+        args_summary = json.dumps(call.arguments, ensure_ascii=False, default=str)[:200]
+        if verdict is None:
+            verdict, approval_event = await self._resolve_direct_verdict(call)
+            if approval_event is not None:
+                yield approval_event
+        # ── 统一执行分派（两条路径在此收敛：判定已完成，只做副作用与事件）──
+        if verdict["action"] in {"hook_block", "plan_only", "deny"}:
+            result = self._refusal_result(call, verdict)
+            await self._persist_tool(call, message_id, result, verdict["action"])
+            yield TurnEvent(type="tool_end", tool_call=call, result=result)
+            return
+        approval_label = verdict["action"]
+        if approval_label == "allow_always" and call.name not in NEVER_PERSIST_ALLOW:
+            self.allow_always.add(call_signature(call))
+        if call.name == "ask_user" and self.registry.ctx.question_asker is not None:
+            question, options = self._parse_question_args(call.arguments)
+            # Emit first: the browser needs the question to render its card,
+            # and the asker blocks until the user answers.
+            yield TurnEvent(
+                type="question",
+                data={"question": question, "options": options, "tool_id": call.id},
+            )
+            answer = ""
+            ask_error: Exception | None = None
+            try:
+                answer = await self.registry.ctx.question_asker(question, options)
+            except Exception as exc:  # noqa: BLE001
+                ask_error = exc
+            result = self._question_result(question, answer, ask_error)
+            await self._persist_tool(call, message_id, result, "ask")
+            yield TurnEvent(type="tool_end", tool_call=call, result=result)
+            return
+        if call.name == "task" and self.registry.ctx.task_runner is not None:
+            items, task_error = self._collect_task_items(call.arguments)
+            summaries: list[str] = []
+            sub_errors: list[str] = []
+            if task_error:
+                result = ToolResult(ok=False, payload={"error": task_error})
+            elif not items:
+                result = ToolResult(ok=False, payload={"error": "prompt required"})
+            elif len(items) == 1:
+                prompt, system_extra, allowlist = self._single_task_params(items[0])
+                async for sub_event in self._forward_subtask_events(
+                    self.spawn_subtask(
+                        prompt, system_extra=system_extra, tools_allowlist=allowlist
+                    ),
+                    summaries,
+                    sub_errors,
+                ):
+                    yield sub_event
+                result = self._single_task_result(summaries, sub_errors)
+            else:
+                prompts, system_extras, allowlists = self._parallel_task_params(items)
+                async for sub_event in self._forward_subtask_events(
+                    self.spawn_subtasks_parallel(
+                        prompts,
+                        system_extras=system_extras,
+                        tools_allowlists=allowlists,
+                    ),
+                    summaries,
+                    sub_errors,
+                ):
+                    yield sub_event
+                result = ToolResult(ok=True, payload={"summaries": summaries})
+        else:
+            result = await self.registry.execute(call)
+        self._finish_tool_execution(call, result, started, args_summary)
         await self._persist_tool(call, message_id, result, approval_label)
         yield TurnEvent(type="tool_end", tool_call=call, result=result)
 

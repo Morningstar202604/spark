@@ -93,7 +93,7 @@ dist\spark\spark.exe web
 ## Documentación
 
 - `docs/INSTALL.md` — instalación y empaquetado (incluye EXE de Windows)
-- `docs/CONFIGURATION.md` — referencia completa de configuración
+- `docs/CONFIG.md` — referencia completa de configuración
 - `docs/API.md` — API HTTP y protocolo de eventos SSE
 - `docs/ARCHITECTURE.md` — arquitectura / flujo de datos / modelo de seguridad
 

@@ -39,6 +39,7 @@ from spark.web._handlers import (  # noqa: F401  (re-export for backward-compat)
     _handle_selfheal,
     _handle_skills,
     _handle_session_export,
+    _handle_session_import,
     _handle_question_answer,
     _handle_sessions_delete,
     _handle_sessions_fork,
@@ -46,6 +47,7 @@ from spark.web._handlers import (  # noqa: F401  (re-export for backward-compat)
     _handle_sessions_rename,
     _handle_sessions_switch,
     _handle_settings,
+    _handle_shell,
     _handle_test,
     _history_messages,
 )
@@ -621,6 +623,7 @@ _POST_HANDLERS: dict[str, Any] = {
     "/api/sessions/fork": _handle_sessions_fork,
     "/api/selfheal": _handle_selfheal,
     "/api/sessions/export": _handle_session_export,
+    "/api/sessions/import": _handle_session_import,
     "/api/chat/stream": _handle_chat_stream,
     "/api/chat": _handle_chat,
     "/api/skills": _handle_skills,
@@ -629,6 +632,7 @@ _POST_HANDLERS: dict[str, Any] = {
     "/api/knowledge": _handle_knowledge,
     "/api/settings": _handle_settings,
     "/api/test": _handle_test,
+    "/api/shell": _handle_shell,
 }
 
 # P1-5：内置终端（PTY）写路径（读流是 GET /api/pty/stream，见 _handle_get）

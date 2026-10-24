@@ -6,6 +6,7 @@ import { Composer } from "./components/Composer"
 import { ApprovalModal } from "./components/ApprovalModal"
 import { ShortcutsHelp } from "./components/ShortcutsHelp"
 import { QuestionCard } from "./components/QuestionCard"
+import { Onboarding } from "./components/Onboarding"
 import Toast from "./components/Toast"
 import { fetchStatus } from "./api"
 import type { Status } from "./types"
@@ -13,6 +14,8 @@ import { useChatStore } from "./store/chatStore"
 import { useSessionStore } from "./store/sessionStore"
 import { useUiStore } from "./store/uiStore"
 import { loadBindings, matchesBinding } from "./shortcuts"
+import { installNotificationWatcher } from "./notify"
+import { activateModelProfile, listModelProfiles } from "./api"
 
 // Heavy, rarely-first-action surfaces are split out of the initial bundle:
 // xterm, xyflow and the diff/checkpoint/replay UIs would otherwise all load
@@ -48,6 +51,9 @@ export default function App() {
     loadInitialHistory()
   }, [setStatus, refreshSessions, loadInitialHistory])
 
+  // 回合结束 / 等待审批时的桌面通知（设置 → 展示页可开；默认关）
+  useEffect(() => installNotificationWatcher(), [])
+
   // 全局快捷键（可在设置 → 快捷键里改，绑定存 localStorage）
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -73,6 +79,11 @@ export default function App() {
         const s = useUiStore.getState()
         if (s.terminalOpen) s.closeTerminal()
         else s.openTerminal()
+      }
+      // 循环最近模型（opencode F2 / Shift+F2 的 Web 等价物）
+      if (e.ctrlKey && e.altKey && e.key.toLowerCase() === "m") {
+        e.preventDefault()
+        void cycleModel()
       }
       // `?` 打开快捷键帮助（Claude Code 习惯）；输入框内不抢键。
       if (matchesBinding(e, b.help)) {
@@ -137,6 +148,7 @@ export default function App() {
       <ApprovalModal />
       <QuestionCard />
       <ShortcutsHelp />
+      <Onboarding />
       {/* Chunks are fetched on first open (keeps the initial bundle at ~140 KB),
           but each surface then stays mounted: unmounting on close threw away
           the browse URL, the file viewer's current directory and the replay
@@ -158,6 +170,23 @@ export default function App() {
       )}
     </div>
   )
+}
+
+
+/** 在当前模型的最近档案间循环切换（写入后端 active_profile_id）。 */
+async function cycleModel(): Promise<void> {
+  try {
+    const { profiles } = await listModelProfiles()
+    const active = profiles.findIndex((p) => p.active)
+    if (profiles.length === 0) return
+    const next = profiles[(active + 1) % profiles.length]
+    if (!next || next.active) return
+    const res = await activateModelProfile(next.id)
+    useSessionStore.getState().setStatus(res.status)
+    useUiStore.getState().pushToast("toast.modelSwitched", "info")
+  } catch {
+    useUiStore.getState().pushToast("toast.modelSwitchFailed", "error")
+  }
 }
 
 /** Latch each surface on its first open so local UI state survives a close. */

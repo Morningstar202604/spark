@@ -33,6 +33,15 @@ def _kw_jaccard(a: set[str], b: set[str]) -> float:
     return inter / union if union else 0.0
 
 
+def _build_transcript(user_text: str, assistant_text: str, tool_summary: str) -> str:
+    pieces = [f"user: {user_text[:2000]}"]
+    if assistant_text:
+        pieces.append(f"assistant: {assistant_text[:2000]}")
+    if tool_summary:
+        pieces.append(f"tools: {tool_summary[:1500]}")
+    return "\n".join(pieces)
+
+
 class MemoryService:
     def __init__(self, store: MemoryStore, cfg: SparkConfig) -> None:
         self.store = store
@@ -184,129 +193,178 @@ class MemoryService:
         user_text = redact_secrets(user_text)
         assistant_text = redact_secrets(assistant_text)
         tool_summary = redact_secrets(tool_summary)
-        pieces = [f"user: {user_text[:2000]}"]
-        if assistant_text:
-            pieces.append(f"assistant: {assistant_text[:2000]}")
-        if tool_summary:
-            pieces.append(f"tools: {tool_summary[:1500]}")
+        transcript = _build_transcript(user_text, assistant_text, tool_summary)
         explicit = bool(EXPLICIT_RE.search(user_text))
-        p = self.cfg.provider
-        try:
-            candidates = run_coroutine_sync(
-                extract_facts(
-                    transcript="\n".join(pieces),
-                    base_url=p.base_url,
-                    api_key=p.api_key or "ollama",
-                    model=p.model,
-                    explicit=explicit,
-                )
-            )
-        except Exception as exc:
-            return {
-                "extracted": 0,
-                "ops": [],
-                "conflicts": [],
-                "error": str(exc),
-            }
+        candidates, extract_error = self._extract_candidates(transcript, explicit)
+        if extract_error:
+            return {"extracted": 0, "ops": [], "conflicts": [], "error": extract_error}
         if not candidates:
             return {"extracted": 0, "ops": [], "conflicts": []}
 
         with self._lock:
-            similar: dict[int, list[tuple[MemoryRow, float]]] = {}
-            for i, cand in enumerate(candidates):
-                similar[i] = self.search(cand.content, top_k=3)
-            target_versions: dict[int, MemoryRow] = {}
-            for hits in similar.values():
-                for row, _score in hits:
-                    target_versions[row.id] = row
-            try:
-                ops = run_coroutine_sync(
-                    resolve_operations(
-                        candidates=candidates,
-                        similar=similar,
-                        base_url=p.base_url,
-                        api_key=p.api_key or "ollama",
-                        model=p.model,
-                    )
-                )
-            except Exception as exc:
+            similar = self._similar_lookup(candidates)
+            target_versions = self._target_versions(similar)
+            ops, resolve_error = self._resolve_ops(candidates, similar)
+            if resolve_error:
                 return {
                     "extracted": len(candidates),
                     "ops": [],
                     "conflicts": [],
-                    "error": str(exc),
+                    "error": resolve_error,
                 }
-
-            new_texts = [op.content for op in ops if op.action == "ADD"]
-            update_texts = [
-                op.content for op in ops if op.action == "UPDATE" and op.target_id
-            ]
-            all_texts = new_texts + update_texts
-            vecs = self._embed(all_texts) if all_texts else None
-            vec_map: dict[str, list[float]] = {}
-            if vecs:
-                for text, vec in zip(all_texts, vecs):
-                    vec_map[text] = vec
-
-            applied: list[dict] = []
-            conflicts: list[dict] = []
-            with self.store.transaction():
-                for op in ops:
-                    if op.action not in {"ADD", "UPDATE"}:
-                        continue
-                    if op.action == "UPDATE" and not op.target_id:
-                        continue
-                    safe_content = redact_secrets(op.content)
-                    conflict: dict | None = None
-                    if op.action == "UPDATE" and op.target_id:
-                        target = target_versions.get(op.target_id)
-                        if target is not None and self.store.update_content_if_version(
-                            op.target_id,
-                            safe_content,
-                            target.version,
-                            importance=op.importance,
-                            embedding=vec_map.get(op.content),
-                            embedding_model=self.cfg.memory.embedding_model
-                            if op.content in vec_map
-                            else None,
-                        ):
-                            applied.append(
-                                {
-                                    "action": "UPDATE",
-                                    "id": op.target_id,
-                                    "content": safe_content,
-                                }
-                            )
-                            continue
-                        conflict = {
-                            "action": "UPDATE",
-                            "id": op.target_id,
-                            "expected_version": target.version if target else None,
-                            "reason": "version_conflict",
-                        }
-                    memory_id = self.store.add(
-                        safe_content,
-                        type=op.type,
-                        importance=op.importance,
-                        embedding=vec_map.get(op.content) or vec_map.get(safe_content),
-                        embedding_model=self.cfg.memory.embedding_model
-                        if (op.content in vec_map or safe_content in vec_map)
-                        else None,
-                        source_session=session_id,
-                    )
-                    applied.append(
-                        {"action": "ADD", "id": memory_id, "content": safe_content}
-                    )
-                    if conflict is not None:
-                        conflict["fallback_id"] = memory_id
-                        conflicts.append(conflict)
-                archived = self.store.enforce_capacity()
+            vec_map = self._embed_texts(ops)
+            applied, conflicts, archived = self._apply_operations(
+                ops, target_versions, vec_map, session_id
+            )
         return {
             "extracted": len(candidates),
             "ops": applied,
             "archived": archived,
             "conflicts": conflicts,
         }
+
+    def _extract_candidates(self, transcript: str, explicit: bool) -> tuple[list, str]:
+        p = self.cfg.provider
+        try:
+            candidates = run_coroutine_sync(
+                extract_facts(
+                    transcript=transcript,
+                    base_url=p.base_url,
+                    api_key=p.api_key or "ollama",
+                    model=p.model,
+                    explicit=explicit,
+                )
+            )
+        except Exception as exc:  # aqg: top-level boundary
+            return [], str(exc)
+        return list(candidates), ""
+
+    def _similar_lookup(
+        self, candidates: list
+    ) -> dict[int, list[tuple[MemoryRow, float]]]:
+        similar: dict[int, list[tuple[MemoryRow, float]]] = {}
+        for i, cand in enumerate(candidates):
+            similar[i] = self.search(cand.content, top_k=3)
+        return similar
+
+    @staticmethod
+    def _target_versions(
+        similar: dict[int, list[tuple[MemoryRow, float]]],
+    ) -> dict[int, MemoryRow]:
+        target_versions: dict[int, MemoryRow] = {}
+        for hits in similar.values():
+            for row, _score in hits:
+                target_versions[row.id] = row
+        return target_versions
+
+    def _resolve_ops(self, candidates: list, similar: dict) -> tuple[list, str]:
+        p = self.cfg.provider
+        try:
+            ops = run_coroutine_sync(
+                resolve_operations(
+                    candidates=candidates,
+                    similar=similar,
+                    base_url=p.base_url,
+                    api_key=p.api_key or "ollama",
+                    model=p.model,
+                )
+            )
+        except Exception as exc:  # aqg: top-level boundary
+            return [], str(exc)
+        return list(ops), ""
+
+    def _embed_texts(self, ops: list) -> dict[str, list[float]]:
+        new_texts = [op.content for op in ops if op.action == "ADD"]
+        update_texts = [
+            op.content for op in ops if op.action == "UPDATE" and op.target_id
+        ]
+        all_texts = new_texts + update_texts
+        vecs = self._embed(all_texts) if all_texts else None
+        vec_map: dict[str, list[float]] = {}
+        if vecs:
+            for text, vec in zip(all_texts, vecs):
+                vec_map[text] = vec
+        return vec_map
+
+    def _apply_operation(
+        self,
+        op,
+        target_versions: dict[int, MemoryRow],
+        vec_map: dict[str, list[float]],
+        session_id: str,
+    ) -> tuple[list[dict], dict | None]:
+        """应用单条 ADD/UPDATE，返回 (applied 条目列表, 冲突记录或 None)。
+
+        UPDATE 版本冲突时不失败：降级为 ADD，冲突记录带 fallback_id。
+        """
+        safe_content = redact_secrets(op.content)
+        conflict: dict | None = None
+        if op.action == "UPDATE" and op.target_id:
+            target = target_versions.get(op.target_id)
+            if target is not None and self.store.update_content_if_version(
+                op.target_id,
+                safe_content,
+                target.version,
+                importance=op.importance,
+                embedding=vec_map.get(op.content),
+                embedding_model=self.cfg.memory.embedding_model
+                if op.content in vec_map
+                else None,
+            ):
+                return (
+                    [
+                        {
+                            "action": "UPDATE",
+                            "id": op.target_id,
+                            "content": safe_content,
+                        }
+                    ],
+                    None,
+                )
+            conflict = {
+                "action": "UPDATE",
+                "id": op.target_id,
+                "expected_version": target.version if target else None,
+                "reason": "version_conflict",
+            }
+        memory_id = self.store.add(
+            safe_content,
+            type=op.type,
+            importance=op.importance,
+            embedding=vec_map.get(op.content) or vec_map.get(safe_content),
+            embedding_model=self.cfg.memory.embedding_model
+            if (op.content in vec_map or safe_content in vec_map)
+            else None,
+            source_session=session_id,
+        )
+        applied = [{"action": "ADD", "id": memory_id, "content": safe_content}]
+        if conflict is not None:
+            conflict["fallback_id"] = memory_id
+        return applied, conflict
+
+    def _apply_operations(
+        self,
+        ops: list,
+        target_versions: dict[int, MemoryRow],
+        vec_map: dict[str, list[float]],
+        session_id: str,
+    ) -> tuple[list[dict], list[dict], int]:
+        applied: list[dict] = []
+        conflicts: list[dict] = []
+        with self.store.transaction():
+            for op in ops:
+                if op.action not in {"ADD", "UPDATE"}:
+                    continue
+                if op.action == "UPDATE" and not op.target_id:
+                    continue
+                entries, conflict = self._apply_operation(
+                    op, target_versions, vec_map, session_id
+                )
+                applied.extend(entries)
+                if conflict is not None:
+                    conflicts.append(conflict)
+            archived = self.store.enforce_capacity()
+        return applied, conflicts, archived
 
     # ---------- optimization ----------
 

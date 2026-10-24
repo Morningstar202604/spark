@@ -140,7 +140,10 @@ def _generate_session_meta_async(
         if not base_url.endswith("/v1"):
             base_url = f"{base_url}/v1"
         api_key = state.cfg.provider.api_key or ""
-        model = state.cfg.provider.model
+        # 小模型分工：标题/关键词是廉价辅助调用，配置了 small_model 就不走主模型
+        model = (
+            getattr(state.cfg.provider, "small_model", "") or state.cfg.provider.model
+        )
         if not model or (state.cfg.provider.name == "openai_compat" and not api_key):
             return
         try:

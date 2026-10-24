@@ -812,3 +812,87 @@ def test_tool_only_turns_have_a_timeline_marker(tmp_path: Path) -> None:
         assert "read_file" in briefs[0]["preview"]
     finally:
         store.close()
+
+
+# ---------------------------------------------------------------------------
+# Round 7: share HTML export, session import, inline shell (!cmd)
+# ---------------------------------------------------------------------------
+
+
+def test_session_export_html_is_self_contained(live) -> None:
+    base, _ = live
+    _post(base, "/api/chat", {"prompt": "<script>alert(1)</script> share me"})
+    body = _post(base, "/api/sessions/export", {"format": "html"})
+    assert body["ok"] is True and body["format"] == "html"
+    html = body["content"]
+    assert html.startswith("<!doctype html>")
+    assert "share me" in html
+    # 消息内容必须被转义：注入的 script 不能原样出现在正文里
+    assert "<script>alert(1)</script>" not in html
+    assert "&lt;script&gt;" in html
+
+
+def test_session_import_roundtrip(live) -> None:
+    import json as _json
+
+    base, _ = live
+    _post(base, "/api/chat", {"prompt": "import me please"})
+    export = _post(base, "/api/sessions/export", {"format": "json"})
+    payload = _json.loads(export["content"])
+    imported = _post(base, "/api/sessions/import", {"content": payload})
+    assert imported["ok"] is True
+    assert imported["imported"] >= 1
+    assert imported["session_id"] != payload["session_id"]
+    texts = [m.get("content") for m in imported["messages"] if m.get("role") == "user"]
+    assert any("import me please" in t for t in texts)
+
+
+def test_session_import_accepts_json_string(live) -> None:
+    import json as _json
+
+    base, _ = live
+    payload = {"title": "字符串导入", "messages": [{"role": "user", "content": "hi"}]}
+    imported = _post(base, "/api/sessions/import", {"content": _json.dumps(payload)})
+    assert imported["ok"] is True
+    assert imported["imported"] == 1
+
+
+def test_session_import_rejects_bad_payload(live) -> None:
+    base, _ = live
+    for bad in (
+        {"content": "not json at all"},
+        {"content": {"messages": []}},
+        {"content": {"messages": [{"role": "tool", "content": "x"}]}},
+        {},
+    ):
+        with pytest.raises(urllib.error.HTTPError) as err:
+            _post(base, "/api/sessions/import", bad)
+        assert err.value.code == 400
+
+
+def test_inline_shell_runs_in_workdir(live) -> None:
+    base, _ = live
+    body = _post(base, "/api/shell", {"command": "echo spark-inline-ok"})
+    assert body["result"]["exit_code"] == 0
+    assert "spark-inline-ok" in body["result"]["stdout"]
+
+
+def test_inline_shell_rejects_empty_and_errors_are_structured(live) -> None:
+    base, _ = live
+    with pytest.raises(urllib.error.HTTPError) as err:
+        _post(base, "/api/shell", {"command": ""})
+    assert err.value.code == 400
+    body = _post(base, "/api/shell", {"command": "exit 3"})
+    assert body["result"]["exit_code"] == 3
+    assert body["ok"] is False
+
+
+def test_share_html_does_not_leak_local_paths(live) -> None:
+    """分享文件面向外发：不得带本机绝对路径与会话 id（真机 review 指出）。"""
+    base, _ = live
+    _post(base, "/api/chat", {"prompt": "hello share"})
+    html = _post(base, "/api/sessions/export", {"format": "html"})["content"]
+    status = _get(base, "/api/status")
+    assert str(status["workdir"]) not in html
+    assert str(status["session_id"]) not in html
+    assert "hello share" in html

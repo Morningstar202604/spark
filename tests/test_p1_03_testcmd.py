@@ -238,9 +238,11 @@ def test_tui_wires_test_slash() -> None:
 
 
 def test_web_stream_wires_test_slash() -> None:
-    from spark.web._handlers import _handle_chat_stream
+    # 第六轮把 /test 段落拆进 _run_test_slash/_dispatch_turn 后，接线见证
+    # 从函数源码升级为模块源码（覆盖 helper 与调用点）。
+    import spark.web._handlers_chat as chat_mod
 
-    src = inspect.getsource(_handle_chat_stream)
+    src = inspect.getsource(chat_mod)
     assert "parse_slash" in src
     assert "handle_test" in src
     assert "slash_result.feedback" in src

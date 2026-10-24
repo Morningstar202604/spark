@@ -1,6 +1,6 @@
 # 竞品功能对比：spark vs Qoder / ZCode / opencode / Codex CLI
 
-> 调研日期：2026-10-14；**spark 侧复测 2026-10-22**（本轮逐项 grep 代码并实跑验证，
+> 调研日期：2026-10-14；**spark 侧复测 2026-10-23（第七轮）**（本轮逐项 grep 代码并实跑验证，
 > 见 `docs/reviews/2026-10-22-full-audit.md`）。竞品侧仍为公开文档/仓库声明。
 > 目的：给出 spark 与主流 AI 编程 agent 的功能差距矩阵，服务于后续路线规划。
 > 标注：✅ 已有 ｜ ⚠️ 部分/不完整 ｜ ❌ 缺失。
@@ -22,10 +22,10 @@
 
 | 功能点 | spark | Qoder | ZCode | opencode | codex |
 |---|---|---|---|---|---|
-| 一键安装脚本 | ❌（clone+venv 或解压 zip） | 安装器 | dmg/exe/deb 包 | `curl … \| bash` | `curl … \| sh`（Win: irm \| iex） |
+| 一键安装脚本 | ✅ `install.sh` / `install.ps1`（SHA256 校验、无 sudo） | 安装器 | dmg/exe/deb 包 | `curl … \| bash` | `curl … \| sh`（Win: irm \| iex） |
 | 免安装绿色包 | ✅ `spark-agent-*-win64.zip` 解压即用（含 GUI 子系统 exe，双击无黑框） | 安装器 | 安装包 | — | — |
 | 包管理器 | ❌ | 安装器 | ❌ | brew/npm/choco/scoop/pacman… | npm/brew/Releases |
-| 自动更新 | ❌ | 内置 | 内置 | ✅ auto/notify 三态 | ✅ check_for_update_on_startup |
+| 自动更新 | ✅ `spark update`（SHA256 + 原子替换 + 旧版备份）+ doctor 提示，可 `mode=off` | 内置 | 内置 | ✅ auto/notify 三态 | ✅ check_for_update_on_startup |
 | 卸载命令 | ❌ | 安装器 | — | ✅ `opencode uninstall` | — |
 
 **spark 缺口**：发布渠道与自动更新。建议 P1（EXE 用户体感关键）。
@@ -37,10 +37,10 @@
 | 登录方式 | 配置文件 + 环境变量 + `spark init` 向导 | Qoder/ZCode：账号登录（OAuth）；codex：Sign in with ChatGPT |
 | 多 provider 预设 | ✅ 8 家（DeepSeek/通义/智谱/Kimi/豆包/Agnes/Ollama/自定义） | Qoder 预设 9+；opencode models.dev 全目录 |
 | 多模型档案切换 | ✅ `[[model_profiles]]` + Web 面板 | codex `--profile`；opencode agent 级 model |
-| 热键循环最近模型 | ❌ | opencode `F2/Shift+F2`；codex `/model` 弹窗 |
+| 热键循环最近模型 | ✅ `Ctrl+Alt+M` 循环模型档案 | opencode `F2/Shift+F2`；codex `/model` 弹窗 |
 | 推理档（effort/variant） | ✅ effort 低/中/高（Web + 配置） | opencode `ctrl+t` variant 循环；codex `/model` 带 reasoning 档 |
 | 连通性自检 | ✅ `spark test` + `doctor --probe` | 都有对应（`/status`、doctor） |
-| 小模型分工（标题/压缩） | ❌ | opencode `small_model`；codex `review_model` |
+| 小模型分工（标题/压缩） | ✅ `provider.small_model`：压缩摘要 + 会话标题/关键词 | opencode `small_model`；codex `review_model` |
 
 ## 3. 交互模式
 
@@ -48,12 +48,12 @@
 |---|---|---|
 | TUI 快捷指令 | ⚠️ 仅 `/test`（其余透传模型） | codex 60+ slash；opencode 全量 slash（`/init /undo /share /compact /export /models /sessions /themes …`） |
 | 自定义斜杠命令 | ✅ `.spark/commands/*.md` + 输入框 `/` 补全 | opencode markdown 命令（`$ARGUMENTS`/`!shell` 模板）；codex 经 hooks/skills |
-| 内联 shell（`!cmd`） | ❌ | opencode ✅ |
+| 内联 shell（`!cmd`） | ✅ Web 输入框 `!cmd`，结果本地卡片、不进模型上下文 | opencode ✅ |
 | `/editor` 外部编辑器写 prompt | ❌ | opencode / codex ✅ |
 | 消息回溯编辑 | ✅ 消息级删除 / 编辑重发 / 重新生成（`messages/delete`、`messages/truncate`） | codex **Esc Esc** 回溯改 prompt 分支重跑；opencode timeline 回填 |
 | Vim 模式 | ❌ | codex `/vim` |
-| 非交互 exec | ✅ `spark exec`（stdout 纯文本） | codex `exec --json/--output-schema/--ephemeral`；opencode `run --format` |
-| 代码审查命令 | ❌（`/test` 只跑测试） | codex `codex review --uncommitted/--base/--commit` |
+| 非交互 exec | ✅ `spark exec`（stdout 纯文本）+ `--json`（NDJSON 事件流，末行 `{"type":"final"}`） | codex `exec --json/--output-schema/--ephemeral`；opencode `run --format` |
+| 代码审查命令 | ✅ `spark review [--commit/--base/--json]`，强制只读+仅沙箱，高危 findings 退出码 2 | codex `codex review --uncommitted/--base/--commit` |
 | 计划模式 | ✅ `plan-only` / `approve-plan` 两档 | codex `/plan`；opencode plan agent；Qoder Plan-driven；ZCode `/plan` |
 | Goal 长程模式 | ❌ | ZCode `/goal`（证据门槛 + 迭代验证）；Qoder `/goal` |
 
@@ -63,8 +63,8 @@
 |---|---|---|
 | 新建/恢复/切换 | ✅ TUI ctrl+r、Web 侧栏、`spark resume` | 全都有 |
 | Fork | ✅ `POST /api/sessions/fork` + 顶栏按钮 + 侧栏入口 | codex `/fork`；opencode `--fork`；ZCode Edit History 分支 |
-| 分享链接 | ❌ | opencode `/share` → `opncd.ai/s/<id>` |
-| 导出/导入 | ⚠️ 导出 ✅（`POST /api/sessions/export`，md/JSON + 命令面板下载）；导入 ❌ | opencode `/export`（md/JSON）；codex `/export`；codex `/import` 从 Claude Code 迁移 |
+| 分享链接 | ✅ 单文件 HTML 离线分享（零 JS、零外链、消息内容转义）；无云托管链接（与本地定位一致） | opencode `/share` → `opncd.ai/s/<id>` |
+| 导出/导入 | ✅ 导出 md/JSON/HTML；✅ 导入 spark 导出 JSON（`POST /api/sessions/import`，仅恢复 user/assistant 文本） | opencode `/export`（md/JSON）；codex `/export`；codex `/import` 从 Claude Code 迁移 |
 | 归档 | ✅ Web 删除 | codex `/archive`；ZCode 自动归档候选（窗口可配） |
 | 重命名 | ✅ 自动标题 | codex `/rename`；opencode ctrl+r |
 | 会话内 token 用量 | ✅ ContextMeter | codex `/status`；ZCode Usage Stats 面板 |
@@ -76,7 +76,7 @@
 | 功能点 | spark | 竞品代表 |
 |---|---|---|
 | AGENTS.md | ✅ 项目级（可配文件名） | opencode 多级向上 + `~/.config` 全局；codex 逐级收集；ZCode 两源（全局+workspace） |
-| 全局规则文件 | ❌ | opencode `~/.config/opencode/AGENTS.md`；ZCode `~/.zcode/AGENTS.md` |
+| 全局规则文件 | ✅ `~/.agents/AGENTS.md`（+CLAUDE.md，与项目/子目录三级叠加） | opencode `~/.config/opencode/AGENTS.md`；ZCode `~/.zcode/AGENTS.md` |
 | Claude Code 兼容（CLAUDE.md/skills） | ⚠️ 声明式 subagent 读 `.claude/agents/*.md` | opencode `CLAUDE.md` 回退 + `.claude/skills`；ZCode 一键导入 + 预装 CC marketplace |
 | `@` 文件引用补全 | ✅ 输入框 `@` 列出工作区条目，方向键 + Tab/Enter | opencode `@` 模糊；codex `@` file-search；ZCode `@` 文件/文件夹 |
 | 外部目录/仓库引用 | ❌ | opencode `references`（别名+description）；codex `--add-dir` |
@@ -150,7 +150,7 @@
 |---|---|---|
 | 定时任务 | ❌ | ZCode Automations（模板/聊天创建 + 四种频率 + skipped 语义）；Qoder `/crontab` |
 | 空闲算力队列 | ❌ | ZCode Idle-time task（免费跑、超时回队列续跑）—— 独特 |
-| 桌面通知/声音 | ❌（仅页内 Toast） | opencode attention 声音包；codex notifications（osc9/bel）+ `/warnings` |
+| 桌面通知/声音 | ✅ Web Notification（回合结束/等待审批，页面不可见时才发；设置可开） | opencode attention 声音包；codex notifications（osc9/bel）+ `/warnings` |
 | 主题 | ⚠️ Web light/dark/system；TUI 固定 | opencode 10+ 主题 + 自定义 JSON；codex `/theme` + `$CODEX_HOME/themes` |
 | 快捷键重绑 | ❌ | codex `/keymap` 交互重绑；ZCode 自定义键位 |
 | 状态栏定制 | ⚠️ TUI 单行 | codex `tui.status_line` 有序项；ZCode 命令中心 |
@@ -182,12 +182,16 @@
 - system_prompt 全链路（本轮已修 ✅）
 
 **P1（中成本，对齐业界预期）**
-- 自定义斜杠命令（markdown 目录扫描 + `$ARGUMENTS` 模板）
-- 桌面通知（web Notification API / TUI 成功失败提示音可关）
-- codex 风格 `exec --json`（当前 stdout 纯文本，CI 集成弱）
-- LSP 只读工具（definition/references——接 pylsp/typescript-language-server 子进程）
-- 会话分享（本地导出为静态 HTML 单文件即可，无需服务端）
-- 快捷键可配置 + 主题扩展
+- ~~自定义斜杠命令~~（已完成，见 §3）
+- ~~桌面通知~~（第七轮完成，见 §10）
+- ~~`exec --json`~~（第七轮完成，见 §3）
+- LSP 只读工具（definition/references——接 pylsp/typescript-language-server 子进程）——**未做，仍是已知差距**
+- ~~会话分享~~（第七轮完成：单文件 HTML，见 §4）
+- ~~快捷键可配置~~（已完成）+ 主题扩展（未做，仅 light/dark/system）
+
+**第七轮（2026-10-23）已关闭**：一键安装、自动更新、`exec --json`、`spark review`、
+`!cmd` 内联 shell、桌面通知、HTML 分享、会话导入、全局规则、small_model、（另已存在）
+`~/.agents` 全局层。
 
 **P2（高成本 / 需要产品决策）**
 - Repo Wiki（可复用现有 tree-sitter + LLM 摘要，产物落本地）

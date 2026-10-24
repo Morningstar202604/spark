@@ -252,6 +252,42 @@ const NoticeMessage = memo(function NoticeMessage({ msg }: { msg: ChatMsg }) {
   )
 })
 
+
+const ShellMessage = memo(function ShellMessage({ msg }: { msg: ChatMsg }) {
+  const lang = useUiStore((s) => s.lang)
+  const shell = msg.meta?.shell
+  if (!shell) return null
+  const running = shell.exitCode === -1 && !shell.stderr
+  const failed = shell.exitCode !== 0 || Boolean(shell.stderr)
+  return (
+    <div className="anim-msg py-2">
+      <div className="overflow-hidden rounded-xl border border-line bg-panel">
+        <div className="flex items-center gap-2 border-b border-line bg-panel2 px-3 py-2">
+          <span className="rounded bg-hover px-1.5 py-0.5 font-mono text-[10.5px] font-semibold text-accent">
+            {t("composer.shellTag", lang)}
+          </span>
+          <code className="min-w-0 flex-1 truncate font-mono text-[12px] text-ink">!{shell.command}</code>
+          <span
+            className={cls(
+              "shrink-0 rounded-full px-2 py-0.5 text-[10.5px] font-medium",
+              running ? "bg-hover text-ink3" : failed ? "bg-err/10 text-err" : "bg-ok/10 text-ok",
+            )}
+          >
+            {running ? "…" : `${t("shell.exit", lang)} ${shell.exitCode}`}
+          </span>
+        </div>
+        {(shell.stdout || shell.stderr) && (
+          <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-words bg-[#0f1115] px-3 py-2.5 font-mono text-[12px] leading-relaxed text-[#cfe3ff]">
+            {shell.stdout}
+            {shell.stderr && <span className="text-[#ff9b9b]">{shell.stdout ? "\n" : ""}{shell.stderr}</span>}
+          </pre>
+        )}
+        {shell.truncated && <div className="border-t border-line px-3 py-1 text-[10.5px] text-warn">{t("shell.truncated", lang)}</div>}
+      </div>
+    </div>
+  )
+})
+
 export default function MessageItem({ msg, actions }: { msg: ChatMsg; actions?: MessageActions }) {
   switch (msg.role) {
     case "user":
@@ -263,5 +299,7 @@ export default function MessageItem({ msg, actions }: { msg: ChatMsg; actions?: 
     case "notice":
     case "summary":
       return <NoticeMessage msg={msg} />
+    case "shell":
+      return <ShellMessage msg={msg} />
   }
 }

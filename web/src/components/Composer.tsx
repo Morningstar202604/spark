@@ -14,6 +14,7 @@ export const Composer = memo(function Composer() {
   const streaming = useChatStore((s) => s.streaming)
   const setInput = useChatStore((s) => s.setInput)
   const send = useChatStore((s) => s.send)
+  const runShell = useChatStore((s) => s.runShell)
   const webSearch = useChatStore((s) => s.webSearch)
   const setWebSearch = useChatStore((s) => s.setWebSearch)
   const pushToast = useUiStore((s) => s.pushToast)
@@ -36,6 +37,8 @@ export const Composer = memo(function Composer() {
   const model = status?.model
 
   // Slash menu: only when the message starts with "/" (like Claude Code / Codex).
+  // `!` 前缀是内联 shell，不参与斜杠补全。
+  const shellMode = input.startsWith("!")
   const slashQuery = input.startsWith("/") && !input.includes("\n") ? input.slice(1).split(/\s/)[0].toLowerCase() : null
   const slashItems = useMemo(() => {
     if (slashQuery === null) return []
@@ -135,9 +138,14 @@ export const Composer = memo(function Composer() {
   const submit = useCallback(() => {
     if (streaming) return
     if (!input.trim() && images.length === 0) return
+    // `!cmd`：直接在工作目录执行，结果作为本地卡片呈现（opencode / codex 同款）
+    if (input.startsWith("!") && images.length === 0) {
+      void runShell(input.slice(1).trim())
+      return
+    }
     send(images)
     setImages([])
-  }, [input, images, streaming, send])
+  }, [input, images, streaming, send, runShell])
 
   function onKey(e: KeyboardEvent<HTMLTextAreaElement>) {
     if (fileOpen) {
@@ -300,6 +308,12 @@ export const Composer = memo(function Composer() {
             dragging ? "border-accent" : "border-line",
           )}
         >
+          {shellMode && (
+            <div className="anim-fade absolute bottom-full left-0 mb-2 flex items-center gap-2 rounded-lg border border-line bg-panel px-3 py-1.5 text-[11.5px] text-ink2 shadow-[var(--shadow)]">
+              <span className="font-mono text-accent">!</span>
+              <span>{t("composer.shellHint", lang)}</span>
+            </div>
+          )}
           {fileOpen && (
             <div
               className="anim-fade absolute bottom-full left-0 mb-2 w-full overflow-hidden rounded-xl border border-line bg-panel shadow-[var(--shadow)]"

@@ -1,147 +1,185 @@
 > 🌐 [English](README.md) | [中文](README_zh.md)
 
-# Spark Agent
+# Spark — 本地优先的 AI 编程 Agent
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-brightgreen.svg)](https://www.python.org/)
 [![Node 18+](https://img.shields.io/badge/node-18%2B-339933.svg)](https://nodejs.org/)
+[![CI](https://github.com/badhope/spark/actions/workflows/ci.yml/badge.svg)](https://github.com/badhope/spark/actions/workflows/ci.yml)
+[![Security](https://github.com/badhope/spark/actions/workflows/security.yml/badge.svg)](https://github.com/badhope/spark/actions/workflows/security.yml)
 
-Spark 是一个**本地自托管**的 AI 编程 Agent，代码在你手，密钥在你手。
+**代码在你手，密钥在你手。** 完全跑在你自己机器上的 AI 编程 Agent：六种形态、36 个内置工具、零强制云依赖。
 
-**一句话介绍：** 把 Claude Code 的能力装进你的本地环境，零隐私泄露，完全可控。
+```bash
+# Linux / macOS —— 一行安装，SHA256 校验
+curl -fsSL https://raw.githubusercontent.com/badhope/spark/main/scripts/install.sh | sh
 
-## 核心价值
+# Windows（PowerShell）
+irm https://raw.githubusercontent.com/badhope/spark/main/scripts/install.ps1 | iex
 
-🔒 **隐私至上** — 所有代码、对话、记忆全部存本地，不经过任何第三方服务器
-⚡ **即开即用** — 四种形态：Web UI、原生桌面窗口、终端 TUI、脚本化 CLI
-🧠 **长程记忆** — 向量记忆库，记住你的项目偏好、命名规范、工作流习惯
-🔬 **四档沙箱** — 从只读分析到完全开放，按风险灵活调整
-⏮️ **检查点回滚** — 工作区快照 + 对话恢复，像 Git 一样回到任意时刻
+spark init          # 配置任意 OpenAI 兼容端点
+spark web           # 打开界面
+```
+
+无账号、无遥测、不把代码送去任何托管服务。**没有 API Key 时自动进入演示模式（mock）**，
+在设置里填入密钥后下一轮就走真实模型，无需重启。
+
+---
+
+## 为什么选 Spark
+
+| | |
+|---|---|
+| **数据面全本地** | 会话、记忆、知识库、检查点都在 `~/.spark`；除了你自己配置的模型调用，没有任何外发。 |
+| **六形态，一个大脑** | Web UI · 原生桌面窗口 · Textual TUI · 可脚本化 CLI · ACP（Zed 等编辑器）· MCP Server。同一套 Agent 循环、同一套工具、同一套权限。 |
+| **审批可审计** | 六档审批 × 四档沙箱；通配规则引擎在 user/project/local 三层作用域里 `deny` 永远优先；凭据路径保护、命令 token 级检查、可选 bwrap 隔离。 |
+| **检查点而不是赌运气** | 每轮对工作区做 tar.gz 快照（含 manifest 校验）。文件与对话一起回滚，非 git 目录同样可用。 |
+| **任务即分支** | `task_begin` / `task_step_commit` / `task_finish`：绿测门控逐次提交，测试不过自动废弃分支。竞品均无一等公民实现。 |
+| **AI 审 AI** | `spark review` 在强制只读 + 仅沙箱的回合里审查未提交 diff（或指定 commit 区间），按严重级输出结论，支持 `--json` 接入 CI。 |
 
 ## 界面预览
 
-### 对话界面 · 真实模型驱动
+> 下列截图全部来自**真实模型 + 真实工作目录**的实时会话，不是 mock、不是设计稿。
+> 复现命令：`python scripts/capture_screenshots.py`。
 
-> SSE 流式渲染、Markdown 代码块、工具调用卡片（可展开）、上下文用量计量。
-> 图为真实使用：模型读取 `pyproject.toml` 后总结项目——工具调用 `read_file` 显示 ✓ 完成。
+[![观看 30 秒演示](assets/share/preview-frame.png)](assets/spark-demo.mp4)
+
+**▶ [观看 30 秒演示（MP4，1.3 MB）](assets/spark-demo.mp4)** ·
+[GIF 预览](assets/share/spark-demo.gif)
+
+### 对话 —— 思考、工具调用、回答
+
+模型读取 `greet.py`、完成推理并用一句话回答。`read_file` 卡片显示 **✓ 完成**——
+真实工具往返，经 SSE 流式传输，头部有实时的上下文用量计量。
 
 ![对话界面](assets/screenshots/11-chat.png)
 
-### 英文界面 · 一键切换
+### 内联 shell —— 敲 `!` 直接跑
 
-> 内置中英文双语（设置 → 展示 → 语言）。图为英文界面下模型连续调用 `read_file` + `glob`
-> 两个工具完成仓库调研——两次工具调用均显示 Completed。
+`!echo hello && ls` 在工作目录里执行，走与 `run_shell` 工具完全相同的策略检查与沙箱，
+结果渲染成本地卡片。输出**不进模型上下文**，临时命令零 token 成本。
 
-![英文界面](assets/screenshots/10-empty-state.png)
+![内联 shell](assets/screenshots/20-inline-shell.png)
 
-### 设置 · 模型与多档案
+### 首屏 —— 接着上次继续
 
-> 8 家内置预设（DeepSeek / 通义 / 智谱 / Kimi / 豆包 / Agnes / Ollama / 自定义），
-> 支持多模型档案保存与一键切换，`测试连接` 探活，推理强度（effort）三档可调。
+会话侧栏按时间分组、历史可搜索，模型/审批/沙箱状态始终可见。
+
+![首屏](assets/screenshots/10-empty-state.png)
+
+### 设置 —— 模型
+
+任意 OpenAI 兼容端点（DeepSeek / 通义 / 智谱 / Kimi / 豆包 / Ollama / 自定义），
+多模型档案一键切换，`测试连接` 全链路探活，推理强度三档映射到供应商原生参数。
 
 ![设置 · 模型](assets/screenshots/12-settings-model.png)
 
-### 设置 · 权限与沙箱
+### 设置 —— 权限与沙箱
 
-> 四档访问级别：仅沙箱内访问 / 局部访问（推荐）/ 完全访问 / 无限制，
-> 每档都有明确的行为说明；受保护路径清单可自定义，默认保护 `/etc`、`/root/.spark` 与 Spark 自身代码。
+四档访问级别，每档都有明确的行为说明。受保护路径清单可自行编辑；
+`.git/hooks`、`~/.spark` 与 Spark 自身源码始终受保护。
 
 ![设置 · 权限](assets/screenshots/13-settings-permissions.png)
 
-### 设置 · 展示与定制
+### 命令面板 —— Ctrl+K
 
-> 亮/暗/跟随系统三态主题；6 个前端展示开关（思考过程/工具调用/计划卡片/上下文用量/会话关键词/系统提示）；
-> **系统提示词可完全自定义**（留空用内置默认）。
+模糊跳转到所有界面：新会话、检查点、回合重放、文件查看、网页阅读、分享导出、主题、语言。
 
-![设置 · 展示](assets/screenshots/12-settings-model.png)
+![命令面板](assets/screenshots/15-command-palette.png)
 
-### 文件查看器 · 语法高亮
+### 文件查看器 —— 语法高亮
 
-> 工作目录内文件树浏览 + 带行号的语法高亮预览（highlight.js，含跨行 token 正确着色）、
-> 文件大小显示、二进制与超长文件自动降级提示。
+浏览工作目录，带行号与 highlight.js 语法着色预览；二进制与超大文件优雅降级。
 
 ![文件查看器](assets/screenshots/16-file-viewer.png)
 
-### Windows EXE · 免安装运行
+### 响应式 —— 桌面与手机
 
-> PyInstaller 单文件打包（`dist/spark.exe`），双击即用、无需 Python 环境。
-> 图为 EXE 实例执行的完整链路：模型真实调用 `run_shell` 命令、取回输出 `42` 并正确汇报退出码。
+同一套界面在 390 px 下：侧栏收成抽屉、设置页签横向滚动、输入框始终可达。
 
-![EXE 运行](assets/screenshots/15-command-palette.png)
+![移动端设置](assets/screenshots/18-mobile-settings.png)
 
-## 快速开始
-
-```bash
-git clone https://gitcode.com/badhope/spark        # 或 GitHub: https://github.com/badhope/spark
-cd spark && python3 -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
-pip install -e ".[dev]"
-spark web --workdir /your/project
-```
-
-浏览器打开打印出来的地址即可开始。**没有 API Key 时自动进入演示模式（mock），
-在 Web 设置里填入密钥后立即切换真实模型，无需重启。**
-
-Windows 用户也可以直接构建免安装 EXE（Python 3.11+）：
-
-```powershell
-powershell -ExecutionPolicy Bypass -File scripts/build-windows.ps1
-dist\spark\spark.exe web                    # 或双击 dist\spark.exe
-```
-
-## 四种形态
+## 六种形态
 
 | 形态 | 命令 | 适用场景 |
 |------|------|----------|
-| Web UI | `spark web` | 日常对话、文件查看、终端、执行图（默认自动选可用端口） |
-| 桌面窗口 | `spark desktop` | 原生窗口（pywebview），固定本机绑定 |
-| 终端 TUI | `spark` | 纯终端环境、SSH 远程 |
-| CLI / 脚本 | `spark exec "任务"` | 自动化、CI、管道输出 |
-| IDE 接入 | `spark acp` | 以 ACP agent 被 Zed 等编辑器拉起（详见 [docs/ACP.md](docs/ACP.md)） |
-| MCP Server | `spark mcp-serve` | 把自己的全部工具反向暴露给其他 MCP 客户端 |
+| Web UI | `spark web` | 日常对话、文件查看、内置终端、执行图（自动选空闲端口） |
+| 桌面窗口 | `spark desktop` | pywebview 原生窗口，固定绑定本机 |
+| 终端 TUI | `spark` | 纯终端 / SSH 远程 |
+| CLI | `spark exec "任务" --json` | 自动化、CI、管道（NDJSON 事件流） |
+| IDE（ACP） | `spark acp` | 被 Zed 等 ACP 客户端拉起，见 [docs/ACP.md](docs/ACP.md) |
+| MCP Server | `spark mcp-serve` | 把全部内置工具反向暴露给其他 MCP 客户端 |
 
 ## 特性一览
 
 | 类别 | 功能 |
 |------|------|
-| 对话 | SSE 流式渲染、Markdown 代码块、图片附件上传、思考流展示 |
-| 工具 | 读写文件、apply_edit（AST 语法门禁）、grep/glob 搜索、Shell、后台任务、Jupyter、Web 检索、Git 全套、worktree |
-| 规划 | 多步骤任务计划（PlanCard 可视化）、子 Agent 并行委派（最多 4 个）、声明式子代理（`.claude/agents/*.md`） |
-| 审批 | 六档审批模式（含 plan-only / approve-plan）、`[[permissions]]` 通配规则引擎、审批弹窗三键决策 |
+| 对话 | SSE 流式、Markdown 代码块、图片附件、思考流、长会话虚拟列表 |
+| 工具 | 读写文件、`apply_edit`（tree-sitter 语法门禁）、grep/glob、Shell、后台任务、Jupyter、Web 检索、Git 全套、worktree |
+| 规划 | 多步骤计划卡片、子 Agent 并行（最多 4 个）、声明式 `.claude/agents/*.md`、实时执行图 |
+| 审批 | 六档模式（含 plan-only / approve-plan）、通配规则引擎、带 diff 预览的三键审批卡 |
 | 权限 | 四档沙箱、受保护路径、凭据路径保护、命令 token 级检查、MCP 最小权限白名单 |
-| 记忆 | AGENTS.md 注入、向量长期记忆（embedding + 可选 reranker）、自动抽取、Web 可视化管理 |
-| 持久化 | 会话管理、检查点快照回滚（含非 git 目录）、配置热加载、token 用量统计 |
-| 模型 | 任意 OpenAI 兼容端点、Ollama 本地模型、多档案切换、`spark test` 探活 |
-| 扩展 | MCP 客户端（stdio/SSE/HTTP + OAuth）、MCP 注册表搜索（含国内可用性）、项目级技能 `.spark/skills/`、生命周期 hooks |
-| 界面 | 中英双语、深浅主题、命令面板（Ctrl+K）、文件查看器、内置终端、网页阅读、执行图、检查点回滚面板 |
+| 记忆 | AGENTS.md（全局 `~/.agents` + 项目 + 子目录）、向量长期记忆、自动抽取、Web 管理 |
+| 知识库 | 导入文档，BM25 检索每轮以只读围栏注入 —— 不额外引入向量库 |
+| 持久化 | 会话管理、检查点回滚（非 git 目录可用）、配置热加载、token 统计、会话全文检索 |
+| 模型 | 任意 OpenAI 兼容端点、Ollama、多档案切换、`small_model` 廉价辅助调用、`--probe` 端点体检 |
+| 扩展 | MCP 客户端（stdio/SSE/HTTP + OAuth）、MCP 注册表一键添加、技能 `.spark/skills/`、斜杠命令、插件、hooks |
+| 界面 | 中英双语、深浅主题、命令面板、可改键、文件查看器、终端、网页阅读、执行图、桌面通知 |
+| 工作流 | `spark review`（AI 审 diff）、`spark exec --json`、`!cmd` 内联 shell、单文件 HTML 会话分享、会话导入、`spark update` |
+| 运维 | `doctor --fix` 自愈、`doctor --backup`（VACUUM INTO）、结构化审计流、CSP 安全头、更新提示 |
 
 ## 架构
 
 ![架构概览](docs/assets/architecture.svg)
 
-详细架构说明 → [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
+LangGraph 1.2 是控制流的唯一真相源（`src/spark/core/graph.py`）；LiteLLM 统一供应商；
+Web 端是 React 19 跑在带严格 CSP 的标准库 HTTP 服务上；其余每种形态都只是同一个
+`AgentLoop` 的薄壳。
 
-## 支持的平台
+详细说明 → [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 
-- Python 3.11+
-- Node.js 18+（仅前端开发需要；发行包已内嵌构建好的前端）
-- 任意 OpenAI 兼容 API（DeepSeek、OpenAI、Ollama、Azure、Agnes、云知声、商汤等）
-- Windows / macOS / Linux（Windows 提供一键 EXE 构建）
+## 参与开发
+
+```bash
+git clone https://github.com/badhope/spark
+cd spark
+python3 -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
+pip install -e ".[dev]"
+pytest -q                    # 约 1000 个测试
+ruff check src/spark tests scripts
+mypy src/spark --ignore-missing-imports
+lint-imports
+```
+
+前端在 `web/`（React 19 + Vite + Tailwind）；`npm run build` 把产物写进
+`src/spark/web/dist/`，由 Python 包一并分发。
+
+CI 在 Linux 与 Windows、Python 3.11 与 3.12 上跑完整门禁：ruff、mypy、import-linter
+契约、bandit、gitleaks/trufflehog 密钥扫描、OpenAPI 快照新鲜度、覆盖率下限、
+Windows 保留名检查、打包一致性检查、mock 模式 eval 基线。
+
+## 平台要求
+
+- Python 3.11+（或用 PyInstaller 打包版，无需 Python）
+- Node.js 18+，仅前端开发需要；发行包已内嵌构建产物
+- 任意 OpenAI 兼容 API（DeepSeek、OpenAI、Ollama、Azure、Kimi、智谱……）
+- Windows / macOS / Linux
 
 ## 文档
 
 | 文档 | 说明 |
 |------|------|
-| [docs/INSTALL.md](docs/INSTALL.md) | 安装与打包（含 Windows EXE） |
-| [docs/CONFIGURATION.md](docs/CONFIGURATION.md) | 配置参考（config.toml / 环境变量 / API 一览） |
+| [docs/INSTALL.md](docs/INSTALL.md) | 安装、打包、桌面版构建、自动更新 |
+| [docs/CONFIG.md](docs/CONFIG.md) | 配置参考（config.toml / 环境变量 / 上限） |
 | [docs/API.md](docs/API.md) | HTTP API 与 SSE 事件协议 |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | 架构说明 |
 | [docs/competitive-comparison.md](docs/competitive-comparison.md) | 与 Qoder / ZCode / opencode / Codex CLI 的功能对比 |
-| [docs/diagrams-ops.md](docs/diagrams-ops.md) | 架构图 / 发布矩阵 / 路线图 / 密钥与流水线运维手册 |
+| [docs/reviews/2026-10-22-full-audit.md](docs/reviews/2026-10-22-full-audit.md) | 全维度审查：发现、修复、证据与诚实边界 |
 
 ## 社区
 
 - 贡献指南：[CONTRIBUTING.md](CONTRIBUTING.md)
-- 问题反馈：使用本仓库的 **Issues** 页
+- 问题反馈：使用本仓库 **Issues** 页
 
 ---
 

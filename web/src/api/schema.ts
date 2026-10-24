@@ -60,6 +60,20 @@ export type SessionRow = {
   updated_at?: SessionRowUpdatedAt;
 };
 
+export type SessionSearchHitMatch = {[key: string]: string};
+
+export type SessionSearchHit = {
+  id: string;
+  workdir: string;
+  title: string;
+  updated_at: number;
+  match: SessionSearchHitMatch;
+};
+
+export type SessionSearchResponse = {
+  hits?: SessionSearchHit[];
+};
+
 export type SessionsResponseCurrent = string | null;
 
 export type SessionsResponse = {
@@ -91,6 +105,11 @@ q?: string;
 };
 
 export type GetHistoryApiHistoryGet200Item = { [key: string]: unknown };
+
+export type GetSessionSearchApiSessionsSearchGetParams = {
+q?: string;
+limit?: number;
+};
 
 /**
  * @summary 运行态快照（会话/循环/用量）
@@ -396,4 +415,60 @@ export const getHistoryApiHistoryGet = async ( options?: RequestInit): Promise<g
   
   const data: getHistoryApiHistoryGetResponse['data'] = body ? JSON.parse(body) : {}
   return { data, status: res.status, headers: res.headers } as getHistoryApiHistoryGetResponse
+}
+
+
+
+/**
+ * @summary 会话全文检索（FTS5 trigram；命中消息正文时带片段）
+ */
+export type getSessionSearchApiSessionsSearchGetResponse200 = {
+  data: SessionSearchResponse
+  status: 200
+}
+
+export type getSessionSearchApiSessionsSearchGetResponse422 = {
+  data: HTTPValidationError
+  status: 422
+}
+    
+export type getSessionSearchApiSessionsSearchGetResponseSuccess = (getSessionSearchApiSessionsSearchGetResponse200) & {
+  headers: Headers;
+};
+export type getSessionSearchApiSessionsSearchGetResponseError = (getSessionSearchApiSessionsSearchGetResponse422) & {
+  headers: Headers;
+};
+
+export type getSessionSearchApiSessionsSearchGetResponse = (getSessionSearchApiSessionsSearchGetResponseSuccess | getSessionSearchApiSessionsSearchGetResponseError)
+
+export const getGetSessionSearchApiSessionsSearchGetUrl = (params?: GetSessionSearchApiSessionsSearchGetParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : value.toString())
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/sessions/search?${stringifiedParams}` : `/api/sessions/search`
+}
+
+export const getSessionSearchApiSessionsSearchGet = async (params?: GetSessionSearchApiSessionsSearchGetParams, options?: RequestInit): Promise<getSessionSearchApiSessionsSearchGetResponse> => {
+  
+  const res = await fetch(getGetSessionSearchApiSessionsSearchGetUrl(params),
+  {      
+    ...options,
+    method: 'GET'
+    
+    
+  }
+)
+
+  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
+  
+  const data: getSessionSearchApiSessionsSearchGetResponse['data'] = body ? JSON.parse(body) : {}
+  return { data, status: res.status, headers: res.headers } as getSessionSearchApiSessionsSearchGetResponse
 }

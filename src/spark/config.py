@@ -212,6 +212,17 @@ class HookConfig(BaseModel):
     on_deny: Literal["warn", "block"] = "block"
 
 
+class UpdaterConfig(BaseModel):
+    """自更新策略（对齐 opencode 的 auto/notify 三态，默认 notify）。
+
+    * ``notify``：只在 doctor/--version 提示有新版本，绝不自作主张改盘
+    * ``off``：完全不做版本检查（离线/内网/受控环境）
+    显式 ``spark update`` 永远可用，不受本开关限制。
+    """
+
+    mode: Literal["notify", "off"] = "notify"
+
+
 class ReplayConfig(BaseModel):
     """P2 上下文合同：turn 级重放记录（replay.jsonl）。
 
@@ -310,6 +321,7 @@ class SparkConfig(BaseSettings):
     hooks: list[HookConfig] = Field(default_factory=list)
     permission_rules: list[PermissionRule] = Field(default_factory=list)
     replay: ReplayConfig = Field(default_factory=ReplayConfig)
+    updater: UpdaterConfig = Field(default_factory=UpdaterConfig)
     approval_profiles: list[ApprovalProfile] = Field(default_factory=list)
     active_approval_profile_id: str = ""
     # H3 三层权限作用域：{"user": [...], "project": [...], "local": [...]}。
@@ -759,24 +771,7 @@ def mask_secret(value: str | None) -> str:
 # ---------------------------------------------------------------------------
 
 
-def save_config(cfg: SparkConfig, path: Path | None = None) -> Path:
-    """Persist configuration as TOML using the official ``tomlkit`` library.
-
-    ``tomlkit`` produces spec-compliant TOML with correct quoting, escaping of
-    special characters, and proper handling of arrays and inline tables — none of
-    which we had to invent.
-    """
-    path = path or default_config_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-
-    doc = tomlkit.document()
-    doc.add("active_profile_id", cfg.active_profile_id or "")
-    doc.add(
-        tomlkit.comment("Spark agent configuration — edit with: spark config set <key> <value>")
-    )
-    doc.add(tomlkit.nl())
-
-    # [provider]
+def _provider_table(cfg: SparkConfig) -> tomlkit.items.Table:
     provider = tomlkit.table()
     provider.add("name", cfg.provider.name)
     provider.add("base_url", cfg.provider.base_url or "")
@@ -784,9 +779,10 @@ def save_config(cfg: SparkConfig, path: Path | None = None) -> Path:
     provider.add("api_key_env", cfg.provider.api_key_env or "")
     if cfg.provider.api_key:
         provider.add("api_key", cfg.provider.api_key)
-    doc.add("provider", provider)
+    return provider
 
-    # [agent]
+
+def _agent_table(cfg: SparkConfig) -> tomlkit.items.Table:
     agent = tomlkit.table()
     agent.add("approval", cfg.agent.approval)
     agent.add("workdir_only", cfg.agent.workdir_only)
@@ -805,9 +801,10 @@ def save_config(cfg: SparkConfig, path: Path | None = None) -> Path:
     agent.add("show_notices", cfg.agent.show_notices)
     agent.add("effort", cfg.agent.effort)
     agent.add("system_prompt", cfg.agent.system_prompt or "")
-    doc.add("agent", agent)
+    return agent
 
-    # [context]
+
+def _context_table(cfg: SparkConfig) -> tomlkit.items.Table:
     context = tomlkit.table()
     context.add("agents_md", cfg.context.agents_md)
     context.add("max_fragment_chars", cfg.context.max_fragment_chars)
@@ -817,102 +814,157 @@ def save_config(cfg: SparkConfig, path: Path | None = None) -> Path:
     context.add("keep_recent_messages", cfg.context.keep_recent_messages)
     context.add("repo_map_enabled", cfg.context.repo_map_enabled)
     context.add("repo_map_max_chars", cfg.context.repo_map_max_chars)
-    doc.add("context", context)
+    return context
 
-    # [memory]
+
+def _memory_table(cfg: SparkConfig) -> tomlkit.items.Table:
     memory = tomlkit.table()
     memory.add("enabled", cfg.memory.enabled)
     memory.add("top_k", cfg.memory.top_k)
     memory.add("capacity", cfg.memory.capacity)
     memory.add("embedding_model", cfg.memory.embedding_model or "")
     memory.add("auto_extract", cfg.memory.auto_extract)
-    doc.add("memory", memory)
+    return memory
 
+
+def _mcp_servers_table(cfg: SparkConfig) -> tomlkit.items.Table | None:
+    if not cfg.mcp_servers:
+        return None
+    mcp_aot = tomlkit.aot()
+    for server in cfg.mcp_servers:
+        srv_table = tomlkit.table(is_super_table=True)
+        srv_table.add("name", server.name)
+        if server.transport in {"sse", "streamable_http"}:
+            srv_table.add("transport", server.transport)
+            srv_table.add("readonly_tools", list(server.readonly_tools))
+            if server.allowed_tools:
+                srv_table.add("allowed_tools", list(server.allowed_tools))
+            if server.http:
+                http = tomlkit.table()
+                http.add("url", server.http.url)
+                if server.http.headers:
+                    http.add("headers", server.http.headers)
+                http.add("timeout_sec", server.http.timeout_sec)
+                srv_table.add("http", http)
+        else:
+            srv_table.add("command", server.command)
+            srv_table.add("args", list(server.args))
+            if server.env:
+                srv_table.add("env", dict(server.env))
+            srv_table.add("readonly_tools", list(server.readonly_tools))
+            if server.allowed_tools:
+                srv_table.add("allowed_tools", list(server.allowed_tools))
+        mcp_aot.append(srv_table)
+    return tomlkit.table().add("servers", mcp_aot)
+
+
+def _model_profiles_aot(cfg: SparkConfig) -> tomlkit.items.AoT | None:
+    if not cfg.model_profiles:
+        return None
+    prof_aot = tomlkit.aot()
+    for prof in cfg.model_profiles:
+        pt = tomlkit.table()
+        pt.add("id", prof.id)
+        pt.add("name", prof.name)
+        pt.add("provider", prof.provider)
+        pt.add("base_url", prof.base_url or "")
+        pt.add("model", prof.model or "")
+        pt.add("api_key", prof.api_key or "")
+        prof_aot.append(pt)
+    return prof_aot
+
+
+def _hooks_aot(cfg: SparkConfig) -> tomlkit.items.AoT | None:
+    if not cfg.hooks:
+        return None
+    hook_aot = tomlkit.aot()
+    for hook in cfg.hooks:
+        ht = tomlkit.table()
+        ht.add("event", hook.event)
+        ht.add("command", hook.command)
+        ht.add("args", list(hook.args))
+        ht.add("name", hook.name or "")
+        ht.add("timeout_sec", hook.timeout_sec)
+        ht.add("on_deny", hook.on_deny or "")
+        hook_aot.append(ht)
+    return hook_aot
+
+
+def _permission_rules_aot(cfg: SparkConfig) -> tomlkit.items.AoT | None:
+    if not cfg.permission_rules:
+        return None
+    pr_aot = tomlkit.aot()
+    for rule in cfg.permission_rules:
+        rt = tomlkit.table()
+        rt.add("action", rule.action)
+        rt.add("resource", rule.resource)
+        if rule.tool:
+            rt.add("tool", rule.tool)
+        pr_aot.append(rt)
+    return pr_aot
+
+
+def _approval_profiles_aot(cfg: SparkConfig) -> tomlkit.items.AoT | None:
+    if not cfg.approval_profiles:
+        return None
+    ap_aot = tomlkit.aot()
+    for profile in cfg.approval_profiles:
+        pt = tomlkit.table()
+        pt.add("id", profile.id)
+        pt.add("name", profile.name)
+        pt.add("approval", profile.approval)
+        pt.add("tools", list(profile.tools))
+        pt.add("system_prompt", profile.system_prompt or "")
+        pt.add("model_profile_id", profile.model_profile_id or "")
+        ap_aot.append(pt)
+    return ap_aot
+
+
+def save_config(cfg: SparkConfig, path: Path | None = None) -> Path:
+    """Persist configuration as TOML using the official ``tomlkit`` library.
+
+    ``tomlkit`` produces spec-compliant TOML with correct quoting, escaping of
+    special characters, and proper handling of arrays and inline tables — none of
+    which we had to invent.
+    """
+    path = path or default_config_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    doc = tomlkit.document()
+    doc.add("active_profile_id", cfg.active_profile_id or "")
+    doc.add(
+        tomlkit.comment("Spark agent configuration — edit with: spark config set <key> <value>")
+    )
+    doc.add(tomlkit.nl())
+
+    doc.add("provider", _provider_table(cfg))
+    doc.add("agent", _agent_table(cfg))
+    doc.add("context", _context_table(cfg))
+    doc.add("memory", _memory_table(cfg))
     # [[mcp.servers]]
-    if cfg.mcp_servers:
-        mcp_aot = tomlkit.aot()
-        for server in cfg.mcp_servers:
-            srv_table = tomlkit.table(is_super_table=True)
-            srv_table.add("name", server.name)
-            if server.transport in {"sse", "streamable_http"}:
-                srv_table.add("transport", server.transport)
-                srv_table.add("readonly_tools", list(server.readonly_tools))
-                if server.allowed_tools:
-                    srv_table.add("allowed_tools", list(server.allowed_tools))
-                if server.http:
-                    http = tomlkit.table()
-                    http.add("url", server.http.url)
-                    if server.http.headers:
-                        http.add("headers", server.http.headers)
-                    http.add("timeout_sec", server.http.timeout_sec)
-                    srv_table.add("http", http)
-            else:
-                srv_table.add("command", server.command)
-                srv_table.add("args", list(server.args))
-                if server.env:
-                    srv_table.add("env", dict(server.env))
-                srv_table.add("readonly_tools", list(server.readonly_tools))
-                if server.allowed_tools:
-                    srv_table.add("allowed_tools", list(server.allowed_tools))
-            mcp_aot.append(srv_table)
-        doc.add("mcp", tomlkit.table().add("servers", mcp_aot))
-
+    mcp = _mcp_servers_table(cfg)
+    if mcp is not None:
+        doc.add("mcp", mcp)
     # [[model_profiles]]
-    if cfg.model_profiles:
-        prof_aot = tomlkit.aot()
-        for prof in cfg.model_profiles:
-            pt = tomlkit.table()
-            pt.add("id", prof.id)
-            pt.add("name", prof.name)
-            pt.add("provider", prof.provider)
-            pt.add("base_url", prof.base_url or "")
-            pt.add("model", prof.model or "")
-            pt.add("api_key", prof.api_key or "")
-            prof_aot.append(pt)
-        doc.add("model_profiles", prof_aot)
-
+    profiles = _model_profiles_aot(cfg)
+    if profiles is not None:
+        doc.add("model_profiles", profiles)
     # [[hooks]]
-    if cfg.hooks:
-        hook_aot = tomlkit.aot()
-        for hook in cfg.hooks:
-            ht = tomlkit.table()
-            ht.add("event", hook.event)
-            ht.add("command", hook.command)
-            ht.add("args", list(hook.args))
-            ht.add("name", hook.name or "")
-            ht.add("timeout_sec", hook.timeout_sec)
-            ht.add("on_deny", hook.on_deny or "")
-            hook_aot.append(ht)
-        doc.add("hooks", hook_aot)
-
+    hooks = _hooks_aot(cfg)
+    if hooks is not None:
+        doc.add("hooks", hooks)
     # [[permission_rules]]
-    if cfg.permission_rules:
-        pr_aot = tomlkit.aot()
-        for rule in cfg.permission_rules:
-            rt = tomlkit.table()
-            rt.add("action", rule.action)
-            rt.add("resource", rule.resource)
-            if rule.tool:
-                rt.add("tool", rule.tool)
-            pr_aot.append(rt)
-        doc.add("permission_rules", pr_aot)
-
+    rules = _permission_rules_aot(cfg)
+    if rules is not None:
+        doc.add("permission_rules", rules)
     # [replay]
     doc.add("replay", tomlkit.table().add("enabled", bool(cfg.replay.enabled)))
-
+    # [updater]
+    doc.add("updater", tomlkit.table().add("mode", cfg.updater.mode))
     # [[approval_profiles]] + active id（H4 审批/行为档案）
-    if cfg.approval_profiles:
-        ap_aot = tomlkit.aot()
-        for profile in cfg.approval_profiles:
-            pt = tomlkit.table()
-            pt.add("id", profile.id)
-            pt.add("name", profile.name)
-            pt.add("approval", profile.approval)
-            pt.add("tools", list(profile.tools))
-            pt.add("system_prompt", profile.system_prompt or "")
-            pt.add("model_profile_id", profile.model_profile_id or "")
-            ap_aot.append(pt)
-        doc.add("approval_profiles", ap_aot)
+    ap = _approval_profiles_aot(cfg)
+    if ap is not None:
+        doc.add("approval_profiles", ap)
     doc.add("active_approval_profile_id", cfg.active_approval_profile_id or "")
 
     output = tomlkit.dumps(doc)

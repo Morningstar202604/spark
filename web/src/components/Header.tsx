@@ -4,7 +4,7 @@ import { useSessionStore } from "../store/sessionStore"
 import { useUiStore } from "../store/uiStore"
 import { ContextMeter } from "./ContextMeter"
 import { IconButton } from "./ui"
-import { IconCommand, IconFolder, IconFork, IconGlobe, IconMenu, IconSpark, IconTerminal } from "./icons"
+import { IconCommand, IconFolder, IconFork, IconGlobe, IconHelp, IconMenu, IconSpark, IconTerminal } from "./icons"
 import { t, type Lang } from "../i18n"
 
 export const Header = memo(function Header() {
@@ -14,6 +14,7 @@ export const Header = memo(function Header() {
   const lang = useUiStore((s) => s.lang)
   const toggleSidebar = useUiStore((s) => s.toggleSidebar)
   const setPaletteOpen = useUiStore((s) => s.setPaletteOpen)
+  const openHelp = useUiStore((s) => s.openHelp)
   const openFiles = useUiStore((s) => s.openFiles)
   const openBrowser = useUiStore((s) => s.openBrowser)
   const openTerminal = useUiStore((s) => s.openTerminal)
@@ -33,7 +34,7 @@ export const Header = memo(function Header() {
           {status?.demo_mode && (
             <span
               title={status.demo_reason}
-              className="shrink-0 rounded-full border border-warn/40 bg-warn/10 px-1.5 py-0.5 text-[10px] font-medium text-warn"
+              className="hidden shrink-0 rounded-full border border-warn/40 bg-warn/10 px-1.5 py-0.5 text-[10px] font-medium text-warn sm:inline-block"
             >
               {t("header.demo", lang)}
             </span>
@@ -58,23 +59,40 @@ export const Header = memo(function Header() {
       )}
 
       <ContextMeter />
-      <IconButton title={t("files.title", lang)} onClick={openFiles}>
-        <IconFolder size={16} />
-      </IconButton>
-      <IconButton title={t("browser.title", lang)} onClick={openBrowser} className="hidden sm:inline-flex">
-        <IconGlobe size={16} />
-      </IconButton>
-      <IconButton title={t("graph.title", lang)} onClick={openGraph} className="hidden md:inline-flex">
-        <IconSpark size={16} />
-      </IconButton>
-      <IconButton title={t("sidebar.fork", lang)} onClick={() => void useSessionStore.getState().handleFork()} className="hidden md:inline-flex">
-        <IconFork size={16} />
-      </IconButton>
-      <IconButton title={`${t("terminal.title", lang)} (Ctrl+\`)`} onClick={openTerminal} className="hidden sm:inline-flex">
-        <IconTerminal size={16} />
-      </IconButton>
+      {/* 响应式隐藏必须放在外层 span 上：IconButton 自带 inline-flex，
+          与传入的 hidden 同属 display 工具类，胜负取决于 CSS 生成顺序，
+          实测 390px 下 9 个按钮全显示、标题被压成 0 宽、演示徽标与计量重叠。 */}
+      <span className="hidden sm:inline-flex">
+        <IconButton title={t("files.title", lang)} onClick={openFiles}>
+          <IconFolder size={16} />
+        </IconButton>
+      </span>
+      <span className="hidden sm:inline-flex">
+        <IconButton title={t("browser.title", lang)} onClick={openBrowser}>
+          <IconGlobe size={16} />
+        </IconButton>
+      </span>
+      <span className="hidden md:inline-flex">
+        <IconButton title={t("graph.title", lang)} onClick={openGraph}>
+          <IconSpark size={16} />
+        </IconButton>
+      </span>
+      <span className="hidden md:inline-flex">
+        <IconButton title={t("sidebar.fork", lang)} onClick={() => void useSessionStore.getState().handleFork()}>
+          <IconFork size={16} />
+        </IconButton>
+      </span>
+      <span className="hidden sm:inline-flex">
+        <IconButton title={`${t("terminal.title", lang)} (Ctrl+\`)`} onClick={openTerminal}>
+          <IconTerminal size={16} />
+        </IconButton>
+      </span>
       <IconButton title={`${t("palette.title", lang)} (Ctrl+K)`} onClick={() => setPaletteOpen(true)}>
         <IconCommand size={16} />
+      </IconButton>
+      {/* 审查报告第五节体验差距：帮助此前只能靠 `?` 键，无可见入口。 */}
+      <IconButton title={`${t("help.title", lang)} (?)`} onClick={openHelp}>
+        <IconHelp size={16} />
       </IconButton>
     </header>
   )

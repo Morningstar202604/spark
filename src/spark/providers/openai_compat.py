@@ -26,7 +26,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from typing import Any, AsyncIterator
+from typing import Any, AsyncIterator, NoReturn
 
 import litellm
 
@@ -270,132 +270,145 @@ class OpenAICompatProvider:
             if span is not None:
                 span.end()
 
+    def _request_kwargs(
+        self,
+        target: str,
+        messages: list[ChatMessage],
+        tools: list[dict],
+        effort: str | None,
+    ) -> dict[str, Any]:
+        model_arg, provider_hint = self._litellm_model(target)
+        request_key = self._next_key()
+        completion_kwargs: dict[str, Any] = dict(
+            model=model_arg,
+            messages=_to_openai(messages),
+            tools=tools or None,
+            stream=True,
+            # P1：请求流尾 usage 帧（choices 为空、usage 有值）；
+            # drop_params=True 兜底不支持该参数的 provider
+            stream_options={"include_usage": True},
+            api_base=self.base_url or None,
+            api_key=request_key or None,
+            num_retries=0,  # we handle retries explicitly for fine-grained control
+            drop_params=True,  # pass through non-standard fields (e.g. reasoning_content)
+            timeout=120.0,  # httpx.Timeout(120.0) equivalent for LiteLLM
+            # LiteLLM >=1.100 auto-routes any call carrying `tools`
+            # through litellm.responses.mcp, which imports the mcp 2.x
+            # API (mcp.types.CacheableResult / the `mcp_types`
+            # package). Spark pins mcp 1.x for the official SDK, so
+            # that import fails and *every* tool-carrying completion
+            # dies with "cannot import name 'CacheableResult'".
+            # Spark does its own MCP bridged through tool names, so
+            # LiteLLM's MCP handler is never what we want here.
+            _skip_mcp_handler=True,
+        )
+        if provider_hint:
+            completion_kwargs["custom_llm_provider"] = provider_hint
+        if effort:
+            completion_kwargs["reasoning_effort"] = effort
+            if "deepseek" in target.lower():
+                completion_kwargs["extra_body"] = {
+                    "thinking": {
+                        "type": "enabled",
+                        "budget_tokens": {
+                            "low": 2048,
+                            "medium": 4096,
+                            "high": 8192,
+                        }[effort],
+                    }
+                }
+        return completion_kwargs
+
+    async def _request_with_retries(
+        self,
+        target: str,
+        messages: list[ChatMessage],
+        tools: list[dict],
+        effort: str | None,
+    ) -> tuple[Any, Exception | None]:
+        """单目标重试：可重试错误指数退避，不可重试立即返回；成功返回 (response, None)。"""
+        last_exc: Exception | None = None
+        for attempt in range(self.max_retries + 1):
+            try:
+                response = await litellm.acompletion(
+                    **self._request_kwargs(target, messages, tools, effort)
+                )
+            except Exception as exc:  # aqg: top-level boundary
+                last_exc = exc
+                status = self._extract_status_code(exc)
+                is_retryable = (
+                    status in _RETRYABLE_STATUS_CODES
+                    or (
+                        status is None
+                        and isinstance(exc, _RETRYABLE_EXCEPTIONS)
+                    )
+                )
+                if is_retryable and attempt < self.max_retries:
+                    backoff = 2**attempt  # 1, 2, 4 seconds
+                    logger.warning(
+                        "provider_retry model=%s attempt=%d/%d status=%s base_url=%s backoff=%ds error=%s",
+                        target,
+                        attempt + 1,
+                        self.max_retries,
+                        status,
+                        self.base_url,
+                        backoff,
+                        str(exc)[:200],
+                    )
+                    await asyncio.sleep(backoff)
+                    continue
+                # 本目标不可重试（如 4xx）——交给外层决定是否切下一目标
+                break
+            # Successful request — proceed to stream
+            return response, None
+        return None, last_exc
+
+    def _raise_all_failed(
+        self, targets: list[str], last_exc: Exception | None
+    ) -> NoReturn:
+        msg = str(last_exc) if last_exc else "no response"
+        # Never leak credentials into error output（全池脱敏）
+        for k in self._key_pool:
+            if k and k in msg:
+                msg = msg.replace(k, "***")
+        raise RuntimeError(
+            f"Provider request to '{self.base_url}' failed after "
+            f"{self.max_retries} retries (models tried: {', '.join(targets)}): {msg}"
+        ) from last_exc
+
     async def _stream_impl(
         self,
         messages: list[ChatMessage],
         tools: list[dict],
         effort: str | None = None,
     ) -> AsyncIterator[ChatDelta]:
-        last_exc: Exception | None = None
         # P1：目标链 = 主模型 + fallback_models；每个目标独立重试，凭据池逐次轮换。
         # 任一目标成功即返回；全部失败才抛错（错误信息脱敏全部池内密钥）。
         targets: list[str] = [self.model, *self.fallback_models]
         response = None
+        last_exc: Exception | None = None
         for ti, target in enumerate(targets):
-            for attempt in range(self.max_retries + 1):
-                try:
-                    model_arg, provider_hint = self._litellm_model(target)
-                    request_key = self._next_key()
-                    completion_kwargs: dict[str, Any] = dict(
-                        model=model_arg,
-                        messages=_to_openai(messages),
-                        tools=tools or None,
-                        stream=True,
-                        # P1：请求流尾 usage 帧（choices 为空、usage 有值）；
-                        # drop_params=True 兜底不支持该参数的 provider
-                        stream_options={"include_usage": True},
-                        api_base=self.base_url or None,
-                        api_key=request_key or None,
-                        num_retries=0,  # we handle retries explicitly for fine-grained control
-                        drop_params=True,  # pass through non-standard fields (e.g. reasoning_content)
-                        timeout=120.0,  # httpx.Timeout(120.0) equivalent for LiteLLM
-                        # LiteLLM >=1.100 auto-routes any call carrying `tools`
-                        # through litellm.responses.mcp, which imports the mcp 2.x
-                        # API (mcp.types.CacheableResult / the `mcp_types`
-                        # package). Spark pins mcp 1.x for the official SDK, so
-                        # that import fails and *every* tool-carrying completion
-                        # dies with "cannot import name 'CacheableResult'".
-                        # Spark does its own MCP bridged through tool names, so
-                        # LiteLLM's MCP handler is never what we want here.
-                        _skip_mcp_handler=True,
-                    )
-                    if provider_hint:
-                        completion_kwargs["custom_llm_provider"] = provider_hint
-                    if effort:
-                        completion_kwargs["reasoning_effort"] = effort
-                        if "deepseek" in target.lower():
-                            completion_kwargs["extra_body"] = {
-                                "thinking": {
-                                    "type": "enabled",
-                                    "budget_tokens": {
-                                        "low": 2048,
-                                        "medium": 4096,
-                                        "high": 8192,
-                                    }[effort],
-                                }
-                            }
-                    response = await litellm.acompletion(**completion_kwargs)
-                except Exception as exc:
-                    last_exc = exc
-                    status = self._extract_status_code(exc)
-                    is_retryable = (
-                        status in _RETRYABLE_STATUS_CODES
-                        or (
-                            status is None
-                            and isinstance(exc, _RETRYABLE_EXCEPTIONS)
-                        )
-                    )
-                    if is_retryable and attempt < self.max_retries:
-                        backoff = 2**attempt  # 1, 2, 4 seconds
-                        logger.warning(
-                            "provider_retry model=%s attempt=%d/%d status=%s base_url=%s backoff=%ds error=%s",
-                            target,
-                            attempt + 1,
-                            self.max_retries,
-                            status,
-                            self.base_url,
-                            backoff,
-                            str(exc)[:200],
-                        )
-                        await asyncio.sleep(backoff)
-                        continue
-                    # 本目标不可重试（如 4xx）——交给外层决定是否切下一目标
-                    break
-                # Successful request — proceed to stream
-                last_exc = None
-                break
-            if last_exc is None and response is not None:
+            response, last_exc = await self._request_with_retries(
+                target, messages, tools, effort
+            )
+            if response is not None:
                 break
             if ti < len(targets) - 1:
                 logger.warning(
-                    "provider_fallback: 模型 %s 不可用，切换到 %s", target, targets[ti + 1]
+                    "provider_fallback: 模型 %s 不可用，切换到 %s",
+                    target,
+                    targets[ti + 1],
                 )
-                continue
         # If all targets exhausted without success
-        if last_exc is not None or response is None:
-            msg = str(last_exc) if last_exc else "no response"
-            # Never leak credentials into error output（全池脱敏）
-            for k in self._key_pool:
-                if k and k in msg:
-                    msg = msg.replace(k, "***")
-            raise RuntimeError(
-                f"Provider request to '{self.base_url}' failed after "
-                f"{self.max_retries} retries (models tried: {', '.join(targets)}): {msg}"
-            ) from last_exc
+        if response is None:
+            self._raise_all_failed(targets, last_exc)
 
         tool_acc: dict[int, dict[str, str]] = {}
         think_state: dict[str, bool] = {"open": False, "closed": False}
         reported_usage: dict[str, int] = {}
 
         async for chunk in response:
-            # P1：usage 帧通常出现在流尾且 choices 为空——先提取再跳过
-            usage_obj = getattr(chunk, "usage", None)
-            if usage_obj is not None:
-                try:
-                    if getattr(usage_obj, "prompt_tokens", None):
-                        reported_usage["prompt_tokens"] = int(usage_obj.prompt_tokens)
-                    if getattr(usage_obj, "completion_tokens", None):
-                        reported_usage["completion_tokens"] = int(
-                            usage_obj.completion_tokens
-                        )
-                    details = getattr(usage_obj, "completion_tokens_details", None)
-                    reasoning_tok = (
-                        getattr(details, "reasoning_tokens", None) if details else None
-                    )
-                    if reasoning_tok:
-                        reported_usage["reasoning_tokens"] = int(reasoning_tok)
-                except (TypeError, ValueError):
-                    pass
+            _collect_usage(chunk, reported_usage)
             # Guard against LiteLLM returning None/empty chunks
             if not chunk or not chunk.choices:
                 continue
@@ -423,37 +436,70 @@ class OpenAICompatProvider:
 
             # 3) Tool-call deltas (OpenAI-style incremental aggregation)
             for tc in delta.tool_calls or []:
-                idx = int(getattr(tc, "index", 0) or 0)
-                acc = tool_acc.setdefault(idx, {"id": "", "name": "", "arguments": ""})
-                tc_id = getattr(tc, "id", None)
-                if tc_id:
-                    acc["id"] += tc_id
-                fn = tc.function if tc.function else None
-                if fn:
-                    fn_name = getattr(fn, "name", None)
-                    fn_args = getattr(fn, "arguments", None)
-                    if fn_name:
-                        acc["name"] += fn_name
-                    if fn_args:
-                        acc["arguments"] += fn_args
+                _accumulate_tool_call(tool_acc, tc)
 
         # Yield aggregated tool calls after the stream ends
-        for acc in tool_acc.values():
-            if not acc["name"]:
-                continue
-            try:
-                args = json.loads(acc["arguments"] or "{}")
-            except json.JSONDecodeError:
-                args = {}
-            yield ChatDelta(
-                type="tool_call",
-                tool_call=ToolCall(
-                    id=acc["id"] or "call_0",
-                    name=acc["name"],
-                    arguments=args,
-                ),
-            )
+        for delta in _tool_call_deltas(tool_acc):
+            yield delta
         yield ChatDelta(type="end", usage=reported_usage or None)
+
+
+def _collect_usage(chunk: Any, reported_usage: dict[str, int]) -> None:
+    """流尾 usage 帧（choices 为空、usage 有值）先提取，提取失败静默跳过。"""
+    usage_obj = getattr(chunk, "usage", None)
+    if usage_obj is None:
+        return
+    try:
+        if getattr(usage_obj, "prompt_tokens", None):
+            reported_usage["prompt_tokens"] = int(usage_obj.prompt_tokens)
+        if getattr(usage_obj, "completion_tokens", None):
+            reported_usage["completion_tokens"] = int(
+                usage_obj.completion_tokens
+            )
+        details = getattr(usage_obj, "completion_tokens_details", None)
+        reasoning_tok = (
+            getattr(details, "reasoning_tokens", None) if details else None
+        )
+        if reasoning_tok:
+            reported_usage["reasoning_tokens"] = int(reasoning_tok)
+    except (TypeError, ValueError):
+        pass
+
+
+def _accumulate_tool_call(tool_acc: dict[int, dict[str, str]], tc: Any) -> None:
+    """OpenAI 风格增量工具调用按 index 聚合。"""
+    idx = int(getattr(tc, "index", 0) or 0)
+    acc = tool_acc.setdefault(idx, {"id": "", "name": "", "arguments": ""})
+    tc_id = getattr(tc, "id", None)
+    if tc_id:
+        acc["id"] += tc_id
+    fn = tc.function if tc.function else None
+    if fn:
+        fn_name = getattr(fn, "name", None)
+        fn_args = getattr(fn, "arguments", None)
+        if fn_name:
+            acc["name"] += fn_name
+        if fn_args:
+            acc["arguments"] += fn_args
+
+
+def _tool_call_deltas(tool_acc: dict[int, dict[str, str]]):
+    """流结束后吐出聚合完成的工具调用。"""
+    for acc in tool_acc.values():
+        if not acc["name"]:
+            continue
+        try:
+            args = json.loads(acc["arguments"] or "{}")
+        except json.JSONDecodeError:
+            args = {}
+        yield ChatDelta(
+            type="tool_call",
+            tool_call=ToolCall(
+                id=acc["id"] or "call_0",
+                name=acc["name"],
+                arguments=args,
+            ),
+        )
 
 
 class OllamaProvider(OpenAICompatProvider):

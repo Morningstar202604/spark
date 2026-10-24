@@ -129,3 +129,41 @@ small_model = "deepseek-v4-flash"
 - **模型目录**：`spark models [关键词]` 查询 models.dev 开放目录
   （232+ 供应商、价格、上下文长度；24h 本地缓存，离线回退内置快照）。
 - **repo map git 热度**：代码地图按 git 提交频率排序（高频文件优先入图）。
+
+## 沙箱模式详解
+
+| 模式 | 可读 | 可写 | Shell | MCP | 用途 |
+|------|------|------|-------|-----|------|
+| `sandbox-only` | ✅ | ❌ | ❌ | ❌ | 只读分析、代码审查 |
+| `workspace` | ✅ | ✅ | ✅ | 限制 | 默认模式，平衡安全与能力 |
+| `full-access` | ✅ | ✅ | ✅ | ✅ | 高级用户、信任环境 |
+| `unrestricted` | ✅ | ✅ | ✅ | ✅ | 开发调试、完全放开 |
+
+## 审批模式详解
+
+| 模式 | 说明 |
+|------|------|
+| `suggest` | 敏感操作（写文件、shell）弹出确认对话框 |
+| `auto-edit` | 只读操作自动放行，写操作需确认 |
+| `full-auto` | 全部自动放行，适合 CI/CD 或可信环境 |
+| `plan-only` | 只读允许；写/执行一律不执行，仅输出计划（plan mode） |
+| `approve-plan` | 先出计划等待批准，批准后按 auto-edit 语义自动执行 |
+| `manual` | 写/执行逐条人工确认 |
+
+## 本地数据文件
+
+| 路径 | 说明 |
+|------|------|
+| `~/.spark/config.toml` | 配置文件（含模型档案与密钥） |
+| `~/.spark/sessions.db` | SQLite：会话、消息、工具事件、检查点、后台任务记录 |
+| `~/.spark/checkpoints/*.tar.gz` | 工作区快照（回滚用） |
+| `~/.spark/memory.db` | 长期记忆库 |
+| `~/.spark/spark.log` | 运行日志 |
+| `~/.spark/backups/*.db` | `doctor --backup` 的在线快照（VACUUM INTO） |
+| `~/.spark/update-check.json` | 最近一次版本检查缓存（24h） |
+
+后台任务（`bg_start`）记录持久化在 `sessions.db` 的 `bg_jobs` 表：服务器重启后
+`bg_list` 仍可列出历史任务（标记为 lost），`bg_output` 返回最后一次持久化的输出。
+
+HTTP API 与 SSE 事件协议单独成篇：见 [API.md](API.md)。CLI 命令见
+[INSTALL.md](INSTALL.md) 与 `spark --help`。

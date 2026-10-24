@@ -15,6 +15,7 @@ import { IconBrain, IconCheck, IconCommand, IconFile, IconFolder, IconGlobe, Ico
 import { useSessionStore } from "../store/sessionStore"
 import { useUiStore } from "../store/uiStore"
 import { t, type TranslationKey } from "../i18n"
+import { notificationsEnabled, notificationPermission, requestNotificationPermission, setNotificationsEnabled } from "../notify"
 
 // Mirrors spark.hooks.HookRegistry.EVENTS (backend validates against it).
 /** Split a hook argument line, honouring "double" and 'single' quotes. */
@@ -208,6 +209,11 @@ export default function SettingsDrawer({ onClose, onSaved }: Props) {
   // palette computing "next theme" from a stale value.
   const theme = useUiStore((s) => s.theme)
   const setTheme = useUiStore((s) => s.setTheme)
+  const pushToast = useUiStore((s) => s.pushToast)
+  // 注意：hook 必须全部在 `if (!cfg)` 早退之前，否则首次渲染（cfg 仍是 null）
+  // 与数据到达后的渲染 hook 数量不一致，React 直接抛 #310 白屏。
+  const [notifyOn, setNotifyOn] = useState(() => notificationsEnabled())
+  const [notifyPerm, setNotifyPerm] = useState(() => notificationPermission())
   const [showRegistry, setShowRegistry] = useState(false)
   const dirtyRef = useRef({ cfg: false, mcp: false, md: false })
 
@@ -845,6 +851,37 @@ export default function SettingsDrawer({ onClose, onSaved }: Props) {
                     <Toggle checked={Boolean(cfg.agent[key])} onChange={(v) => patchAgent({ [key]: v })} />
                   </label>
                 ))}
+              </section>
+
+              <section className="flex flex-col gap-2 rounded-xl border border-line bg-panel p-4">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <h3 className="text-sm font-semibold text-ink">{t("display.notifications", lang)}</h3>
+                    <p className="mt-0.5 text-[11.5px] leading-relaxed text-ink3">{t("display.notificationsHint", lang)}</p>
+                  </div>
+                  <Toggle
+                    checked={notifyOn}
+                    onChange={async (v) => {
+                      if (v && notificationPermission() === "default") {
+                        const perm = await requestNotificationPermission()
+                        setNotifyPerm(perm)
+                        if (perm !== "granted") {
+                          pushToast("toast.notifyBlocked", "error")
+                          return
+                        }
+                      }
+                      if (v && notificationPermission() === "denied") {
+                        pushToast("toast.notifyBlocked", "error")
+                        return
+                      }
+                      setNotifyOn(v)
+                      setNotificationsEnabled(v)
+                    }}
+                  />
+                </div>
+                {notifyPerm === "denied" && (
+                  <p className="text-[11px] text-warn">{t("display.notifyDenied", lang)}</p>
+                )}
               </section>
 
               <section className="flex flex-col gap-2 rounded-xl border border-line bg-panel p-4">

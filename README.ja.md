@@ -91,7 +91,7 @@ dist\spark\spark.exe web
 ## ドキュメント
 
 - `docs/INSTALL.md` — インストールとパッケージング（Windows EXE 含む）
-- `docs/CONFIGURATION.md` — 設定ファイル全項目
+- `docs/CONFIG.md` — 設定ファイル全項目
 - `docs/API.md` — HTTP API / SSE イベントプロトコル
 - `docs/ARCHITECTURE.md` — アーキテクチャ / データフロー / セキュリティモデル
 

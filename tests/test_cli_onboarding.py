@@ -413,3 +413,131 @@ def test_list_models_parses_and_degrades() -> None:
 
     assert asyncio.run(list_models(base_url="", api_key="k")) == []
     assert asyncio.run(list_models(base_url="http://127.0.0.1:1/v1", api_key="k")) == []
+
+
+# ---------------------------------------------------------------------------
+# exec --json: NDJSON event stream for CI/scripting (codex exec --json parity)
+# ---------------------------------------------------------------------------
+
+
+def test_exec_json_streams_ndjson_and_final_line(tmp_path, monkeypatch) -> None:
+    monkeypatch.delenv("SPARK_API_KEY", raising=False)
+    cfg_path = tmp_path / "c.toml"
+    cfg_path.write_text(
+        '[provider]\nname = "openai_compat"\nbase_url = "https://example.invalid/v1"\n'
+        'model = "m"\napi_key_env = "SPARK_NOPE_KEY"\n',
+        encoding="utf-8",
+    )
+    r = _invoke(
+        [
+            "exec",
+            "hi",
+            "--json",
+            "--config",
+            str(cfg_path),
+            "--approval",
+            "full-auto",
+            "--workdir",
+            str(tmp_path),
+        ],
+        monkeypatch,
+        tmp_path,
+    )
+    assert r.exit_code == 0, r.stdout + (r.stderr or "")
+    lines = [ln for ln in r.stdout.splitlines() if ln.strip()]
+    assert lines, "expected at least one NDJSON line"
+    events = [json.loads(ln) for ln in lines]
+    assert all(isinstance(e, dict) and "type" in e for e in events)
+    types = [e["type"] for e in events]
+    assert "turn_end" in types
+    assert types[-1] == "final"
+    assert events[-1].get("text")
+
+
+def test_exec_json_rejects_suggest_mode(tmp_path, monkeypatch) -> None:
+    cfg_path = tmp_path / "c.toml"
+    cfg_path.write_text(
+        '[provider]\nname = "mock"\nmodel = "mock"\n',
+        encoding="utf-8",
+    )
+    r = _invoke(
+        [
+            "exec",
+            "hi",
+            "--json",
+            "--config",
+            str(cfg_path),
+            "--approval",
+            "suggest",
+            "--workdir",
+            str(tmp_path),
+        ],
+        monkeypatch,
+        tmp_path,
+    )
+    assert r.exit_code != 0
+    combined = r.stdout + (r.stderr or "")
+    assert "approval" in combined.lower() or "exec" in combined.lower()
+
+
+# ---------------------------------------------------------------------------
+# spark update — CLI surface (network mocked)
+# ---------------------------------------------------------------------------
+
+
+def _updater_cfg(tmp_path):
+    cfg_path = tmp_path / "c.toml"
+    cfg_path.write_text('[provider]\nname = "mock"\nmodel = "mock"\n', encoding="utf-8")
+    return cfg_path
+
+
+def test_update_reports_already_latest(tmp_path, monkeypatch) -> None:
+    from spark import updater
+
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setattr(cli, "default_home", lambda: home)
+    monkeypatch.setenv("SPARK_HOME", str(home))
+    # 用一个必然"不比当前新"的版本：本地是源码安装，版本可能高于测试硬编码
+    current = cli._installed_version()
+    release = updater.ReleaseInfo(version=current, tag=f"v{current}", notes="", assets=[])
+    monkeypatch.setattr(updater, "fetch_latest", lambda *a, **k: release)
+    r = runner.invoke(cli.app, ["update"])
+    assert r.exit_code == 0
+    assert "最新" in r.stdout
+
+
+def test_update_check_only_reports_url(tmp_path, monkeypatch) -> None:
+    from spark import updater
+
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setattr(cli, "default_home", lambda: home)
+    monkeypatch.setenv("SPARK_HOME", str(home))
+    release = updater.ReleaseInfo(version="99.0.0", tag="v99.0.0", notes="", assets=[])
+    monkeypatch.setattr(updater, "fetch_latest", lambda *a, **k: release)
+    r = runner.invoke(cli.app, ["update", "--check"])
+    assert r.exit_code == 0
+    assert "releases/tag/v99.0.0" in r.stdout
+
+
+def test_update_network_failure_is_friendly(tmp_path, monkeypatch) -> None:
+    from spark import updater
+
+    def boom(*a, **k):
+        raise updater.UpdateError("no route to host")
+
+    monkeypatch.setattr(updater, "fetch_latest", boom)
+    r = runner.invoke(cli.app, ["update"])
+    assert r.exit_code == 1
+    assert "检查更新失败" in (r.stdout + (r.stderr or ""))
+
+
+def test_update_pip_install_is_redirected_to_pip(tmp_path, monkeypatch) -> None:
+    from spark import updater
+
+    release = updater.ReleaseInfo(version="99.0.0", tag="v99.0.0", notes="", assets=[])
+    monkeypatch.setattr(updater, "fetch_latest", lambda *a, **k: release)
+    r = runner.invoke(cli.app, ["update"])
+    assert r.exit_code == 2
+    assert "pip install -U spark-agent" in r.stdout

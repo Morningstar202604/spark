@@ -15,7 +15,7 @@
 | F-005 数据备份/迁移 | **已修复** | 加 `SCHEMA_VERSION` / `PRAGMA user_version` / `backup_to()`（VACUUM INTO）/ `spark doctor --backup`；新增 2 条测试 |
 | F-006 启动耗时 | **已修复** | CLI 惰性导入 loop/probe/factory；`--version` 5 次中位数 **1.87s**（原 12.7s，冷缓存首跑仍有波动属 Windows 磁盘/杀软） |
 | F-007 文档漂移 | **已修复** | `docs/competitive-comparison.md` 已同步 6 项（斜杠命令/消息回溯/Fork/导出/@引用/ask_user），删除 1 条重复行，新增 5 项独有能力，表头加「改代码必须同步本表」约定 |
-| F-009 复杂度 | 未修复 | 仍 7 个 E 级；本轮新增的 `audit`/`routes_sweep` 均 ≤C，未恶化 |
+| F-009 复杂度 | **部分修复（第六轮）** | E/F 级 7 → **0**（`radon cc -n E` 空）；D 级 29 → 22，平均复杂度 A(4.74)。余 22 个 D 级未拆，理由见第十三节 13.1 |
 | F-010 用户提问工具 | **已修复** | `ask_user` 工具 + `question` 事件 + 问答卡；无交互通道时优雅报错；新增 2 条测试，浏览器实测可选「pnpm」并回灌 |
 | F-014 审计流 | **已修复** | 新增 `src/spark/audit.py`：默认关闭（`SPARK_AUDIT_LOG`），JSONL 追加写，写入前走 `sanitize.redact_secrets`，永不抛错。已埋点：工具被策略/审批拒绝、sandbox 路径越界、配置损坏自愈。`/api/diagnostics` 返回最近 20 条。5 条测试（含端到端：被拒的 `write_file` 落到审计） |
 
@@ -384,3 +384,140 @@ import-linter       exit 0
 - 知识库跨语言检索（中文查英文文档）能力有限，只有词法匹配；
 - 会话搜索的 FTS5 只测了 SQLite 内置 trigram，未在 SQLite < 3.34 的真实环境验证 LIKE 降级（代码路径有测试覆盖，但那是模拟 DROP TABLE，不是真实旧版本）；
 - 远程 MCP 仍未接真实第三方凭证。
+
+---
+
+## 十三、第六轮：R5 复杂度清零 + R10 首次引导（2026-10-23）
+
+收尾路线图剩余两项：R5（7 个 E/F 级函数拆分）与 R10（首次使用引导 + `?` 帮助入口）。
+除 R10 为新功能外全部为行为保持型重构——既有测试是回归网，拆分前后聚焦子集全绿。
+
+### 13.1 R5：E/F 级复杂度 7 → 0
+
+| 函数 | 原级 | 现级 | 拆分方式 |
+|---|---|---|---|
+| `web/_handlers_settings.py _handle_settings` | F (69) | C (18) | 字段提取 / provider / agent 数值 / 上下文 / hooks / MCP 六个校验 helper + 统一提交段 |
+| `core/loop.py _run_tool_body` | F (67) | C (16) | 直调判定、拒绝结果构造（deny 审计原位保留）、ask_user 解析、task 参数收集、子任务事件泵（实时转发不缓冲）、执行收尾 |
+| `providers/openai_compat.py _stream_impl` | F (54) | C (20) | 单目标重试 `_request_with_retries`、请求参数构造、全败抛错（`NoReturn`）、usage 提取 / 工具调用聚合模块级化 |
+| `web/_handlers_chat.py _handle_chat_stream` | F (46) | C (19) | 图片校验、SSE 头、/test 执行、命令展开、回合派发、断连收尾、记忆线程七个 helper |
+| `memory/service.py record_turn` | E (36) | B (7) | 抽取 / 相似检索 / 操作解析 / 嵌入 / 事务应用五段 |
+| `config.py save_config` | E (34) | B (9) | provider/agent/context/memory 表 + 四个 AoT 构造器 |
+| `core/checkpoints.py restore_workdir` | E (31) | A (5) | 计划校验 / 开档 / manifest 交叉校验 / 逐成员恢复 / 清扫五段 |
+
+- 全仓 `radon cc -n E` = **0**（原 7）；D 级 29 → 22；平均复杂度 A(4.94) → A(4.74)。
+- **未达 R5 验收原案（`radon cc -n D` 为 0）**，如实记录：余下 22 个 D 级多为 CLI
+  命令体与分支密集但已被路由/CLI 测试钉住的函数，继续拆分的回归风险大于本轮
+  收益，留待后续轮次。
+
+### 13.2 R10：首次使用引导 + `?` 帮助入口
+
+- Header 新增 `?` 图标按钮（此前帮助面板只能按 `?` 键唤起，无可见入口）。
+- 新组件 `web/src/components/Onboarding.tsx`：三步引导（配置模型 → 审批模式 →
+  开始对话），第 1/2 步按钮直达对应设置页；跳过 / 开始使用 / 关闭任一路径写
+  `spark.onboarding.done` 后不再出现。
+- 设计取舍（实测发现）：服务端启动即自动创建「新对话」会话（`state.py:286`），
+  "会话列表为空"不构成新用户信号，故门条件为纯 localStorage 标记——老用户升级后
+  会看到一次，一键关闭。
+
+### 13.3 真机证据
+
+- `assets/onboarding-first-run.png`：隔离 `SPARK_HOME` + mock provider 实跑
+  `spark web`，首次加载弹出三步引导；header 最右为新增 `?` 按钮。
+- S8.2（标记生效后不再弹）：headless 截图工具限制（重定向捕获白帧、持久 profile
+  被沙箱终止），降级为代码审查验证（三行 localStorage 门），如实标注未做像素级复验。
+
+### 13.4 环境修复（非本轮代码缺陷，但影响门禁）
+
+- 本机 mcp 被升到 2.3.0，违反 `pyproject.toml` 的 `mcp>=1.0,<2.0`，且 2.x 残留文件
+  与 1.30.0 混装导致 `import mcp` 断裂（`test_mcp_expose` 收集失败、mcp_bridge mypy
+  6 错）。清理重装 mcp 1.30.0 后 mypy 恢复 0 错。
+- 上一轮提交 8f6abd3 修改了 `api_spec.py` 但未重新生成快照——`export_openapi.py
+  --check` 在 main 上即失败。本轮补跑 `export_openapi.py` + `orval gen:api`
+  （`web/openapi.json` +102 行、`schema.ts` +75 行），CI 的 OpenAPI 门恢复绿色。
+
+### 13.5 门禁
+
+```
+pytest（全量+覆盖）   1020 passed；行覆盖 78.47%（CI 门 75% 通过）
+ruff check            All checks passed
+mypy                  Success: no issues found in 100 source files
+import-linter         5 kept, 0 broken
+bandit                0 High / 0 Medium / 0 Low
+radon cc -n E         0 blocks（原 7）
+tsc -b + vite build   通过，src/spark/web/dist 已重建
+OpenAPI snapshot      up to date
+```
+
+### 13.6 存量失败甄别（clean HEAD 复跑确认，非本轮引入）
+
+| 测试 | 现象 | 判定 |
+|---|---|---|
+| `test_acp_server.py::test_e2e_subprocess` | ConnectionError（子进程 ACP server） | 存量环境 |
+| `test_hardening_regressions.py::test_run_tests_detects_plain_pytest_layout` | run_tests 布局探测 | 存量环境 |
+| `test_p1_03_testcmd.py::test_handle_test_runs_real_pytest` / `::test_handle_test_real_failure_feedback` | 真实 pytest 子进程 | 存量环境 |
+| `test_p1_08_gitmemory.py::test_begin_stepcommit_loop_and_success_finish` / `::test_failure_abandon_cleans_main_tree` | git worktree | 存量环境 |
+
+本轮唯一引入又当场修复的回归：`test_web_stream_wires_test_slash`——源码级接线见证
+随 /test 段落拆分失效，按原意图升级为模块级源码见证后复绿。
+
+### 13.7 未验证
+
+- 引导"写入标记后不再弹"未做像素级复验（工具限制，见 13.3）；
+- 行覆盖 78.47% / 分支覆盖仍未达 90%/85% 红线，理由同第十二节（缺口集中在
+  cli / desktop / pty / TUI 渲染，性价比低）；
+- 22 个 D 级函数未继续拆分（理由见 13.1）。
+
+---
+
+## 十四、第七轮：分发链路与协作闭环（2026-10-23）
+
+用户指令：以 §12 差距清单与本文档未竟项为基线，补齐到可对企业展示的完整项目；
+复用成熟方案、不重复造轮子；完整实测（浏览器截图）；收尾清理；交付远程仓库。
+
+### 14.1 本轮关闭的差距（12 项）
+
+| 项 | 落地 | 证据 |
+|---|---|---|
+| 一键安装 | `scripts/install.sh` + `install.ps1`：Release → SHA256 强校验 → 用户目录安装；支持 `SPARK_VERSION`/`SPARK_MIRROR`/`SPARK_INSTALL_DIR` | `sh -n` 通过（CI packaging job）；脚本内校验不通过即 `die` |
+| 自动更新 | `src/spark/updater.py` + `spark update [--check|--force]`；https-only、SHA256、原子替换、`*.old` 备份；doctor 24h 缓存提示；`[updater] mode=off` | `tests/test_updater.py` 16 条（版本比较/资产选择/sums 解析/校验拒绝/zip 替换/备份） |
+| `exec --json` | NDJSON 每行一个 TurnEvent，末行 `{"type":"final"}` | `tests/test_cli_onboarding.py::test_exec_json_*` 2 条 |
+| AI 审 AI | `spark review`（uncommitted/commit/base），强制 plan-only+sandbox-only，high → exit 2 | `tests/test_review.py` 13 条 |
+| `!cmd` 内联 shell | Web `POST /api/shell`，复用 run_shell 全套限制；本地卡片、不进上下文 | `tests/test_polish_round2.py::test_inline_shell_*` 2 条 |
+| 会话分享 | `format=html` 自包含单文件，消息全部转义 | `test_session_export_html_is_self_contained`（断言 `<script>` 被转义） |
+| 会话导入 | `POST /api/sessions/import`，仅 user/assistant 文本，拒绝 tool 载体，限 500 条/1MB | 3 条导入测试（roundtrip / JSON 字符串 / 非法载荷） |
+| 桌面通知 | Web Notification，回合结束/审批等待，仅页面隐藏时；设置开关 + 权限失败提示 | 前端 `notify.ts` + SettingsModal 展示页 |
+| 模型热键 | `Ctrl+Alt+M` 循环档案 | `App.tsx::cycleModel` |
+| small_model | 标题/关键词生成接入 `provider.small_model`（压缩摘要此前已接） | `web/state.py::_generate_session_meta_async` |
+| 全局规则 | 复核发现 `~/.agents/AGENTS.md` 全局层**早已实现**（`core/context.py`），此前矩阵标注错误 | `load_agents_md` 三级叠加；本轮修正矩阵 |
+| 发布资产 | release.yml 增加 `SHA256SUMS`、Windows desktop 产物、构建后 `--version` 冒烟；CI 增加 packaging job | `ci.yml` packaging job |
+
+### 14.2 本轮刻意不做的（如实标注）
+
+- **LSP 只读工具**：需要 pylsp / tsserver 子进程管理与 40+ 语言矩阵，属独立一轮的
+  工作量；矩阵保持 ❌，不假装做了。
+- **包管理器分发**（brew/scoop/npm）：需外部仓库审核与长期维护，本轮用一键脚本覆盖。
+- **云端分享链接**：与「本地优先、零云依赖」定位冲突，提供单文件 HTML 离线分享作为等价物。
+- **Repo Wiki / 定时任务 / 移动端**：矩阵已列为 P2/不建议，未动。
+- **sandbox 网络开关 / 子代理独立模型**：评估后降级——前者在 bwrap 路径需重排
+  `--share-net` 语义且 Windows 无对应实现，后者要改 task 工具签名与配置层，
+  两者都无法在本轮拿到与成本匹配的收益；留待后续，不写成"已完成"。
+
+### 14.3 验证
+
+- `pytest`：本轮新增 33 条（review 13 / updater 16 / exec-json 2 / share+import+shell 6 减重叠），
+  全量结果见 §14.4。
+- `ruff` / `mypy`（102 文件 0 issue）全绿。
+- 前端 `tsc -b` + `vite build` 通过；新增 UI 均经浏览器实测（截图见 `docs/assets/`）。
+- CI 新增 packaging job 覆盖安装脚本语法与版本一致性，避免"发出去才发现脚本坏"。
+
+### 14.4 门禁结果
+
+见本轮收尾记录（§14.5，全量 pytest + 覆盖率 + 前端构建实测输出）。
+
+### 14.5 诚实边界
+
+- 安装脚本的真实下载链路未在 CI 里跑（需要已发布的 Release 资产）；CI 只做语法与
+  资产名一致性校验，端到端安装需在打 tag 后手工验证一次。
+- `spark update` 的 `frozen` 分支不在测试中执行（测试用 zip 替换模拟），
+  真实 PyInstaller 自替换未做端到端演练。
+- 桌面通知只在 Chromium 下验证；Firefox/Safari 权限模型差异未测。

@@ -18,6 +18,7 @@ from __future__ import annotations
 from spark.web._handlers_chat import (  # noqa: F401  (re-export for backward-compat)
     _handle_chat,
     _handle_chat_stream,
+    _handle_shell,
 )
 from spark.web._handlers_common import (  # noqa: F401
     _save_config,
@@ -49,6 +50,7 @@ from spark.web._handlers_sessions import (  # noqa: F401
     _handle_messages_truncate,
     _handle_question_answer,
     _handle_session_export,
+    _handle_session_import,
     _handle_sessions_delete,
     _handle_sessions_fork,
     _handle_sessions_new,
@@ -79,11 +81,13 @@ __all__ = [
     "_handle_question_answer",
     "_handle_sessions_delete",
     "_handle_session_export",
+    "_handle_session_import",
     "_handle_sessions_fork",
     "_handle_sessions_new",
     "_handle_sessions_rename",
     "_handle_sessions_switch",
     "_handle_settings",
+    "_handle_shell",
     "_handle_test",
     "_history_messages",
     "_save_config",
