@@ -40,7 +40,9 @@ spark web           # 打开界面
 ## 界面预览
 
 > 下列截图全部来自**真实模型 + 真实工作目录**的实时会话，不是 mock、不是设计稿。
-> 复现命令：`python scripts/capture_screenshots.py`。
+> 复现命令：`python scripts/capture_screenshots.py`（核心界面）与
+> `python scripts/capture_round7.py`（内联 shell / 分享 / 通知）；
+> 30 秒演示片由 `python scripts/build_promo.py` + ffmpeg 重建。
 
 [![观看 30 秒演示](assets/share/preview-frame.png)](assets/spark-demo.mp4)
 

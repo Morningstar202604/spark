@@ -510,14 +510,52 @@ OpenAPI snapshot      up to date
 - 前端 `tsc -b` + `vite build` 通过；新增 UI 均经浏览器实测（截图见 `docs/assets/`）。
 - CI 新增 packaging job 覆盖安装脚本语法与版本一致性，避免"发出去才发现脚本坏"。
 
-### 14.4 门禁结果
+### 14.4 门禁结果（本机实测，2026-10-24）
 
-见本轮收尾记录（§14.5，全量 pytest + 覆盖率 + 前端构建实测输出）。
+```
+pytest                1087 passed, 5 skipped（314s）
+coverage              行 78%（CI 门 75%）；review.py 93%、updater.py 84%
+ruff                  All checks passed
+mypy                  102 source files, 0 issues
+bandit                0 High / 0 Medium / 0 Low
+import-linter         5 contracts kept, 0 broken
+OpenAPI snapshot      up to date
+tsc -b + vite build   通过（16 chunk，dist 无重复 hash）
+sh -n install.sh      OK（dash）
+```
 
-### 14.5 诚实边界
+5 个 skip 均为平台/可选依赖：`ptyprocess`×3、bubblewrap（仅 Linux）、symlink 权限。
 
-- 安装脚本的真实下载链路未在 CI 里跑（需要已发布的 Release 资产）；CI 只做语法与
+**远端 CI（GitHub Actions，commit `fcd2842`）7/7 工作流 success**：
+CI（quality / packaging / windows-checkout / test×4）、Security、docs、Evals、
+build-exe、mirror。
+
+首轮推送时 CI 暴露并修复了两个发布链缺陷（详见下方 §14.5）：
+
+1. `install.sh` 以 CRLF 提交，Linux `dash` 的 `sh -n` 报
+   `Syntax error: word unexpected (expecting "in")`——`.gitattributes` 已锁
+   `*.sh eol=lf`；
+2. `build-exe` / `release` 的冒烟 grep 锚定整行，而 `spark version` 会先打印
+   品牌 banner——改为匹配版本子串，仍会在无版本号时失败。
+
+### 14.5 本轮修掉的 CI 级缺陷与诚实边界
+
+**修掉的缺陷**
+
+| # | 缺陷 | 影响 | 修法 |
+|---|---|---|---|
+| D-12 | `_SSESession` 的 peer 断连探测（`select` + `MSG_PEEK`）在 Linux 上「刚建连、请求体刚读完」瞬间报可读且 `recv` 为空，被判定为断连 | `test_live_stream_keeps_sse_event_contract` 在 ubuntu 3.11/3.12 上 100% 得到空 body；Windows select 语义不同，本地永不复现 | 建连后 0.25s grace 窗口内不做 peer 检查；空闲真实关闭仍可检测（`test_sse_writer_notices_idle_socket_close`），新增 `test_peer_disconnect_is_suppressed_during_connect_grace` 强制 select 报可读来钉住 Linux 行为 |
+| D-13 | `install.sh` 含 CRLF（Windows 提交） | Linux `dash` 的 `sh -n` 在 `case ... in` 处报语法错，packaging job 红 | 脚本 LF 化 + `.gitattributes` 锁 `*.sh eol=lf`、`*.ps1 eol=crlf` |
+| D-14 | 冒烟 grep 锚定整行 `^x.y.z$`，但 `spark version` 打印品牌 banner + 版本行 | build-exe / release 的冒烟步骤必然 exit 1，产物其实可用 | 改为匹配版本子串（无版本号仍失败） |
+| D-15 | `web/openapi.json` 快照在 `8f6abd3` 后过期 | main 的 quality job 长期红 | 重新生成快照并纳入本轮提交 |
+| D-16 | `frontend` dist 里累积了 7 个同名不同 hash 的陈旧 chunk | 包体冗余、缓存语义混乱 | 清空重建，Vite 现在只产出 16 个 chunk |
+
+**诚实边界（仍未验证）**
+
+- 安装脚本的真实下载链路未在 CI 里跑（需要先发布 Release 资产）；CI 只做语法与
   资产名一致性校验，端到端安装需在打 tag 后手工验证一次。
 - `spark update` 的 `frozen` 分支不在测试中执行（测试用 zip 替换模拟），
   真实 PyInstaller 自替换未做端到端演练。
 - 桌面通知只在 Chromium 下验证；Firefox/Safari 权限模型差异未测。
+- 本轮 Linux 侧结论来自 CI 实跑，本机无 Linux 环境（Docker daemon 不可用、
+  WSL 未安装），无法在本地复现同一时序。

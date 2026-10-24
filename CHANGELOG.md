@@ -28,6 +28,20 @@
 - **模型热键**：`Ctrl+Alt+M` 循环模型档案（对齐全 opencode `F2/Shift+F2`）。
 - **small_model 接线标题生成**：会话标题/关键词走 `provider.small_model`（压缩摘要此前已接）。
 
+### 修复（CI 首次全绿攻坚）
+
+- **Linux SSE 空流**：`_SSESession` 的 peer 断连探测在「刚建连、请求体刚读完」
+  瞬间于 Linux 上误判断连，整条流未写出即 abort（Windows 不复现）。建连后
+  0.25s grace 窗口内跳过该探测，空闲真实关闭仍可检测。
+- **`install.sh` CRLF**：Windows 提交带 CRLF，Linux `dash` 的 `sh -n` 在
+  `case ... in` 处报语法错；脚本 LF 化并在 `.gitattributes` 锁
+  `*.sh eol=lf` / `*.ps1 eol=crlf`。
+- **发布冒烟误报**：`build-exe`/`release` 的 grep 锚定整行，而 `spark version`
+  先打印品牌 banner；改为匹配版本子串。
+- **OpenAPI 快照过期**：`8f6abd3` 改 api_spec 未重生成，main 的 quality job
+  长期红；已重建。
+- **前端 dist 冗余**：清掉 7 个同名不同 hash 的陈旧 chunk，重建后仅 16 个。
+
 ### 改进（工程门禁）
 
 - CI 新增 `packaging` job：`sh -n` 校验安装脚本、pyproject 与 `spark.__version__`

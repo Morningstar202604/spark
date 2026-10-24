@@ -43,7 +43,9 @@ model — no restart.
 
 > Every screenshot below comes from a **live session against a real model** on a real
 > workdir — no mock, no mock-up. Regenerate them with
-> `python scripts/capture_screenshots.py`.
+> `python scripts/capture_screenshots.py` (core surfaces) and
+> `python scripts/capture_round7.py` (inline shell, share, notifications); the
+> 30-second tour is rebuilt with `python scripts/build_promo.py` + ffmpeg.
 
 [![Watch the 30-second tour](assets/share/preview-frame.png)](assets/spark-demo.mp4)
 

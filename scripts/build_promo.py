@@ -31,3 +31,50 @@ for i, (name, cap) in enumerate(shots):
         check=True,
     )
     print("frame", dst.name)
+
+# --- compose the tour -------------------------------------------------------
+# Frames are built above; xfade chains them into assets/spark-demo.mp4 and the
+# GIF preview. Kept in one script so the README's rebuild command actually
+# reproduces the shipped video end to end.
+import shutil
+
+frames = sorted(out.glob("frame*.png"))
+if not frames:
+    raise SystemExit("no frames produced")
+DUR = 3.0
+FADE = 0.6
+
+inputs: list[str] = []
+for frame in frames:
+    inputs += ["-loop", "1", "-t", str(DUR), "-i", str(frame)]
+
+filters = [f"[{i}:v]scale=1600:1100,setsar=1,fps=30[v{i}]" for i in range(len(frames))]
+last = "v0"
+for i in range(1, len(frames)):
+    nxt = f"x{i}"
+    filters.append(
+        f"[{last}][v{i}]xfade=transition=fade:duration={FADE}:"
+        f"offset={DUR * i - FADE * i:.2f}[{nxt}]"
+    )
+    last = nxt
+filters.append(f"[{last}]format=yuv420p[outv]")
+
+subprocess.run(
+    ["ffmpeg", "-y", "-loglevel", "error", *inputs, "-filter_complex", ";".join(filters),
+     "-map", "[outv]", "-c:v", "libx264", "-preset", "slow", "-crf", "20",
+     "-movflags", "+faststart", "assets/spark-demo.mp4"],
+    check=True,
+)
+subprocess.run(
+    ["ffmpeg", "-y", "-loglevel", "error", "-i", "assets/spark-demo.mp4",
+     "-vf", "fps=1,scale=760:-1", "assets/share/spark-demo.gif"],
+    check=True,
+)
+subprocess.run(
+    ["ffmpeg", "-y", "-loglevel", "error", "-ss", "4", "-i", "assets/spark-demo.mp4",
+     "-frames:v", "1", "-update", "1", "assets/share/preview-frame.png"],
+    check=True,
+)
+# Intermediate frames are reproducible from the screenshots; do not leave them.
+shutil.rmtree(out, ignore_errors=True)
+print("wrote assets/spark-demo.mp4, assets/share/spark-demo.gif, assets/share/preview-frame.png")
