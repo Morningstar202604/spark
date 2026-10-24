@@ -260,3 +260,34 @@ def test_live_stream_keeps_sse_event_contract(tmp_path, monkeypatch) -> None:
         "done",
     ]
     assert events[1]["text"]
+
+
+def test_peer_disconnect_is_suppressed_during_connect_grace(monkeypatch) -> None:
+    """Linux 回归：建连瞬间 select 可读 + recv 空会被误判断连，整条流 abort。
+
+    Windows 上不复现（select 语义不同），所以这个不变量必须显式钉住：
+    grace 窗口内根本不做 peer 检查，窗口过后才恢复（真实关闭的检测由
+    test_sse_writer_notices_idle_socket_close 覆盖）。
+    """
+    from spark.web import sse as sse_mod
+
+    class FakeConn:
+        def __init__(self) -> None:
+            self.recv_calls = 0
+
+        def fileno(self) -> int:
+            return -1
+
+        def recv(self, n, flags=0):
+            self.recv_calls += 1
+            return b""
+
+    conn = FakeConn()
+    session = sse_mod._SSESession(object(), connection=conn)
+    # select 永远报可读，模拟 Linux 建连瞬间的行为
+    monkeypatch.setattr(sse_mod.select, "select", lambda *a, **k: ([conn], [], []))
+    assert session._peer_disconnected() is False
+    assert conn.recv_calls == 0, "grace 窗口内不应做 recv"
+    session._created_at -= 1.0
+    assert session._peer_disconnected() is True
+    assert conn.recv_calls == 1

@@ -32,6 +32,8 @@ __pycache__/
 *.py[cod]
 .venv/
 venv/
+# 临时 Python 版本对照环境（本地兼容性验证用，不进仓库）
+.venv3*/
 ENV/
 *.egg-info/
 *.egg

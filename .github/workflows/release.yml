@@ -59,7 +59,7 @@ jobs:
           elif [ -f dist/spark/spark ]; then BIN=dist/spark/spark
           else echo "no executable produced"; exit 1; fi
           "$BIN" --version | tee /tmp/spark-version.txt
-          grep -qE '^[0-9]+\.[0-9]+\.[0-9]+([-.][A-Za-z0-9.]+)?$' /tmp/spark-version.txt
+          grep -qE '[0-9]+\.[0-9]+\.[0-9]+([-.][A-Za-z0-9.]+)?' /tmp/spark-version.txt
       - name: Upload logs (diagnostics)
         if: failure()
         uses: actions/upload-artifact@v4

@@ -47,6 +47,13 @@ class _SSESession:
         self._on_disconnect = on_disconnect
         self._close_connection = close_connection
         self._peer_monitor_disabled = False
+        # Linux 上 select+MSG_PEEK 在「刚建连、请求体刚读完」的极短窗口里可能
+        # 报告可读且 recv 返回空，被误判成断连 —— 整条 SSE 流还没写出就被 abort
+        # （CI ubuntu 100% 复现，Windows 不复现）。只在建连后的 grace 窗口内
+        # 抑制该判定，空闲连接的真实关闭仍能被发现（见
+        # tests/test_web_sse.py::test_sse_writer_notices_idle_socket_close）。
+        self._created_at = time.monotonic()
+        self._peer_grace_sec = 0.25
         self._flush_interval = max(0.001, float(flush_interval))
         self._heartbeat_interval = max(0.001, float(heartbeat_interval))
         self._max_text_chars = max(1, int(max_text_chars))
@@ -125,6 +132,8 @@ class _SSESession:
 
     def _peer_disconnected(self) -> bool:
         if self._connection is None or self._peer_monitor_disabled:
+            return False
+        if time.monotonic() - self._created_at < self._peer_grace_sec:
             return False
         try:
             readable, _, _ = select.select([self._connection], [], [], 0)
