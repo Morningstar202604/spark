@@ -143,7 +143,6 @@ def test_web_fetch_blocks_internal_targets(url: str) -> None:
 def test_web_fetch_allows_public_hosts(url: str, monkeypatch: pytest.MonkeyPatch) -> None:
     from urllib.parse import urlparse
 
-    from spark.tools import web
     from spark.tools.web import _assert_fetchable, _is_public_host
 
     _stub_public_dns(monkeypatch)
