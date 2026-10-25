@@ -16,6 +16,16 @@ from spark.web._httpbase import HandlerBase
 from spark.web._routing import _route_state
 
 
+def _parse_resilience(body: dict) -> tuple[list[str], list[str], str]:
+    """供应商韧性字段（可缺省）：api_keys 凭据池 / fallback_models 回退链 / small_model。"""
+    raw_keys = body.get("api_keys")
+    api_keys = [str(x).strip() for x in raw_keys if str(x).strip()] if isinstance(raw_keys, list) else []
+    raw_fb = body.get("fallback_models")
+    fallback_models = [str(x).strip() for x in raw_fb if str(x).strip()] if isinstance(raw_fb, list) else []
+    small_model = str(body.get("small_model") or "").strip()
+    return api_keys, fallback_models, small_model
+
+
 def _handle_models_save(handler: HandlerBase, body: dict) -> None:
     from spark.config import ModelProfile
 
@@ -32,6 +42,7 @@ def _handle_models_save(handler: HandlerBase, body: dict) -> None:
         return
     state = _route_state(handler)
     pid = str(body.get("id") or "").strip()
+    api_keys, fallback_models, small_model = _parse_resilience(body)
     existing = next(
         (p for p in state.cfg.model_profiles if p.id == pid), None
     )
@@ -42,6 +53,9 @@ def _handle_models_save(handler: HandlerBase, body: dict) -> None:
         existing.model = model
         if api_key:
             existing.api_key = api_key
+        existing.api_keys = api_keys
+        existing.fallback_models = fallback_models
+        existing.small_model = small_model
     else:
         if not api_key:
             api_key = state.cfg.provider.api_key or ""
@@ -52,6 +66,9 @@ def _handle_models_save(handler: HandlerBase, body: dict) -> None:
             base_url=base_url,
             model=model,
             api_key=api_key,
+            api_keys=api_keys,
+            fallback_models=fallback_models,
+            small_model=small_model,
         )
         state.cfg.model_profiles.append(existing)
     _save_config(state.cfg)
@@ -91,6 +108,13 @@ def _handle_models_activate(handler: HandlerBase, body: dict) -> None:
     state.cfg.provider.model = profile.model
     if profile.api_key:
         state.cfg.provider.api_key = profile.api_key
+    # 供应商韧性随档案同步（档案未配置时保持全局现状）
+    if profile.api_keys:
+        state.cfg.provider.api_keys = profile.api_keys
+    if profile.fallback_models:
+        state.cfg.provider.fallback_models = profile.fallback_models
+    if profile.small_model:
+        state.cfg.provider.small_model = profile.small_model
     state.cfg.active_profile_id = profile.id
     _save_config(state.cfg)
     try:

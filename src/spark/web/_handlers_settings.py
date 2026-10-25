@@ -136,10 +136,45 @@ def _context_updates(context_in: Any) -> tuple[dict[str, Any], str | None]:
             if not 1000 <= budget <= 100_000_000:
                 raise ValueError("history_budget_chars out of range")
             updates["history_budget_chars"] = budget
+        if "max_fragment_chars" in context_in:
+            frag = int(context_in["max_fragment_chars"])
+            if not 100 <= frag <= 200_000:
+                raise ValueError("max_fragment_chars out of range")
+            updates["max_fragment_chars"] = frag
         if "repo_map_enabled" in context_in:
             updates["repo_map_enabled"] = bool(context_in["repo_map_enabled"])
     except (TypeError, ValueError) as exc:
         return {}, f"invalid context setting: {exc}"
+    return updates, None
+
+
+def _memory_updates(memory_in: Any) -> tuple[dict[str, Any], str | None]:
+    """记忆 tab 配置：返回 (updates, error)。非 dict 输入视为不更新。"""
+    updates: dict[str, Any] = {}
+    if not isinstance(memory_in, dict):
+        return updates, None
+    try:
+        if "enabled" in memory_in:
+            updates["enabled"] = bool(memory_in["enabled"])
+        if "top_k" in memory_in:
+            topk = int(memory_in["top_k"])
+            if not 1 <= topk <= 50:
+                raise ValueError("top_k must be within 1-50")
+            updates["top_k"] = topk
+        if "capacity" in memory_in:
+            capacity = int(memory_in["capacity"])
+            if not 1 <= capacity <= 100_000:
+                raise ValueError("capacity out of range")
+            updates["capacity"] = capacity
+        if "embedding_model" in memory_in:
+            name = str(memory_in["embedding_model"] or "").strip()
+            if not name:
+                raise ValueError("embedding_model is required")
+            updates["embedding_model"] = name
+        if "auto_extract" in memory_in:
+            updates["auto_extract"] = bool(memory_in["auto_extract"])
+    except (TypeError, ValueError) as exc:
+        return {}, f"invalid memory setting: {exc}"
     return updates, None
 
 
@@ -196,6 +231,7 @@ def _extract_request_fields(state, body: dict) -> dict[str, Any]:
     """从请求体提取本次保存的全部标量字段（缺省回落当前配置）。"""
     provider_raw = body.get("provider")
     provider_in: dict = provider_raw if isinstance(provider_raw, dict) else {}
+    memory_raw = body.get("memory")
     agent_raw = body.get("agent")
     agent_in: dict = agent_raw if isinstance(agent_raw, dict) else {}
     return {
@@ -226,6 +262,16 @@ def _extract_request_fields(state, body: dict) -> dict[str, Any]:
         "effort": str(
             agent_in.get("effort") or state.cfg.agent.effort
         ).strip(),
+        "provider_resilience": (
+            {
+                "api_keys": provider_in.get("api_keys"),
+                "fallback_models": provider_in.get("fallback_models"),
+                "small_model": provider_in.get("small_model"),
+            }
+            if isinstance(provider_raw, dict)
+            else {}
+        ),
+        "memory_in": memory_raw if isinstance(memory_raw, dict) else {},
     }
 
 
@@ -237,6 +283,7 @@ def _apply_validated_settings(
     protected_paths_update: list[str] | None,
     system_prompt: str,
     context_updates: dict[str, Any],
+    memory_updates: dict[str, Any],
 ) -> None:
     """全部校验通过后统一提交：任何失败都不会走到这里，不留下半改状态。"""
     cfg = state.cfg
@@ -244,6 +291,24 @@ def _apply_validated_settings(
     cfg.provider.base_url = fields["base_url"]
     cfg.provider.model = fields["model"]
     cfg.provider.api_key = fields["api_key"] or None
+    # 供应商韧性（凭据池 / 回退链 / 小模型分工）：请求携带即覆盖
+    resilience = fields.get("provider_resilience") or {}
+    if "api_keys" in resilience and resilience["api_keys"] is not None:
+        raw_keys = resilience["api_keys"]
+        cfg.provider.api_keys = (
+            [str(x).strip() for x in raw_keys if str(x).strip()]
+            if isinstance(raw_keys, list)
+            else []
+        )
+    if "fallback_models" in resilience and resilience["fallback_models"] is not None:
+        raw_fb = resilience["fallback_models"]
+        cfg.provider.fallback_models = (
+            [str(x).strip() for x in raw_fb if str(x).strip()]
+            if isinstance(raw_fb, list)
+            else []
+        )
+    if resilience.get("small_model") is not None:
+        cfg.provider.small_model = str(resilience["small_model"] or "").strip()
     cfg.agent.approval = cast(ApprovalMode, fields["approval"])
     cfg.agent.sandbox_mode = cast(SandboxMode, fields["sandbox_mode"])
     cfg.agent.effort = cast(Literal["low", "medium", "high"], fields["effort"])
@@ -262,6 +327,8 @@ def _apply_validated_settings(
         # Field types were validated above; setattr keeps this version-tolerant
         # if a new context field is added to the model.
         setattr(cfg.context, key, value)  # type: ignore[arg-type]
+    for key, value in memory_updates.items():
+        setattr(cfg.memory, key, value)  # type: ignore[arg-type]
     state.sandbox = WorkdirSandbox(state.workdir, state.cfg)
 
 
@@ -326,10 +393,16 @@ def _handle_settings(handler: HandlerBase, body: dict) -> None:
         handler._json(400, {"error": context_error})
         return
 
+    # ── 记忆配置（Memory 页）：开关 / 容量 / 嵌入模型 / 自动抽取 / 检索条数 ──
+    memory_updates, memory_error = _memory_updates(fields["memory_in"])
+    if memory_error:
+        handler._json(400, {"error": memory_error})
+        return
+
     # ── 全部校验通过后统一提交：任何失败都不留下半改的内存状态 ──
     _apply_validated_settings(
         state, fields, numbers, display_flags, protected_paths_update,
-        system_prompt, context_updates,
+        system_prompt, context_updates, memory_updates,
     )
 
     mcp_errors, mcp_error = _apply_mcp_servers(state, body.get("mcp_servers"))

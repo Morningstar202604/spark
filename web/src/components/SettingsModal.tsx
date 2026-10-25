@@ -199,8 +199,11 @@ export default function SettingsDrawer({ onClose, onSaved }: Props) {
   const [busy, setBusy] = useState<"save" | "test" | "profile" | null>(null)
   const [profiles, setProfiles] = useState<ModelProfile[]>([])
   const [showProfileForm, setShowProfileForm] = useState(false)
-  const [profileForm, setProfileForm] = useState({ id: "", name: "", provider: "openai_compat", base_url: "", model: "", api_key: "" })
+  const [profileForm, setProfileForm] = useState({ id: "", name: "", provider: "openai_compat", base_url: "", model: "", api_key: "", api_keysText: "", fallbackModelsText: "", small_model: "" })
   const [protectedText, setProtectedText] = useState("")
+  const [providerApiKeysText, setProviderApiKeysText] = useState("")
+  const [providerFallbackText, setProviderFallbackText] = useState("")
+  const [providerSmallModel, setProviderSmallModel] = useState("")
   const [hookRows, setHookRows] = useState<HookEntry[]>([])
   // Raw argument text per row, so quotes survive typing; rows are re-split on
   // every change but the input keeps what the user actually typed.
@@ -215,7 +218,7 @@ export default function SettingsDrawer({ onClose, onSaved }: Props) {
   const [notifyOn, setNotifyOn] = useState(() => notificationsEnabled())
   const [notifyPerm, setNotifyPerm] = useState(() => notificationPermission())
   const [showRegistry, setShowRegistry] = useState(false)
-  const dirtyRef = useRef({ cfg: false, mcp: false, md: false })
+  const dirtyRef = useRef({ cfg: false, mcp: false, md: false, memory: false })
 
   function handleRegistryPick(item: McpRegistryItem) {
     // stdio 条目给 command/args；remote 条目只有 URL，走 streamable_http。
@@ -312,6 +315,11 @@ export default function SettingsDrawer({ onClose, onSaved }: Props) {
           // Empty means "keep the stored key": the backend falls back to
           // cfg.provider.api_key / the env var when this is blank.
           api_key: apiKeyInput.trim(),
+          // 供应商韧性：输入框留空 = 保持现状（避免保存设置时误清凭据池）；
+          // 有输入 = 整体替换（掩码回显不参与保存，重新输入真实值覆盖）。
+          ...(providerApiKeysText.trim() ? { api_keys: providerApiKeysText.split("\n").map((s) => s.trim()).filter(Boolean) } : {}),
+          ...(providerFallbackText.trim() ? { fallback_models: providerFallbackText.split("\n").map((s) => s.trim()).filter(Boolean) } : {}),
+          ...(providerSmallModel.trim() ? { small_model: providerSmallModel.trim() } : {}),
         },
         agent: {
           approval: cfg.agent.approval,
@@ -339,8 +347,21 @@ export default function SettingsDrawer({ onClose, onSaved }: Props) {
           max_context_tokens: cfg.context.max_context_tokens,
           keep_recent_messages: cfg.context.keep_recent_messages,
           history_budget_chars: cfg.context.history_budget_chars,
+          max_fragment_chars: cfg.context.max_fragment_chars,
           repo_map_enabled: cfg.context.repo_map_enabled,
         },
+        // 只在记忆配置区块有改动时提交，避免覆盖 toml 手改值
+        ...(dirtyRef.current.memory
+          ? {
+              memory: {
+                enabled: cfg.memory?.enabled ?? true,
+                top_k: cfg.memory?.top_k ?? 6,
+                capacity: cfg.memory?.capacity ?? 500,
+                embedding_model: cfg.memory?.embedding_model ?? "",
+                auto_extract: cfg.memory?.auto_extract ?? true,
+              },
+            }
+          : {}),
         mcp_servers: mcpRows.map((row) => ({
           ...row,
           env: Object.fromEntries(
@@ -359,6 +380,7 @@ export default function SettingsDrawer({ onClose, onSaved }: Props) {
       }
       dirtyRef.current.cfg = false
       dirtyRef.current.mcp = false
+      dirtyRef.current.memory = false
       onSaved(data.status)
       useSessionStore.getState().refreshSessions()
     } catch (e) {
@@ -397,12 +419,16 @@ export default function SettingsDrawer({ onClose, onSaved }: Props) {
         base_url: profileForm.base_url,
         model: profileForm.model,
         api_key: profileForm.api_key || undefined,
+        // 留空 = 保持该档案已有韧性（掩码回显不参与保存）
+        ...(profileForm.api_keysText.trim() ? { api_keys: profileForm.api_keysText.split("\n").map((s) => s.trim()).filter(Boolean) } : {}),
+        ...(profileForm.fallbackModelsText.trim() ? { fallback_models: profileForm.fallbackModelsText.split("\n").map((s) => s.trim()).filter(Boolean) } : {}),
+        ...(profileForm.small_model.trim() ? { small_model: profileForm.small_model.trim() } : {}),
       })
       await refreshProfiles()
       const act = await activateModelProfile(res.id)
       onSaved(act.status)
       setShowProfileForm(false)
-      setProfileForm({ id: "", name: "", provider: "openai_compat", base_url: "", model: "", api_key: "" })
+      setProfileForm({ id: "", name: "", provider: "openai_compat", base_url: "", model: "", api_key: "", api_keysText: "", fallbackModelsText: "", small_model: "" })
       setNotice(t("model.saved", lang))
     } catch (e) {
       setNotice(t("settings.saveFailed", lang, { msg: e instanceof Error ? e.message : String(e) }))
@@ -612,6 +638,20 @@ export default function SettingsDrawer({ onClose, onSaved }: Props) {
                 )}
               </section>
 
+              <section className="flex flex-col gap-2.5 rounded-xl border border-line bg-panel p-4">
+                <h3 className="text-sm font-semibold text-ink">{t("model.resilience", lang)}</h3>
+                <p className="text-xs leading-relaxed text-ink3">{t("model.resilienceDesc", lang)}</p>
+                <Field label={t("model.apiKeys", lang)} hint={cfg.provider.api_keys_count > 0 ? t("model.apiKeysHint", lang, { n: cfg.provider.api_keys_count }) : undefined}>
+                  <TextArea value={providerApiKeysText} onChange={(e) => { dirtyRef.current.cfg = true; setProviderApiKeysText(e.target.value) }} placeholder={t("model.apiKeysPh", lang)} rows={2} />
+                </Field>
+                <Field label={t("model.fallbackModels", lang)}>
+                  <TextArea value={providerFallbackText} onChange={(e) => { dirtyRef.current.cfg = true; setProviderFallbackText(e.target.value) }} placeholder={t("model.fallbackModelsPh", lang)} rows={2} />
+                </Field>
+                <Field label={t("model.smallModel", lang)}>
+                  <TextInput value={providerSmallModel} onChange={(e) => { dirtyRef.current.cfg = true; setProviderSmallModel(e.target.value) }} placeholder={t("model.smallModelPh", lang)} />
+                </Field>
+              </section>
+
               <section className="flex flex-col gap-3 rounded-xl border border-line bg-panel p-4">
                 <div className="flex items-center justify-between">
                   <h3 className="text-sm font-semibold text-ink">{t("model.profiles", lang)}</h3>
@@ -639,6 +679,15 @@ export default function SettingsDrawer({ onClose, onSaved }: Props) {
                     </Field>
                     <Field label={t("model.apiKey", lang)}>
                       <TextInput value={profileForm.api_key} onChange={(e) => setProfileForm((p) => ({ ...p, api_key: e.target.value }))} placeholder={t("model.apiKeyPhNew", lang)} type="password" />
+                    </Field>
+                    <Field label={t("model.apiKeys", lang)} hint={t("model.apiKeysProfileHint", lang)}>
+                      <TextArea value={profileForm.api_keysText} onChange={(e) => setProfileForm((p) => ({ ...p, api_keysText: e.target.value }))} placeholder={t("model.apiKeysPh", lang)} rows={2} />
+                    </Field>
+                    <Field label={t("model.fallbackModels", lang)}>
+                      <TextArea value={profileForm.fallbackModelsText} onChange={(e) => setProfileForm((p) => ({ ...p, fallbackModelsText: e.target.value }))} placeholder={t("model.fallbackModelsPh", lang)} rows={2} />
+                    </Field>
+                    <Field label={t("model.smallModel", lang)}>
+                      <TextInput value={profileForm.small_model} onChange={(e) => setProfileForm((p) => ({ ...p, small_model: e.target.value }))} placeholder={t("model.smallModelPh", lang)} />
                     </Field>
                     <div className="flex gap-2">
                       <Button variant="primary" full onClick={handleSaveProfile} disabled={busy === "profile" || !profileForm.name || !profileForm.base_url || !profileForm.model}>
@@ -813,6 +862,24 @@ export default function SettingsDrawer({ onClose, onSaved }: Props) {
                   </Button>
                 </div>
               </section>
+
+              <section className="flex flex-col gap-2.5 rounded-xl border border-line bg-panel p-4">
+                <h3 className="text-sm font-semibold text-ink">{t("security.envProbe", lang)}</h3>
+                <p className="text-xs leading-relaxed text-ink3">{t("security.envProbeDesc", lang)}</p>
+                {!cfg.env_probe || cfg.env_probe.length === 0 ? (
+                  <p className="text-xs text-ink3">{t("security.noProbeData", lang)}</p>
+                ) : (
+                  <div className="flex flex-col divide-y divide-line rounded-lg border border-line">
+                    {cfg.env_probe.map((row) => (
+                      <div key={row.name} className="flex items-center gap-3 px-3 py-2">
+                        <span className="w-20 shrink-0 font-mono text-[12px] font-medium text-ink">{row.name}</span>
+                        <span className="min-w-0 flex-1 truncate font-mono text-[11.5px] text-ink3" title={row.path}>{row.path || t("common.notFound", lang)}</span>
+                        <span className={cls("shrink-0 rounded-md px-2 py-0.5 text-[11px] font-medium", row.version === "unavailable" ? "bg-err/10 text-err" : "bg-ok/10 text-ok")}>{row.version}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </section>
             </div>
           )}
 
@@ -914,7 +981,38 @@ export default function SettingsDrawer({ onClose, onSaved }: Props) {
             </div>
           )}
 
-          {tab === "memory" && <MemorySection />}
+          {tab === "memory" && (
+            <div className="flex flex-col gap-4">
+              <section className="flex flex-col gap-2.5 rounded-xl border border-line bg-panel p-4">
+                <h3 className="text-sm font-semibold text-ink">{t("memory.configTitle", lang)}</h3>
+                <p className="text-xs leading-relaxed text-ink3">{t("memory.configDesc", lang)}</p>
+                <label className="flex items-center justify-between gap-3">
+                  <span className="text-[12.5px] text-ink">{t("memory.enabled", lang)}</span>
+                  <Toggle
+                    checked={cfg.memory?.enabled ?? true}
+                    onChange={(v) => { dirtyRef.current.memory = true; setCfg((c) => (c ? { ...c, memory: { ...(c.memory ?? { enabled: true, top_k: 6, capacity: 500, embedding_model: "", auto_extract: true }), enabled: v } } : c)) }}
+                  />
+                </label>
+                <Field label={t("memory.topK", lang)}>
+                  <TextInput type="number" value={cfg.memory?.top_k ?? 6} onChange={(e) => { dirtyRef.current.memory = true; setCfg((c) => (c ? { ...c, memory: { ...(c.memory ?? { enabled: true, top_k: 6, capacity: 500, embedding_model: "", auto_extract: true }), top_k: Number(e.target.value) || 6 } } : c)) }} />
+                </Field>
+                <Field label={t("memory.capacity", lang)}>
+                  <TextInput type="number" value={cfg.memory?.capacity ?? 500} onChange={(e) => { dirtyRef.current.memory = true; setCfg((c) => (c ? { ...c, memory: { ...(c.memory ?? { enabled: true, top_k: 6, capacity: 500, embedding_model: "", auto_extract: true }), capacity: Number(e.target.value) || 500 } } : c)) }} />
+                </Field>
+                <Field label={t("memory.embeddingModel", lang)}>
+                  <TextInput value={cfg.memory?.embedding_model ?? ""} onChange={(e) => { dirtyRef.current.memory = true; setCfg((c) => (c ? { ...c, memory: { ...(c.memory ?? { enabled: true, top_k: 6, capacity: 500, embedding_model: "", auto_extract: true }), embedding_model: e.target.value } } : c)) }} placeholder={t("memory.embeddingModelPh", lang)} />
+                </Field>
+                <label className="flex items-center justify-between gap-3">
+                  <span className="text-[12.5px] text-ink">{t("memory.autoExtract", lang)}</span>
+                  <Toggle
+                    checked={cfg.memory?.auto_extract ?? true}
+                    onChange={(v) => { dirtyRef.current.memory = true; setCfg((c) => (c ? { ...c, memory: { ...(c.memory ?? { enabled: true, top_k: 6, capacity: 500, embedding_model: "", auto_extract: true }), auto_extract: v } } : c)) }}
+                  />
+                </label>
+              </section>
+              <MemorySection />
+            </div>
+          )}
 
           {tab === "skills" && <SkillsSection />}
 
@@ -1100,6 +1198,21 @@ export default function SettingsDrawer({ onClose, onSaved }: Props) {
                     }}
                   />
                 </Field>
+                <Field label={t("project.fragmentLimit", lang)}>
+                  <TextInput
+                    type="number"
+                    min={100}
+                    max={200000}
+                    value={cfg.context.max_fragment_chars ?? 8000}
+                    onChange={(e) => {
+                      const raw = e.target.value
+                      if (raw === "") return
+                      const frag = Math.min(200000, Math.max(100, Number(raw)))
+                      dirtyRef.current.cfg = true
+                      setCfg((c) => (c ? { ...c, context: { ...c.context, max_fragment_chars: frag } } : c))
+                    }}
+                  />
+                </Field>
               </section>
 
               <section className="rounded-xl border border-line bg-panel p-4">
@@ -1112,8 +1225,9 @@ export default function SettingsDrawer({ onClose, onSaved }: Props) {
           )}
         </div>
 
-        {/* 底部保存：memory 页有自己的即时操作，其余页（含 project）都可保存 */}
-        {tab !== "memory" && tab !== "skills" && tab !== "prompts" && tab !== "plugins" && tab !== "shortcuts" && tab !== "knowledge" && (
+        {/* 底部保存：skills/prompts/plugins/shortcuts/knowledge 有自己的即时操作；
+            memory 页含记忆配置区块，需要统一保存 */}
+        {tab !== "skills" && tab !== "prompts" && tab !== "plugins" && tab !== "shortcuts" && tab !== "knowledge" && (
           <div className="border-t border-line bg-panel2 px-4 py-3">
             <Button variant="primary" full onClick={handleSave} disabled={busy === "save"}>
               {busy === "save" ? (

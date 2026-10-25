@@ -1,6 +1,6 @@
 > 🌐 [English](README.md) | [中文](README_zh.md)
 
-# Spark — 本地优先的 AI 编程 Agent
+# Spark — 一个大脑，六种形态，可审计的工程级护栏
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-brightgreen.svg)](https://www.python.org/)
@@ -8,7 +8,9 @@
 [![CI](https://github.com/badhope/spark/actions/workflows/ci.yml/badge.svg)](https://github.com/badhope/spark/actions/workflows/ci.yml)
 [![Security](https://github.com/badhope/spark/actions/workflows/security.yml/badge.svg)](https://github.com/badhope/spark/actions/workflows/security.yml)
 
-**代码在你手，密钥在你手。** 完全跑在你自己机器上的 AI 编程 Agent：六种形态、36 个内置工具、零强制云依赖。
+一个把**审批、沙箱、回滚、供应商韧性做成工程级**而不是事后补丁的 AI 编程 Agent：
+同一套大脑同时运行在 Web UI、桌面窗口、TUI、可脚本化 CLI、ACP（IDE）与 MCP Server
+六种形态上。自带任意 OpenAI 兼容端点；无账号、无遥测、无厂商锁定。
 
 ```bash
 # Linux / macOS —— 一行安装，SHA256 校验
@@ -18,11 +20,11 @@ curl -fsSL https://raw.githubusercontent.com/badhope/spark/main/scripts/install.
 irm https://raw.githubusercontent.com/badhope/spark/main/scripts/install.ps1 | iex
 
 spark init          # 配置任意 OpenAI 兼容端点
-spark web           # 打开界面
+spark web           # 打开界面（自动挑一个空闲端口）
 ```
 
-无账号、无遥测、不把代码送去任何托管服务。**没有 API Key 时自动进入演示模式（mock）**，
-在设置里填入密钥后下一轮就走真实模型，无需重启。
+**没有 API Key 时自动进入演示模式（mock）**，在设置里填入密钥后下一轮就走真实模型，
+无需重启。
 
 ---
 
@@ -30,12 +32,15 @@ spark web           # 打开界面
 
 | | |
 |---|---|
-| **数据面全本地** | 会话、记忆、知识库、检查点都在 `~/.spark`；除了你自己配置的模型调用，没有任何外发。 |
-| **六形态，一个大脑** | Web UI · 原生桌面窗口 · Textual TUI · 可脚本化 CLI · ACP（Zed 等编辑器）· MCP Server。同一套 Agent 循环、同一套工具、同一套权限。 |
+| **六形态，一个大脑** | Web UI · 原生桌面窗口 · Textual TUI · 可脚本化 CLI · ACP（Zed 等编辑器）· MCP Server。同一套 Agent 循环、同一套工具、同一套权限——一处设策略，处处生效。 |
 | **审批可审计** | 六档审批 × 四档沙箱；通配规则引擎在 user/project/local 三层作用域里 `deny` 永远优先；凭据路径保护、命令 token 级检查、可选 bwrap 隔离。 |
 | **检查点而不是赌运气** | 每轮对工作区做 tar.gz 快照（含 manifest 校验）。文件与对话一起回滚，非 git 目录同样可用。 |
-| **任务即分支** | `task_begin` / `task_step_commit` / `task_finish`：绿测门控逐次提交，测试不过自动废弃分支。竞品均无一等公民实现。 |
+| **任务即分支** | `task_begin` / `task_step_commit` / `task_finish`：绿测门控逐次提交，测试不过自动废弃分支。不是演示，是一等公民工具。 |
 | **AI 审 AI** | `spark review` 在强制只读 + 仅沙箱的回合里审查未提交 diff（或指定 commit 区间），按严重级输出结论，支持 `--json` 接入 CI。 |
+| **供应商韧性内建** | 凭据池（失败自动轮换多个 Key）、回退模型链、小模型分工（压缩/摘要走 `small_model`）——一个 Key 耗尽或限流不会卡住整轮。 |
+| **MCP 双向协议** | Spark 同时是 MCP *客户端*（stdio/SSE/HTTP、最小权限 allowlist、OAuth）与 MCP *服务端*（`spark mcp-serve` 把 36 个工具暴露给其他 Agent）。 |
+| **`!cmd` 内联 shell** | 在任意聊天消息里直接跑命令——零 token、零审批噪音——结果以可折叠卡片呈现。 |
+| **有治理的记忆** | AGENTS.md 层级（全局 `~/.agents` + 项目 + 嵌套）叠加向量长期记忆：自动抽取、去重合并（UPDATE/NOOP）、容量淘汰，全部可在 Web 界面管理。 |
 
 ## 界面预览
 

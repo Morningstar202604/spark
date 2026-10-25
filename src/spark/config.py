@@ -201,6 +201,10 @@ class ModelProfile(BaseModel):
     base_url: str = ""
     model: str = ""
     api_key: str = ""
+    # 供应商韧性（激活时同步到 [provider]）：凭据池 / 回退链 / 小模型分工
+    api_keys: list[str] = Field(default_factory=list)
+    fallback_models: list[str] = Field(default_factory=list)
+    small_model: str = ""
 
 
 class HookConfig(BaseModel):

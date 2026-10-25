@@ -61,6 +61,10 @@ export interface FullConfig {
     api_key_env: string
     api_key_masked: string
     has_api_key: boolean
+    api_keys: string[]
+    api_keys_count: number
+    fallback_models: string[]
+    small_model: string
   }
   agent: {
     approval: string
@@ -94,6 +98,14 @@ export interface FullConfig {
   mcp_servers: McpServer[]
   mcp_errors: string[]
   hooks: HookEntry[]
+  memory?: {
+    enabled: boolean
+    top_k: number
+    capacity: number
+    embedding_model: string
+    auto_extract: boolean
+  }
+  env_probe?: Array<{ name: string; path: string; version: string }>
 }
 
 export interface HookEntry {
@@ -110,6 +122,9 @@ export interface SettingsPayload {
     base_url: string
     model: string
     api_key?: string
+    api_keys?: string[]
+    fallback_models?: string[]
+    small_model?: string
   }
   agent: {
     approval: string
@@ -135,7 +150,15 @@ export interface SettingsPayload {
     max_context_tokens?: number
     keep_recent_messages?: number
     history_budget_chars?: number
+    max_fragment_chars?: number
     repo_map_enabled?: boolean
+  }
+  memory?: {
+    enabled?: boolean
+    top_k?: number
+    capacity?: number
+    embedding_model?: string
+    auto_extract?: boolean
   }
   mcp_servers: McpServer[]
   hooks?: HookEntry[]
@@ -224,4 +247,7 @@ export interface ModelProfile {
   api_key_masked: string
   has_api_key: boolean
   active: boolean
+  api_keys?: string[]
+  fallback_models?: string[]
+  small_model?: string
 }

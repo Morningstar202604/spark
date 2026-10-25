@@ -174,3 +174,39 @@ def _event_payload(event) -> dict:
     if event.data:
         payload["data"] = event.data
     return payload
+
+
+def probe_env() -> list[dict[str, str]]:
+    """运行环境探测：常见工具链的路径与版本（只读，永不执行用户输入）。
+
+    供「设置 → 权限 → 运行环境探测」展示；探测失败的工具标记 unavailable。
+    """
+    import shutil
+    import subprocess
+
+    tools = [
+        ("python", ["python", "--version"]),
+        ("python3", ["python3", "--version"]),
+        ("git", ["git", "--version"]),
+        ("node", ["node", "--version"]),
+        ("npm", ["npm", "--version"]),
+        ("uv", ["uv", "--version"]),
+    ]
+    out: list[dict[str, str]] = []
+    for name, argv in tools:
+        exe = shutil.which(name)
+        if not exe:
+            out.append({"name": name, "path": "", "version": "unavailable"})
+            continue
+        version = ""
+        try:
+            proc = subprocess.run(
+                argv, capture_output=True, text=True, timeout=5, check=False
+            )
+            version = (proc.stdout or proc.stderr).strip().splitlines()[0] if (
+                proc.stdout or proc.stderr
+            ) else ""
+        except (OSError, subprocess.TimeoutExpired):
+            version = "unavailable"
+        out.append({"name": name, "path": exe, "version": version or "?"})
+    return out

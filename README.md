@@ -1,6 +1,6 @@
 > 🌐 [English](README.md) | [中文](README_zh.md)
 
-# Spark — Local-first AI Coding Agent
+# Spark — One agent brain. Six form factors. Guardrails you can audit.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-brightgreen.svg)](https://www.python.org/)
@@ -8,8 +8,10 @@
 [![CI](https://github.com/badhope/spark/actions/workflows/ci.yml/badge.svg)](https://github.com/badhope/spark/actions/workflows/ci.yml)
 [![Security](https://github.com/badhope/spark/actions/workflows/security.yml/badge.svg)](https://github.com/badhope/spark/actions/workflows/security.yml)
 
-**Code stays with you. Keys stay with you.** A self-hosted AI coding agent that runs
-entirely on your machine — six surfaces, 36 built-in tools, zero mandatory cloud.
+An AI coding agent where **approval, sandboxing, rollback and provider resilience are
+engineered, not bolted on** — the same brain runs as Web UI, desktop window, TUI,
+scriptable CLI, ACP (IDE) and MCP server. Bring your own OpenAI-compatible endpoint;
+no account, no telemetry, no vendor lock-in.
 
 ```bash
 # Linux / macOS — one line, SHA256-verified
@@ -19,12 +21,11 @@ curl -fsSL https://raw.githubusercontent.com/badhope/spark/main/scripts/install.
 irm https://raw.githubusercontent.com/badhope/spark/main/scripts/install.ps1 | iex
 
 spark init          # configure any OpenAI-compatible endpoint
-spark web           # open the UI
+spark web           # open the UI (auto-picks a free port)
 ```
 
-No account, no telemetry, no shell-out to a hosted service. Without an API key Spark
-starts in **demo mode (mock)**; paste a key in settings and the next turn uses the real
-model — no restart.
+Without an API key Spark starts in **demo mode (mock)**; paste a key in settings and
+the next turn uses the real model — no restart.
 
 ---
 
@@ -32,12 +33,15 @@ model — no restart.
 
 | | |
 |---|---|
-| **Local data plane** | Sessions, memory, knowledge base and checkpoints live in `~/.spark`. Nothing leaves the machine except the model calls you configure. |
-| **Six surfaces, one brain** | Web UI · native desktop window · Textual TUI · scriptable CLI · ACP (Zed & co.) · MCP server. Same agent loop, same tools, same permissions. |
+| **Six surfaces, one brain** | Web UI · native desktop window · Textual TUI · scriptable CLI · ACP (Zed & co.) · MCP server. Same agent loop, same tools, same permissions — a policy set once applies everywhere. |
 | **Approval you can audit** | Six approval modes × four sandbox levels, wildcard rule engine where `deny` wins across user/project/local scopes, protected credential paths, token-level shell checks, optional bwrap isolation. |
 | **Checkpoint instead of fear** | Every turn snapshots the workspace (tar.gz + manifest verification). Roll back files *and* conversation, including in non-git directories. |
-| **Task-as-branch** | `task_begin` / `task_step_commit` / `task_finish`: green tests gate each commit, failures abandon the branch. No competitor ships this as a first-class tool. |
+| **Task-as-branch** | `task_begin` / `task_step_commit` / `task_finish`: green tests gate each commit, failures abandon the branch. Not a demo — a first-class tool. |
 | **AI reviews AI** | `spark review` audits your uncommitted diff (or a commit range) in a forced read-only, sandbox-only turn and returns severity-ranked findings, with `--json` for CI. |
+| **Provider resilience, built-in** | A credential pool (multiple keys rotated on failure), a fallback model chain, and a `small_model` for compression/summary calls — one exhausted key or rate limit never blocks a turn. |
+| **MCP in both directions** | Spark is simultaneously an MCP *client* (stdio/SSE/HTTP, least-privilege allowlists, OAuth) and an MCP *server* (`spark mcp-serve`) exposing its 36 tools to other agents. |
+| **`!cmd` inline shell** | Run any command inside a chat message — zero tokens, zero approval noise — rendered as a collapsible result card. |
+| **Memory with governance** | AGENTS.md hierarchy (global `~/.agents` + project + nested) plus vector long-term memory with auto-extraction, dedup merge (UPDATE/NOOP) and capacity eviction — all manageable from the web UI. |
 
 ## Preview
 

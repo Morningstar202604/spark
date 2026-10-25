@@ -27,6 +27,7 @@ from spark.sandbox import WorkdirSandbox
 from spark.tools import bg as bg_tools
 from spark.tools.mcp_bridge import McpBridge
 from spark.tools.registry import ToolContext, ToolRegistry
+from spark.web.utils import probe_env
 
 logger = logging.getLogger(__name__)
 
@@ -415,6 +416,11 @@ class SparkWebState:
                 "api_key_env": self.cfg.provider.api_key_env,
                 "api_key_masked": mask_secret(self.cfg.provider.api_key or ""),
                 "has_api_key": bool(self.cfg.provider.api_key),
+                # 供应商韧性：凭据池按掩码回显，重新提交即整体替换
+                "api_keys": [mask_secret(k) for k in self.cfg.provider.api_keys],
+                "api_keys_count": len(self.cfg.provider.api_keys),
+                "fallback_models": list(self.cfg.provider.fallback_models),
+                "small_model": self.cfg.provider.small_model,
             },
             "agent": {
                 "approval": self.cfg.agent.approval,
@@ -447,6 +453,14 @@ class SparkWebState:
                 "repo_map_enabled": self.cfg.context.repo_map_enabled,
                 "repo_map_max_chars": self.cfg.context.repo_map_max_chars,
             },
+            "memory": {
+                "enabled": self.cfg.memory.enabled,
+                "top_k": self.cfg.memory.top_k,
+                "capacity": self.cfg.memory.capacity,
+                "embedding_model": self.cfg.memory.embedding_model,
+                "auto_extract": self.cfg.memory.auto_extract,
+            },
+            "env_probe": probe_env(),
             "mcp_servers": [
                 {
                     "name": s.name,
