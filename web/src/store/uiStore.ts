@@ -40,6 +40,7 @@ interface UiState {
   theme: Theme
   settingsOpen: boolean
   sidebarOpen: boolean
+  rightPanelOpen: boolean
   paletteOpen: boolean
   checkpointsOpen: boolean
   filesOpen: boolean
@@ -62,6 +63,8 @@ interface UiState {
   setSettingsTab: (tab: SettingsTab | null) => void
   toggleSidebar: () => void
   setSidebarOpen: (open: boolean) => void
+  toggleRightPanel: () => void
+  setRightPanelOpen: (open: boolean) => void
   setPaletteOpen: (open: boolean) => void
   openCheckpoints: () => void
   closeCheckpoints: () => void
@@ -92,6 +95,7 @@ export const useUiStore = create<UiState>((set) => ({
   theme: initTheme(),
   settingsOpen: false,
   sidebarOpen: window.innerWidth >= 1024,
+  rightPanelOpen: true,
   paletteOpen: false,
   checkpointsOpen: false,
   filesOpen: false,
@@ -125,6 +129,8 @@ export const useUiStore = create<UiState>((set) => ({
   setSettingsTab: (tab) => set({ settingsTab: tab }),
   toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen })),
   setSidebarOpen: (open) => set({ sidebarOpen: open }),
+  toggleRightPanel: () => set((s) => ({ rightPanelOpen: !s.rightPanelOpen })),
+  setRightPanelOpen: (open) => set({ rightPanelOpen: open }),
   setPaletteOpen: (open) => set({ paletteOpen: open }),
 
   openCheckpoints: () => set({ settingsOpen: false, checkpointsOpen: true, filesOpen: false, browserOpen: false, graphOpen: false, replayOpen: false, terminalOpen: false }),

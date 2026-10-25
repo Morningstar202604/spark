@@ -1,5 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useState } from "react"
 import { Sidebar } from "./components/Sidebar"
+import { RightPanel } from "./components/RightPanel"
 import { Header } from "./components/Header"
 import { ChatView } from "./components/ChatView"
 import { Composer } from "./components/Composer"
@@ -147,6 +148,7 @@ export default function App() {
         <ChatView />
         <Composer />
       </div>
+      <RightPanel />
       <ApprovalModal />
       <QuestionCard />
       <ShortcutsHelp />

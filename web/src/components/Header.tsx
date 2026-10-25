@@ -16,6 +16,7 @@ export const Header = memo(function Header() {
   const setPaletteOpen = useUiStore((s) => s.setPaletteOpen)
   const openHelp = useUiStore((s) => s.openHelp)
   const openFiles = useUiStore((s) => s.openFiles)
+  const toggleRightPanel = useUiStore((s) => s.toggleRightPanel)
   const openBrowser = useUiStore((s) => s.openBrowser)
   const openTerminal = useUiStore((s) => s.openTerminal)
   const openGraph = useUiStore((s) => s.openGraph)
@@ -90,6 +91,12 @@ export const Header = memo(function Header() {
       <IconButton title={`${t("palette.title", lang)} (Ctrl+K)`} onClick={() => setPaletteOpen(true)}>
         <IconCommand size={16} />
       </IconButton>
+      {/* 右侧面板（文件/预览/网页）：与左侧边栏对称，默认展开 */}
+      <span className="hidden md:inline-flex">
+        <IconButton title={t("rightPanel.title", lang)} onClick={toggleRightPanel}>
+          <IconMenu size={16} />
+        </IconButton>
+      </span>
       {/* 审查报告第五节体验差距：帮助此前只能靠 `?` 键，无可见入口。 */}
       <IconButton title={`${t("help.title", lang)} (?)`} onClick={openHelp}>
         <IconHelp size={16} />
