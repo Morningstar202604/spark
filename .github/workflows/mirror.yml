@@ -19,6 +19,9 @@ concurrency:
 
 jobs:
   push-mirrors:
+    # 仅主仓执行镜像；镜像仓库（x33834 / Morningstar202604 等）没有
+    # MIRROR_* Secrets，直接跳过而不是报错。
+    if: github.repository == 'badhope/spark'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
