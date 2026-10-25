@@ -492,6 +492,7 @@ class MemoryService:
             stats = self.store.stats()
         stats["embedding_available"] = self.embedding_available
         stats["embedding_model"] = self.cfg.memory.embedding_model
+        stats["capacity"] = self.cfg.memory.capacity
         return stats
 
 

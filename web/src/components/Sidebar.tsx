@@ -473,8 +473,15 @@ export const Sidebar = memo(function Sidebar() {
         {/* 底部：模型 + 工作目录 + 设置入口 */}
         <div className="border-t border-line p-3">
           <div className="flex items-center gap-2 rounded-lg bg-panel px-3 py-2">
-            <span className="flex h-6 w-6 items-center justify-center rounded-md bg-hover text-[10px] font-bold text-accent">
+            <span className="relative flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-hover text-[10px] font-bold text-accent">
               {status?.model?.slice(0, 2).toUpperCase() ?? "AI"}
+              <span
+                title={status?.demo_mode ? (status.demo_reason ?? "") : t("sidebar.liveModel", lang)}
+                className={cls(
+                  "absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full ring-2 ring-panel",
+                  status?.demo_mode ? "bg-warn" : "bg-ok",
+                )}
+              />
             </span>
             <div className="min-w-0">
               <p className="truncate text-[12px] font-semibold text-ink">{status?.model ?? t("sidebar.noModel", lang)}</p>

@@ -145,6 +145,27 @@ export default function MemorySection() {
           </div>
         )}
       </div>
+      {stats && stats.capacity ? (
+        <div className="rounded-lg border border-line bg-panel2 px-3 py-2">
+          <div className="mb-1 flex items-center justify-between text-[11px] text-ink3">
+            <span>{t("memory.capacityUsage", lang)}</span>
+            <span className="font-mono tabular-nums">{stats.active} / {stats.capacity}</span>
+          </div>
+          <div className="h-1.5 overflow-hidden rounded-full bg-line">
+            <div
+              className={cls(
+                "h-full rounded-full transition-[width] duration-500",
+                stats.capacity > 0 && stats.active / stats.capacity >= 0.85
+                  ? "bg-err"
+                  : stats.capacity > 0 && stats.active / stats.capacity >= 0.6
+                    ? "bg-warn"
+                    : "bg-accent",
+              )}
+              style={{ width: `${stats.capacity > 0 ? Math.min(100, Math.round((stats.active / stats.capacity) * 100)) : 0}%` }}
+            />
+          </div>
+        </div>
+      ) : null}
 
       <p className="text-xs leading-relaxed text-ink3">
         {t("memory.description", lang)}

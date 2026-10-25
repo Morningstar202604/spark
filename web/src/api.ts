@@ -126,6 +126,7 @@ export interface MemoryStats {
   by_type: Record<string, number>
   embedding_available: boolean | null
   embedding_model: string
+  capacity?: number
 }
 
 export async function fetchMemories(query: string): Promise<{
