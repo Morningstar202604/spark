@@ -2,6 +2,31 @@
 
 本项目遵循语义化版本。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)。
 
+## [Unreleased] - 2026-10-25（第九轮：全面 UI 走查与前后端 1:1 审计）
+
+### 前端（UI 走查修复）
+
+- **斜杠补全空态修复（真 bug）**：`Composer` 中空态提示代码（`composer.slashEmpty`）此前被
+  `slashOpen = slashQuery !== null && slashItems.length > 0` 的外层条件挡住，永远不可达——
+  无自定义命令时输入 `/` 无任何反馈。改为 `slashOpen` 只判前缀，空态可正常渲染；键盘处理
+  加 `slashItems.length > 0` 守卫，避免空态时 Enter 被吞掉无法发送消息。截图验证：无命令时
+  显示「没有匹配的自定义命令（.spark/commands/*.md）」，有命令时菜单正常、Enter 可应用。
+- **终端连接失败文案去平台误导**：`terminal.connectFailed` 原先写死「Windows 不支持，
+  或 pty extras 未安装」，在 Linux/macOS 上同样显示，误导排障。改为平台中性的说明
+  （POSIX 需 pty 支持；Windows 需额外 pty 组件），中英文同步。
+
+### 走查（未改代码，结论性记录）
+
+- 对运行中的 Web UI 做了 25 张截图走查（已归档 `docs/screenshots/ui-walkthrough/`）：
+  设置 12 个 tab（模型 / Agent / 权限 / 展示 / 记忆 / MCP / 技能 / 提示词 / 插件 / 快捷键 /
+  知识库 / 项目）、命令面板、快捷键帮助、文件查看器、网页阅读、内置终端、检查点回滚
+  （消息时间轴 + 回退按钮）、Turn 回放、斜杠补全空态与命令菜单、@ 引用菜单、内联 shell
+  命令卡片（`!ls` 退出码 0）、保存设置成功提示。全部渲染正常。
+- **前后端 1:1 覆盖审计**：后端约 45 个 REST 端点全部在前端有对应调用与观测/修改入口
+  （清单见 `web/src/api.ts` 与各组件）；`/api/diagnostics`、`/api/selfheal` 由设置弹窗的
+  「环境体检 / 一键修复」使用，`/api/history`、`/api/timeline` 由检查点回滚的时间轴使用。
+- 知识库 tab 格式说明「支持 … toml」经复核为正确文本（截图 OCR 曾误读为 "tomi"），无需修复。
+
 ## [Unreleased] - 2026-10-25（第八轮：前端质量与测试密封）
 
 ### 前端

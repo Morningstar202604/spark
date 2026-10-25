@@ -44,7 +44,9 @@ export const Composer = memo(function Composer() {
     if (slashQuery === null) return []
     return commands.filter((c) => c.name.toLowerCase().includes(slashQuery))
   }, [commands, slashQuery])
-  const slashOpen = slashQuery !== null && slashItems.length > 0
+  // 注意：slashOpen 只判前缀、不判 items 长度，否则「没有匹配的命令」空态
+  // 分支被外层条件挡住永远渲染不出来（截图走查发现的死代码）。
+  const slashOpen = slashQuery !== null
 
   // @-mention: the token under the caret starts with "@" (Claude Code / Codex
   // style file reference). Listing the workdir root is enough for the common
@@ -171,7 +173,7 @@ export const Composer = memo(function Composer() {
         return
       }
     }
-    if (slashOpen) {
+    if (slashOpen && slashItems.length > 0) {
       if (e.key === "ArrowDown") {
         e.preventDefault()
         setSlashIndex((i) => Math.min(i + 1, slashItems.length - 1))
@@ -188,11 +190,11 @@ export const Composer = memo(function Composer() {
         if (pick) applySlash(pick.name)
         return
       }
-      if (e.key === "Escape") {
-        e.preventDefault()
-        setInput("")
-        return
-      }
+    }
+    if (slashOpen && e.key === "Escape") {
+      e.preventDefault()
+      setInput("")
+      return
     }
     if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault()
