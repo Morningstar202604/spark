@@ -8,12 +8,12 @@ import { useUiStore } from "../store/uiStore"
 import { t, type Lang, type TranslationKey } from "../i18n"
 
 /* ------------------------------------------------------------------ */
-/* 执行图（P1-5）：agent 执行图 / 子代理树可视化。                     */
+/* 执行图：agent 执行轨迹 / 子代理树可视化。                             */
 /*                                                                     */
-/* 接入点说明（诚实底线）：当前 loop/task 事件流尚未携带结构化节点/边， */
-/* 本组件先以静态数据渲染，验证 @xyflow/react v12 的布局、交互与主题。 */
-/* 后续接实时数据时：把 useExecutionGraphData() 的返回替换为从          */
-/* chatStore / SSE 事件累积出的 nodes/edges 即可，组件本身无需改动。   */
+/* 数据来自 chatStore.turnGraph —— 由 SSE 事件流（tool_start /          */
+/* tool_end / subtask_* / turn_end）实时累积，事件流是唯一事实来源。    */
+/* 没有可绘制的轨迹时（新会话、尚未运行过一轮），显示诚实空状态，      */
+/* 不再用静态样例冒充执行结果。                                        */
 /* ------------------------------------------------------------------ */
 
 export interface ExecutionNode extends Record<string, unknown> {
@@ -49,31 +49,6 @@ function nodeColor(kind: ExecutionNode["kind"]): string {
   if (kind === "tool") return "#2d76a4"
   return "#238636"
 }
-
-/**
- * 静态样例数据 —— 真实接入时替换为事件流累积结果。
- * 形态：主代理 -> 两个并行子代理 -> 各自工具 -> 汇总产出。
- */
-const SAMPLE_NODES: ExecutionNode[] = [
-  { id: "root", label: "graph.sample.root", kind: "root", status: "running" },
-  { id: "agent.research", label: "graph.sample.research", kind: "agent", status: "done" },
-  { id: "agent.coder", label: "graph.sample.coder", kind: "agent", status: "running" },
-  { id: "tool.search", label: "graph.sample.search", kind: "tool", status: "done" },
-  { id: "tool.read", label: "read_file", kind: "tool", status: "done" },
-  { id: "tool.edit", label: "edit_file", kind: "tool", status: "running" },
-  { id: "result", label: "graph.sample.result", kind: "result", status: "pending" },
-]
-
-const SAMPLE_EDGES: ExecutionEdge[] = [
-  { from: "root", to: "agent.research", label: "graph.edge.delegate" },
-  { from: "root", to: "agent.coder", label: "graph.edge.delegate" },
-  { from: "agent.research", to: "tool.search" },
-  { from: "agent.research", to: "tool.read" },
-  { from: "agent.coder", to: "tool.edit" },
-  { from: "tool.search", to: "result" },
-  { from: "tool.read", to: "result" },
-  { from: "tool.edit", to: "result" },
-]
 
 export function buildGraph(nodes: ExecutionNode[], edges: ExecutionEdge[], lang: Lang): {
   nodes: Node[]
@@ -170,8 +145,8 @@ export const ExecutionGraph = memo(function ExecutionGraph() {
   const hasLive = liveNodes.length > 0
 
   const { nodes, edges } = useMemo(
-    () => buildGraph(hasLive ? liveNodes : SAMPLE_NODES, hasLive ? liveEdges : SAMPLE_EDGES, lang),
-    [hasLive, liveNodes, liveEdges, lang],
+    () => buildGraph(liveNodes, liveEdges, lang),
+    [liveNodes, liveEdges, lang],
   )
 
   if (!open) return null
@@ -192,22 +167,24 @@ export const ExecutionGraph = memo(function ExecutionGraph() {
               ? streaming
                 ? t("graph.liveRunning", lang)
                 : t("graph.liveDone", lang)
-              : t("graph.sampleNote", lang)}
+              : t("graph.empty", lang)}
           </span>
           <IconButton title={t("common.close", lang)} onClick={close} className="ml-auto">
             <IconX size={15} />
           </IconButton>
         </div>
         <div className="min-h-0 flex-1">
-          {!hasLive && (
-            <div className="border-b border-line bg-panel2/60 px-4 py-2 text-[11px] text-ink3">
-              {t("graph.emptyHint", lang)}
+          {!hasLive ? (
+            <div className="flex h-full flex-col items-center justify-center gap-3 text-center">
+              <IconSpark size={28} className="text-ink3" />
+              <p className="max-w-xs text-[12.5px] leading-relaxed text-ink3">{t("graph.emptyHint", lang)}</p>
             </div>
+          ) : (
+            <ReactFlow nodes={nodes} edges={edges} fitView proOptions={{ hideAttribution: true }}>
+              <Background gap={20} color="var(--line)" />
+              <Controls showInteractive={false} />
+            </ReactFlow>
           )}
-          <ReactFlow nodes={nodes} edges={edges} fitView proOptions={{ hideAttribution: true }}>
-            <Background gap={20} color="var(--line)" />
-            <Controls showInteractive={false} />
-          </ReactFlow>
         </div>
       </div>
     </div>

@@ -2,6 +2,39 @@
 
 本项目遵循语义化版本。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)。
 
+## [Unreleased] - 2026-10-25（第八轮：前端质量与测试密封）
+
+### 前端
+
+- **统一确认对话框**：新增 `ConfirmDialog`（状态在 `uiStore.requestConfirm`），替换三处
+  原生 `window.confirm`（删消息 / 删命令 / 删技能）——移动端与 WebView 下样式统一、
+  键盘焦点可控、支持 Esc 取消。
+- **执行图不再造假**：移除静态样例数据兜底与误导性注释（事件流此前已接入真实轨迹）；
+  无轨迹时显示诚实空状态（`graph.empty`），清理 `graph.sample.*` 与 `graph.edge.delegate` i18n 键。
+- **lint 工具链修复**：`npm run lint` 此前因 eslint 不在 devDependencies、无配置文件、
+  且脚本使用 eslint 9 已移除的 `--ext` 参数而完全不可用；现引入 eslint 9 flat config +
+  typescript-eslint + react-hooks，全量 0 error 0 warning（顺手修出一个真实的
+  `react-hooks/exhaustive-deps` 问题：SettingsModal 挂载时初始化 effect 的解释性豁免）。
+- **CI 前端门禁**：新增 `frontend` job（eslint / tsc+vite 构建 / **提交的 dist 与全新构建
+  字节比对**），前端从零门禁到全绿，杜绝 dist 静默漂移。
+
+### 后端与测试
+
+- **SSRF 白名单测试密封化**：`test_web_fetch_allows_public_hosts` /
+  `test_public_targets_still_allowed` 此前依赖真实 DNS，在任何有 DNS 拦截的网络
+  （VPN / 企业代理 / 国内访问 GitHub）都会误红；改为 stub `getaddrinfo` 返回固定公网
+  地址，测试守卫逻辑本身而非网络。
+- **修复未 await 协程告警**：`test_acp_server.py` 的 12 处 `*_conn.close()` 补 `await`
+  （此前 WebSocket 实际未关闭，并持续产生 `RuntimeWarning`）。
+- **LF 规范化补完**：上一轮「object store 全量 LF」漏掉了 README / CHANGELOG / 审查文档 /
+  `build_promo.py` 与 dist 的 html/svg（CRLF 提交），而构建产物为 LF，导致工作树永久
+  脏、CI 产物比对无从谈起；本次全部转 LF，重建后 dist 字节一致。
+
+### 验证
+
+- pytest 1086 通过 / 5 跳过，覆盖率 78.33%（门槛 75%）；ruff / mypy / lint-imports /
+  bandit（项目配置）全绿；前端 lint / tsc / build 全绿；重建 dist 字节级一致。
+
 ## [0.10.0] - 2026-10-23
 
 ### 新增（第七轮：分发、审查、协作闭环）

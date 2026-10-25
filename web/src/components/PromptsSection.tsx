@@ -72,16 +72,22 @@ export default function PromptsSection() {
   }
 
   async function removeCommand(name: string) {
-    if (!window.confirm(t("prompts.deleteConfirm", lang))) return
-    setBusy(true)
-    try {
-      const data = (await promptsAction({ action: "delete_command", name })) as { commands?: CommandItem[] }
-      setCommands(data.commands ?? [])
-    } catch (e) {
-      pushToast("common.error", "error", e instanceof Error ? e.message : String(e))
-    } finally {
-      setBusy(false)
-    }
+    useUiStore.getState().requestConfirm({
+      title: t("prompts.deleteTitle", lang),
+      message: t("prompts.deleteConfirm", lang),
+      danger: true,
+      onConfirm: async () => {
+        setBusy(true)
+        try {
+          const data = (await promptsAction({ action: "delete_command", name })) as { commands?: CommandItem[] }
+          setCommands(data.commands ?? [])
+        } catch (e) {
+          pushToast("common.error", "error", e instanceof Error ? e.message : String(e))
+        } finally {
+          setBusy(false)
+        }
+      },
+    })
   }
 
   if (loading) {

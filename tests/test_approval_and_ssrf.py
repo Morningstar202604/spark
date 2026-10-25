@@ -140,10 +140,13 @@ def test_web_fetch_blocks_internal_targets(url: str) -> None:
     "url",
     ["https://example.com/docs", "http://example.org"],
 )
-def test_web_fetch_allows_public_hosts(url: str) -> None:
+def test_web_fetch_allows_public_hosts(url: str, monkeypatch: pytest.MonkeyPatch) -> None:
     from urllib.parse import urlparse
 
+    from spark.tools import web
     from spark.tools.web import _assert_fetchable, _is_public_host
+
+    _stub_public_dns(monkeypatch)
 
     # The guard returns None on success; assert both the return value and the
     # underlying classification, so a regression to "allow everything" fails the
@@ -192,9 +195,43 @@ def test_web_fetch_blocks_metadata_and_encoded_targets(url: str) -> None:
         _assert_fetchable(url)
 
 
-def test_public_targets_still_allowed() -> None:
-    """The guard must not become "block everything" (the other failure mode)."""
+def test_public_targets_still_allowed(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The guard must not become "block everything" (the other failure mode).
+
+    DNS is stubbed on purpose: these assertions test the *guard's* logic, not
+    the network. Live lookups made the suite flaky on any network with DNS
+    interception (VPNs, corporate proxies, domestic access to GitHub) where a
+    public host legitimately resolves to a non-public address and the guard —
+    correctly — refuses it.
+    """
     from spark.tools.web import _assert_fetchable
+
+    _stub_public_dns(monkeypatch)
 
     for url in ("https://example.com/docs", "http://1.1.1.1/", "https://api.github.com/"):
         assert _assert_fetchable(url) is None
+
+
+def _stub_public_dns(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Replace live resolution with fixed public A records.
+
+    ``_assert_fetchable`` re-checks every resolved address with the same
+    ``_is_public_host`` predicate, so a stubbed public answer exercises the
+    exact code path a real fetch would — minus the network dependency.
+    """
+    import socket
+
+    from spark.tools import web
+
+    public_by_host: dict[str, str] = {
+        "example.com": "93.184.216.34",
+        "example.org": "93.184.216.34",
+        "1.1.1.1": "1.1.1.1",
+        "api.github.com": "140.82.112.6",
+    }
+
+    def fake_getaddrinfo(host, _port=None, *args, **kwargs):
+        addr = public_by_host.get(host, "93.184.216.34")
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", (addr, 80))]
+
+    monkeypatch.setattr(web.socket, "getaddrinfo", fake_getaddrinfo)

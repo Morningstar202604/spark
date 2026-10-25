@@ -64,8 +64,15 @@ export const ChatView = memo(function ChatView() {
     () => ({
       onDelete: (m) => {
         if (!m.dbId) return
-        const ok = window.confirm(t("msg.deleteConfirm", lang))
-        if (ok) void deleteMessage(m.dbId)
+        const id = m.dbId
+        // 原生 window.confirm 在移动端/WebView 里样式不可控，且会打断键盘
+        // 焦点流；统一走 uiStore 的全站确认对话框。
+        useUiStore.getState().requestConfirm({
+          title: t("msg.deleteTitle", lang),
+          message: t("msg.deleteConfirm", lang),
+          danger: true,
+          onConfirm: () => void deleteMessage(id),
+        })
       },
       onEdit: (m) => {
         if (!m.dbId) return

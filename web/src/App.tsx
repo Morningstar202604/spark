@@ -8,6 +8,7 @@ import { ShortcutsHelp } from "./components/ShortcutsHelp"
 import { QuestionCard } from "./components/QuestionCard"
 import { Onboarding } from "./components/Onboarding"
 import Toast from "./components/Toast"
+import { ConfirmDialog } from "./components/ConfirmDialog"
 import { fetchStatus } from "./api"
 import type { Status } from "./types"
 import { useChatStore } from "./store/chatStore"
@@ -139,6 +140,7 @@ export default function App() {
   return (
     <div className="flex h-full overflow-hidden bg-canvas text-ink">
       <Toast toasts={toasts} onDismiss={dismissToast} />
+      <ConfirmDialog />
       <Sidebar />
       <div className="flex min-w-0 flex-1 flex-col">
         <Header />

@@ -69,17 +69,23 @@ export default function SkillsSection() {
   }
 
   async function remove(path: string) {
-    if (!window.confirm(t("skills.deleteConfirm", lang))) return
-    setBusy(true)
-    try {
-      const data = (await skillsAction({ action: "delete", path })) as { items: SkillItem[] }
-      setItems(data.items ?? [])
-      if (preview !== null) setPreview(null)
-    } catch (e) {
-      pushToast("common.error", "error", e instanceof Error ? e.message : String(e))
-    } finally {
-      setBusy(false)
-    }
+    useUiStore.getState().requestConfirm({
+      title: t("skills.deleteTitle", lang),
+      message: t("skills.deleteConfirm", lang),
+      danger: true,
+      onConfirm: async () => {
+        setBusy(true)
+        try {
+          const data = (await skillsAction({ action: "delete", path })) as { items: SkillItem[] }
+          setItems(data.items ?? [])
+          if (preview !== null) setPreview(null)
+        } catch (e) {
+          pushToast("common.error", "error", e instanceof Error ? e.message : String(e))
+        } finally {
+          setBusy(false)
+        }
+      },
+    })
   }
 
   /** 文件名决定 frontmatter 里的 name：两者不一致时列表标题会与磁盘文件名对不上，

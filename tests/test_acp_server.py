@@ -126,8 +126,8 @@ async def test_initialize_handshake(tmp_path: Path) -> None:
     assert response.protocol_version == 1
     assert response.agent_info is not None and response.agent_info.name == "spark"
     assert response.agent_capabilities.load_session is True
-    agent_conn.close()
-    client_conn.close()
+    await agent_conn.close()
+    await client_conn.close()
 
 
 async def test_new_session_and_prompt_stream(tmp_path: Path) -> None:
@@ -146,8 +146,8 @@ async def test_new_session_and_prompt_stream(tmp_path: Path) -> None:
     )
     assert result.stop_reason == "end_turn"
     assert client.message_text() == "hello acp"
-    agent_conn.close()
-    client_conn.close()
+    await agent_conn.close()
+    await client_conn.close()
 
 
 async def test_tool_call_events_and_approval_allow(tmp_path: Path) -> None:
@@ -183,8 +183,8 @@ async def test_tool_call_events_and_approval_allow(tmp_path: Path) -> None:
     assert len(client.permission_requests) == 1
     assert client.permission_requests[0][1].tool_call_id == starts[0].tool_call_id
     assert client.message_text() == "done"
-    agent_conn.close()
-    client_conn.close()
+    await agent_conn.close()
+    await client_conn.close()
 
 
 async def test_tool_call_denied(tmp_path: Path) -> None:
@@ -212,8 +212,8 @@ async def test_tool_call_denied(tmp_path: Path) -> None:
     progresses = client.updates_of("tool_call_update")
     assert len(progresses) == 1
     assert progresses[0].status == "failed"
-    agent_conn.close()
-    client_conn.close()
+    await agent_conn.close()
+    await client_conn.close()
 
 
 async def test_prompt_cancelled(tmp_path: Path) -> None:
@@ -246,8 +246,8 @@ async def test_prompt_cancelled(tmp_path: Path) -> None:
     result = await asyncio.wait_for(prompt_task, timeout=10)
 
     assert result.stop_reason == "cancelled"
-    agent_conn.close()
-    client_conn.close()
+    await agent_conn.close()
+    await client_conn.close()
 
 
 async def test_load_session_replay_history(tmp_path: Path) -> None:
@@ -267,8 +267,8 @@ async def test_load_session_replay_history(tmp_path: Path) -> None:
     texts = client.message_text()
     assert "first question" in client.user_message_text()
     assert "first answer" in texts
-    agent_conn.close()
-    client_conn.close()
+    await agent_conn.close()
+    await client_conn.close()
 
 
 async def test_prompt_to_resource_blocks(tmp_path: Path) -> None:

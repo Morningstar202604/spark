@@ -63,6 +63,37 @@ jobs:
           # 缺口与原因见 docs/reviews/2026-10-22-full-audit.md 第十二节。
           python -m pytest -q --cov=spark --cov-report=term-missing --cov-fail-under=75
 
+  # dist 是提交进仓库的（pip 安装要开箱即用），前端此前没有任何 CI 门禁：
+  # 语法/类型/构建漂移只能在上游 release 时暴露。这一道门同时校验
+  # "提交的 dist 与全新构建字节一致"，防止 CRLF/换行等静默漂移。
+  frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Install
+        working-directory: web
+        run: npm ci
+      - name: Lint (eslint)
+        working-directory: web
+        run: npm run lint
+      - name: Build (tsc + vite)
+        working-directory: web
+        run: npm run build
+      - name: Committed dist matches a fresh build (byte-for-byte)
+        run: |
+          if git diff --exit-code -- src/spark/web/dist; then
+            echo "dist is current"
+          else
+            echo "::error::src/spark/web/dist is out of sync with the frontend source — rebuild and commit the result"
+            exit 1
+          fi
+
   windows-checkout:
     timeout-minutes: 10
     # Guards the failure mode found in review: a Windows-reserved filename in the

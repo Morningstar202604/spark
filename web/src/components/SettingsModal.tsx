@@ -293,6 +293,10 @@ export default function SettingsDrawer({ onClose, onSaved }: Props) {
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
+    // 挂载时初始化一次：open 时组件才挂载，语言切换不应重拉配置
+    // （会覆盖用户尚未保存的编辑）。refreshProfiles 是组件内 useCallback，
+    // 加入依赖会随重渲染反复触发网络请求。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [onClose])
 
   async function handleSave() {

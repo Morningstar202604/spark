@@ -26,6 +26,16 @@ export interface ToastItem {
   message?: string
 }
 
+/** 统一的非阻塞确认请求（替代原生 window.confirm，风格与全站一致）。 */
+export interface ConfirmRequest {
+  title: string
+  message?: string
+  confirmLabel?: string
+  cancelLabel?: string
+  danger?: boolean
+  onConfirm: () => void
+}
+
 interface UiState {
   theme: Theme
   settingsOpen: boolean
@@ -42,6 +52,7 @@ interface UiState {
   cpsBusy: boolean
   toasts: ToastItem[]
   lang: Lang
+  confirm: ConfirmRequest | null
   setTheme: (t: Theme) => void
   cycleTheme: () => void
   openSettings: () => void
@@ -71,6 +82,8 @@ interface UiState {
   pushToast: (key: TranslationKey, kind?: ToastItem["kind"], message?: string) => void
   dismissToast: (id: number) => void
   setLang: (lang: Lang) => void
+  requestConfirm: (req: ConfirmRequest) => void
+  dismissConfirm: () => void
 }
 
 let toastCounter = 0
@@ -91,6 +104,7 @@ export const useUiStore = create<UiState>((set) => ({
   cpsBusy: false,
   toasts: [],
   lang: getDefaultLang(),
+  confirm: null,
 
   setTheme: (t) => {
     applyTheme(t)
@@ -141,4 +155,7 @@ export const useUiStore = create<UiState>((set) => ({
     setDefaultLang(lang)
     set({ lang })
   },
+
+  requestConfirm: (req) => set({ confirm: req }),
+  dismissConfirm: () => set({ confirm: null }),
 }))
